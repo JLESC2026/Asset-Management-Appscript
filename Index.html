@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Asset Management System</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<?!= include('Stylesheet'); ?>
+</head>
+<body>
+
+<!-- ══ AUTH SCREEN ══ -->
+<div id="authScreen">
+  <div class="auth-box">
+<div class="auth-logo">
+  <img src="<?!= include('Logo'); ?>" 
+       style="height:56px;object-fit:contain;mix-blend-mode:multiply" 
+       alt="LifeBank Foundation"/>
+</div>
+    <h2>Welcome back</h2>
+    <p>Sign in to your account to continue</p>
+    <div id="authError"></div>
+    <input type="text" id="authUser" placeholder="Employee ID" autocomplete="username"/>
+    <input type="password" id="authPass" placeholder="Password" autocomplete="current-password"/>
+    <button class="btn btn-primary btn-full" onclick="doLogin()"><span id="loginBtnTxt">Sign In</span></button>
+  </div>
+</div>
+
+<!-- ══ CHANGE PASSWORD SCREEN ══ -->
+<div id="changePwdScreen">
+  <div class="auth-box">
+    <div class="auth-logo">
+      <img src="<?!= include('Logo'); ?>" 
+           style="height:56px;object-fit:contain;mix-blend-mode:multiply" 
+           alt="LifeBank Foundation"/>
+    </div>
+    <h2>Set New Password</h2>
+    <p>Your default password must be changed before continuing.</p>
+    <div id="pwdError" style="color:var(--red);font-size:.85rem;margin-bottom:12px;display:none"></div>
+    <input type="password" id="newPwd1" placeholder="New Password (min 4 chars)"/>
+    <input type="password" id="newPwd2" placeholder="Confirm New Password"/>
+    <button class="btn btn-primary btn-full" onclick="doChangePwd()">Update Password</button>
+  </div>
+</div>
+
+<div id="toast-wrap"></div>
+
+<!-- ══ MAIN APP ══ -->
+<div id="app">
+
+  <!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <img src="<?!= include('Logo'); ?>" 
+         style="height:38px;object-fit:contain;mix-blend-mode:multiply" 
+         alt="LifeBank Foundation"/>
+  </div>
+    <div class="topbar-search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="globalSearch" placeholder="Search assets, staff, barcode…" oninput="globalFilter(this.value)"/>
+    </div>
+    <div class="topbar-right">
+      <button class="refresh-btn" onclick="loadData()" title="Refresh">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+      <!-- FE District Badge (hidden for Admin) -->
+      <div id="districtBadge" style="display:none;padding:5px 12px;background:rgba(124,106,247,.12);border:1px solid rgba(124,106,247,.3);border-radius:20px;font-size:.76rem;color:var(--accent2);font-weight:600"></div>
+      <div class="user-badge">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span id="topUser">–</span>
+        <span id="topRole" class="role-tag">User</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="main-wrap">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="nav-section">Overview</div>
+      <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" data-page="all-assets" onclick="switchPage('all-assets')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        All Assets
+        <span class="nav-badge" id="nbAll">0</span>
+      </div>
+
+      <div class="nav-item" data-page="staff-assets" onclick="switchPage('staff-assets')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        Staff Assets
+        <span class="nav-badge" id="nbStaffAssets" style="background:var(--cyan)">0</span>
+      </div>
+
+      <div class="nav-section">Asset Pools</div>
+      <div class="nav-item" data-page="spare" onclick="switchPage('spare')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        Spare Pool
+        <span class="nav-badge" id="nbSpare">0</span>
+      </div>
+      <div class="nav-item" data-page="allocated" onclick="switchPage('allocated')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2Z"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        Allocated
+        <span class="nav-badge" id="nbAllocated" style="background:var(--blue)">0</span>
+      </div>
+      <div class="nav-item" data-page="borrow" onclick="switchPage('borrow')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        Borrow
+        <span class="nav-badge" id="nbBorrowed" style="background:var(--yellow)">0</span>
+      </div>
+      <div class="nav-item" data-page="disposal" onclick="switchPage('disposal')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        Disposal
+        <span class="nav-badge" id="nbDisposal" style="background:var(--red)">0</span>
+      </div>
+
+      <div class="nav-section">Records</div>
+      <div class="nav-item" data-page="transfers" onclick="switchPage('transfers')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Transfers
+      </div>
+      <div class="nav-item" data-page="activity" onclick="switchPage('activity')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Activity Log
+      </div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content">
+
+      <!-- ══ DASHBOARD ══ -->
+      <div class="page active" id="page-dashboard">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+          <div>
+            <h2 style="font-size:1.4rem;font-weight:700">Dashboard</h2>
+            <p style="color:var(--text2);font-size:.85rem" id="dashDate"></p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="switchPage('spare');setTimeout(openAddAssetModal,100)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Asset
+          </button>
+        </div>
+        <div class="dash-stats" id="dashStats"></div>
+        <div class="dash-row">
+          <div class="dash-card">
+            <h3><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Recent Activity</h3>
+            <div id="dashActivity"></div>
+          </div>
+          <div class="dash-card">
+            <h3><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> Assets by Type</h3>
+            <div id="dashTypeChart" class="type-bar"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ ALL ASSETS ══ -->
+      <div class="page" id="page-all-assets">
+        <div class="page-header">
+          <h2>All Assets</h2>
+          <button class="btn btn-secondary btn-sm" id="btnBulkDelete" onclick="bulkDelete()" style="display:none">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            Delete Selected
+          </button>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="allSearch" placeholder="Search…" oninput="renderAllTable()" class="filter-input"/>
+          <select class="filter-select" id="filterType" onchange="renderAllTable()">
+            <option value="">All Types</option>
+            <option>Laptop</option><option>Laptop Adaptor</option><option>CPU</option>
+            <option>Monitor</option><option>Printer</option><option>Scanner</option><option>Scansnap</option>
+            <option>Keyboard</option><option>Mouse</option><option>UPS</option>
+            <option>Camera</option><option>Speaker</option><option>External Drive</option>
+          </select>
+          <select class="filter-select" id="filterLifecycle" onchange="renderAllTable()">
+            <option value="">All Lifecycle</option>
+            <option>Active</option><option>Allocated</option><option>Transfer</option>
+            <option>Borrow</option><option>Returned</option><option>Dispose</option>
+          </select>
+          <span id="filteredCount" style="margin-left:auto;font-size:.8rem;color:var(--text3)"></span>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th><input type="checkbox" class="cb" id="cbAll" onclick="toggleSelectAll()"/></th>
+              <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th>
+              <th>Condition</th><th>Lifecycle</th><th>Staff</th>
+              <th>Location</th><th>Purch. Date</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="tblAll"></tbody>
+          </table>
+          <div class="pager" id="pagerAll"></div>
+        </div>
+      </div>
+
+          <!-- ══ STAFF ASSETS ══ -->
+      <div class="page" id="page-staff-assets">
+        <div class="page-header">
+          <div>
+            <h2>Staff Assets</h2>
+            <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Assets grouped by division → district → area → staff member</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+            <input type="text" id="staffAssetsSearch" placeholder="Search staff, barcode, type…"
+                   oninput="onStaffAssetsSearch()" class="filter-input"/>
+            <button class="btn btn-secondary btn-sm" onclick="stExpandAll()">Expand All</button>
+            <button class="btn btn-secondary btn-sm" onclick="stCollapseAll()">Collapse All</button>
+          </div>
+        </div>
+        <div id="staffAssetsSummary" class="pool-summary"></div>
+        <div id="staffAssetsTree">
+          <div class="st-empty">Open this page to load the staff hierarchy.</div>
+        </div>
+      </div>
+
+      <!-- ══ SPARE POOL ══ -->
+      <div class="page" id="page-spare">
+        <div class="page-header">
+          <div>
+            <h2>Spare Pool</h2>
+            <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Unallocated assets in storage — ready for assignment</p>
+          </div>
+          <button class="btn btn-bulk-del btn-sm" id="btnBulkDelSpare" onclick="bulkDeleteTable('spare')" style="display:none">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            Delete Selected
+          </button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+            <input type="text" id="spareSearch" placeholder="Search spare assets…" oninput="renderSpare()" class="filter-input"/>
+            <select id="spareFilterType" onchange="renderSpare()" class="filter-select">
+              <option value="">All Types</option>
+              <option>Laptop</option><option>Monitor</option><option>CPU</option>
+              <option>Keyboard</option><option>Mouse</option><option>Printer</option>
+              <option>Scanner</option><option>Scansnap</option><option>UPS</option><option>External Drive</option>
+              <option>Camera</option><option>Speaker</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="openAddAssetModal()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Asset
+            </button>
+          </div>
+        </div>
+        <div id="spareSummary" class="pool-summary"></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th style="width:32px"><input type="checkbox" class="cb" id="cbSpare" onclick="toggleSelectAllTable('spare')"/></th>
+              <th style="width:115px">Barcode</th><th style="width:80px">Type</th><th style="width:85px">Brand</th><th style="width:105px">Serial No.</th>
+              <th style="width:78px">Condition</th><th style="width:88px">Purch. Date</th><th style="width:92px">Warranty Exp.</th>
+              <th style="width:95px">Supplier</th><th style="width:124px">Actions</th>
+            </tr></thead>
+            <tbody id="tblSpare"></tbody>
+          </table>
+          <div class="pager" id="pagerSpare"></div>
+        </div>
+      </div>
+
+      <!-- ══ ALLOCATED ══ -->
+      <div class="page" id="page-allocated">
+        <div class="page-header">
+          <div>
+            <h2>Allocated Assets</h2>
+            <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Assets currently assigned to staff members</p>
+          </div>
+          <button class="btn btn-bulk-del btn-sm" id="btnBulkDelAllocated" onclick="bulkDeleteTable('allocated')" style="display:none">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            Delete Selected
+          </button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+            <input type="text" id="allocSearch" placeholder="Search staff, barcode…" oninput="renderAllocated()" class="filter-input"/>
+            <select id="allocFilterType" onchange="renderAllocated()" class="filter-select">
+              <option value="">All Types</option>
+              <option>Laptop</option><option>Monitor</option><option>CPU</option>
+              <option>Keyboard</option><option>Mouse</option><option>Printer</option>
+              <option>Scanner</option><option>Scansnap</option><option>UPS</option>
+            </select>
+            <select id="allocFilterDistrict" onchange="renderAllocated()" class="filter-select">
+              <option value="">All Districts</option>
+            </select>
+          </div>
+        </div>
+        <div id="allocSummary" class="pool-summary"></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th style="width:32px"><input type="checkbox" class="cb" id="cbAllocated" onclick="toggleSelectAllTable('allocated')"/></th>
+              <th onclick="sortAlloc('Barcode')" class="sortable" style="width:115px">Barcode</th>
+              <th onclick="sortAlloc('Type')" class="sortable" style="width:78px">Type</th>
+              <th style="width:82px">Brand</th>
+              <th onclick="sortAlloc('Staff')" class="sortable" style="width:125px">Staff</th>
+              <th style="width:76px">EmpID</th>
+              <th style="width:95px">Designation</th>
+              <th onclick="sortAlloc('Division')" class="sortable" style="width:88px">Division</th>
+              <th onclick="sortAlloc('District')" class="sortable" style="width:88px">District</th>
+              <th style="width:95px">Branch</th>
+              <th onclick="sortAlloc('EffDate')" class="sortable" style="width:88px">Date Alloc.</th>
+              <th style="width:78px">Condition</th>
+              <th style="width:158px">Actions</th>
+            </tr></thead>
+            <tbody id="tblAllocated"></tbody>
+          </table>
+          <div class="pager" id="pagerAllocated"></div>
+        </div>
+      </div>
+
+      <!-- ══ BORROW ══ -->
+      <div class="page" id="page-borrow">
+        <div class="page-header">
+          <div>
+            <h2>Borrow Management</h2>
+            <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Track all asset borrowing and returns</p>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <button class="btn btn-primary btn-sm" onclick="openBorrowModal('')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              New Borrow
+            </button>
+          </div>
+        </div>
+
+        <!-- Borrow sub-tabs -->
+        <div class="tabs" style="margin-bottom:16px">
+          <button class="tab-btn active" id="btab-active" onclick="switchBorrowTab('active')">
+            Active Borrows
+            <span id="nbBorrowActive" style="background:rgba(245,158,11,.2);color:var(--yellow);font-size:.68rem;padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:700">0</span>
+          </button>
+          <button class="tab-btn" id="btab-pool" onclick="switchBorrowTab('pool')">
+            Borrow Pool
+            <span id="nbBorrowPool" style="background:rgba(249,115,22,.2);color:var(--orange);font-size:.68rem;padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:700">0</span>
+          </button>
+          <button class="tab-btn" id="btab-history" onclick="switchBorrowTab('history')">History</button>
+        </div>
+
+        <!-- Active Borrows -->
+        <div id="borrowPane-active">
+          <div class="filter-bar" style="margin-bottom:12px">
+            <input type="text" id="activeBorrowSearch" placeholder="Search borrower, barcode…" oninput="renderActiveBorrows()" class="filter-input"/>
+            <div id="overdueWarn" style="display:none;padding:7px 14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;font-size:.8rem;color:var(--red);font-weight:600"></div>
+            <button class="btn btn-bulk-del btn-sm" id="btnBulkDelActiveBorrow" onclick="bulkDeleteTable('activeBorrow')" style="display:none;margin-left:auto">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              Delete Selected
+            </button>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th style="width:32px"><input type="checkbox" class="cb" id="cbActiveBorrow" onclick="toggleSelectAllTable('activeBorrow')"/></th>
+                <th>Barcode</th><th>Type</th><th>Brand</th>
+                <th>Borrower</th><th>EmpID</th><th>Division</th><th>Branch</th>
+                <th>Borrow Date</th><th>Expected Return</th><th>Days Left</th>
+                <th>Actions</th>
+              </tr></thead>
+              <tbody id="tblActiveBorrow"></tbody>
+            </table>
+            <div class="pager" id="pagerActiveBorrow"></div>
+          </div>
+        </div>
+
+        <!-- Borrow Pool (BorrowItem assets) -->
+        <div id="borrowPane-pool" style="display:none">
+          <div style="padding:10px 14px;background:rgba(249,115,22,.06);border:1px solid rgba(249,115,22,.2);border-radius:8px;font-size:.82rem;color:#fb923c;margin-bottom:12px">
+            <strong>Borrow Pool</strong> — Assets designated specifically for borrowing. These cannot be permanently allocated to staff.
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th>
+                <th>Condition</th><th>Current Status</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="tblBorrowPool"></tbody>
+            </table>
+            <div class="pager" id="pagerBorrowPool"></div>
+          </div>
+        </div>
+
+        <!-- History -->
+        <div id="borrowPane-history" style="display:none">
+          <div class="filter-bar" style="margin-bottom:12px">
+            <input type="text" id="borrowHistSearch" placeholder="Search borrower, barcode…" oninput="renderBorrowHistory()" class="filter-input"/>
+            <select id="borrowHistStatus" onchange="renderBorrowHistory()" class="filter-select">
+              <option value="">All Status</option>
+              <option value="Borrow">Active</option>
+              <option value="Returned">Returned</option>
+            </select>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Barcode</th><th>Type / Brand</th><th>Borrower</th>
+                <th>EmpID</th><th>Borrow Date</th><th>Expected Return</th>
+                <th>Actual Return</th><th>Status</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="tblBorrowHistory"></tbody>
+            </table>
+            <div class="pager" id="pagerBorrowHistory"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ DISPOSAL ══ -->
+      <div class="page" id="page-disposal">
+        <div class="page-header">
+          <div>
+            <h2>Disposal Records</h2>
+            <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Damaged, decommissioned, or written-off assets</p>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <button class="btn btn-bulk-del btn-sm" id="btnBulkDelDisposal" onclick="bulkDeleteTable('disposal')" style="display:none">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              Delete Selected
+            </button>
+            <input type="text" id="disposalSearch" placeholder="Search barcode, reason…" oninput="renderDisposal()" class="filter-input"/>
+            <select id="disposalFilterType" onchange="renderDisposal()" class="filter-select">
+              <option value="">All Types</option>
+              <option>Laptop</option><option>Monitor</option><option>CPU</option>
+              <option>Keyboard</option><option>Mouse</option><option>Printer</option><option>Scanner</option><option>Scansnap</option>
+              <option>UPS</option>
+            </select>
+          </div>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th style="width:32px"><input type="checkbox" class="cb" id="cbDisposal" onclick="toggleSelectAllTable('disposal')"/></th>
+              <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th>
+              <th>Last Staff</th><th>Reason</th><th>Disposed By</th>
+              <th>Date</th><th>Remarks</th>
+            </tr></thead>
+            <tbody id="tblDisposal"></tbody>
+          </table>
+          <div class="pager" id="pagerDisposal"></div>
+        </div>
+      </div>
+
+      <!-- ══ TRANSFERS ══ -->
+      <div class="page" id="page-transfers">
+        <div class="page-header">
+          <h2>Transfer Records</h2>
+          <button class="btn btn-primary btn-sm" onclick="openTransferModal('')">+ New Transfer</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>Barcode</th><th>Type</th><th>From</th><th>To</th>
+              <th>Transfer Type</th><th>Eff. Date</th><th>Status</th><th>Timestamp</th>
+            </tr></thead>
+            <tbody id="tblTransfers"></tbody>
+          </table>
+          <div class="pager" id="pagerTransfers"></div>
+        </div>
+      </div>
+
+      <!-- ══ ACTIVITY LOG ══ -->
+      <div class="page" id="page-activity">
+        <div class="page-header"><h2>Activity Log</h2></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Timestamp</th><th>Action</th><th>Barcode</th><th>Details</th><th>Performed By</th></tr></thead>
+            <tbody id="tblActivity"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main-wrap -->
+</div><!-- /app -->
+
+<!-- ════════════ MODALS ════════════ -->
+
+<!-- ADD ASSET (Spare Pool) -->
+<div class="modal-backdrop" id="addAssetModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr" style="flex-direction:column;align-items:flex-start;gap:0;border-bottom:none;padding-bottom:0">
+      <div style="display:flex;width:100%;align-items:flex-start;padding:20px 24px 0">
+        <div style="flex:1">
+          <h3 style="font-size:1.1rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase">Asset Enrollment</h3>
+          <p style="font-size:.76rem;color:var(--text3);margin-top:3px" id="enrollStepLabel">Step 1 of 3 — Asset Information</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="enrolled-chip"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg><span id="enrolledByLabel">–</span></div>
+          <button class="modal-close" onclick="closeModal('addAssetModal')">×</button>
+        </div>
+      </div>
+      <div class="enroll-stepper">
+        <div class="enroll-step-ind active" id="stepInd1"><div class="step-num">1</div><div class="step-name">Asset Info</div></div>
+        <div class="enroll-step-ind" id="stepInd2"><div class="step-num">2</div><div class="step-name">Location</div></div>
+        <div class="enroll-step-ind" id="stepInd3"><div class="step-num">3</div><div class="step-name">Confirm</div></div>
+      </div>
+      <div style="height:1px;background:var(--border);width:100%;margin-top:16px"></div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="modal-body" id="enrollStep1">
+      <div class="enroll-section-title">Equipment Category &amp; Identification</div>
+      <div class="form-grid cols3" style="margin-bottom:14px">
+        <div class="field"><label>Category *</label><select id="fCategory" onchange="onCategoryChange()"><option value="">Select category…</option></select></div>
+        <div class="field"><label>Brand</label><select id="fBrand" disabled onchange="onBrandChange()"><option value="">Select brand…</option></select></div>
+        <div class="field"><label>Model</label><select id="fModel" disabled><option value="">Select model…</option></select></div>
+      </div>
+      <div class="form-grid cols3" style="margin-bottom:14px">
+        <div class="field"><label>Serial No.</label><input type="text" id="fSerial" placeholder="Serial number"/></div>
+        <div class="field barcode-field">
+          <label>Barcode No. *</label>
+          <input type="text" id="fBarcode" readonly placeholder="Auto-generated" style="font-family:'JetBrains Mono',monospace;font-size:.85rem;opacity:.75;cursor:not-allowed"/>
+          <button class="btn btn-secondary btn-sm barcode-gen" type="button" onclick="genBarcode()" style="font-size:.7rem;padding:3px 8px">Auto</button>
+        </div>
+        <div class="field"><label>Condition</label><select id="fCondition"><option>New</option><option>Good</option><option>Damage</option><option>Repair</option></select></div>
+      </div>
+      <div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(124,106,247,.08);border:1px solid rgba(124,106,247,.25);font-size:.78rem;color:var(--accent2)">
+        ℹ New assets added here go to the <strong>Spare Pool</strong>. You can allocate them later.
+      </div>
+      <div id="laptopSpecsSection" style="display:none">
+        <div class="enroll-section-title">Laptop Specifications</div>
+        <div id="laptopSpecsRows" style="margin-bottom:8px"></div>
+        <button class="spec-add-btn" type="button" onclick="addSpecRow()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Spec Row
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="modal-body" id="enrollStep2" style="display:none">
+      <div class="enroll-section-title">Purchase &amp; Warranty</div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field"><label>Date of Purchase</label><input type="date" id="fPurchDate" onchange="recalcWarranty()"/></div>
+        <div class="field"><label>Supplier</label><select id="fSupplier"><option value="">Select supplier…</option></select></div>
+        <div class="field"><label>Warranty (Years)</label>
+          <div class="warranty-spinner">
+            <input type="number" id="fWTerm" value="0" min="0" max="10" onchange="recalcWarranty()"/>
+            <div class="ws-arrows"><button class="ws-btn" type="button" onclick="stepWarranty(1)">▲</button><button class="ws-btn" type="button" onclick="stepWarranty(-1)">▼</button></div>
+          </div>
+        </div>
+        <div class="field"><label>Warranty Validity</label><input type="date" id="fWVal" readonly style="opacity:.7;cursor:not-allowed"/></div>
+      </div>
+      <div class="enroll-section-title">Location</div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field">
+          <label>Field / Office *</label>
+          <select id="fFieldType" onchange="onFieldTypeChange()">
+            <option value="">Select…</option>
+            <option value="Central Office">Central Office</option>
+            <option value="Field">Field</option>
+          </select>
+        </div>
+      </div>
+      <div id="fFieldDetails" style="display:none">
+        <div class="form-grid" style="margin-bottom:14px">
+          <div class="field"><label>Division</label><select id="fDivision" onchange="onDivisionChange()"><option value="">Select…</option></select></div>
+          <div class="field"><label>District</label><select id="fDistrict"><option value="">Select…</option></select></div>
+          <div class="field"><label>Area</label><input type="text" id="fArea" placeholder="e.g. 1, 2, 3…"/></div>
+          <div class="field"><label>Branch</label><input type="text" id="fBranch" placeholder="Enter Branch"/></div>
+        </div>
+      </div>
+      <div class="enroll-section-title">Entry By (Auto-filled)</div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field"><label>Entry Employee ID</label><input type="text" id="fEntryEmpId" readonly style="opacity:.6;cursor:not-allowed;font-family:'JetBrains Mono',monospace"/></div>
+        <div class="field"><label>Entered By</label><input type="text" id="fEntryName" readonly style="opacity:.6;cursor:not-allowed"/></div>
+      </div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field form-span2"><label>Remarks</label><textarea id="fRemarks" placeholder="Any notes about this asset…"></textarea></div>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="modal-body" id="enrollStep3" style="display:none">
+      <div id="enrollConfirmBody"></div>
+    </div>
+
+    <div class="modal-footer" id="enrollFooter">
+      <button class="btn btn-secondary" id="enrollBackBtn" onclick="enrollBack()" style="display:none">← Back</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-secondary" onclick="closeModal('addAssetModal')">Cancel</button>
+      <button class="btn btn-primary" id="enrollNextBtn" onclick="enrollNext()">Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ALLOCATE MODAL -->
+<div class="modal-backdrop" id="allocateModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <div>
+        <h3>Allocate Asset</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px">Assign accountability to a staff member</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('allocateModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <!-- Asset preview bar -->
+      <div id="allocAssetBar" style="display:flex;gap:12px;align-items:center;padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-bottom:18px">
+        <div>
+          <div style="font-size:.72rem;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Asset</div>
+          <div style="font-weight:700;font-size:.92rem" id="allocAssetLabel">—</div>
+        </div>
+        <div style="margin-left:auto">
+          <div style="font-size:.72rem;color:var(--text3)">Barcode</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.82rem;color:var(--accent2)" id="allocAssetBarcode">—</div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--text3)">Condition</div>
+          <div style="font-size:.82rem" id="allocAssetCondition">—</div>
+        </div>
+      </div>
+
+      <div class="enroll-section-title">Staff Lookup</div>
+      <div style="margin-bottom:10px;padding:8px 12px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:6px;font-size:.78rem;color:#60a5fa">
+        💡 Enter the Employee ID — name and department will auto-fill from the Masterlist
+      </div>
+      <div class="form-grid cols3" style="margin-bottom:14px">
+        <div class="field">
+          <label>Employee ID *</label>
+          <div style="position:relative">
+            <input type="text" id="alEmpId" placeholder="e.g. 2024-9422" oninput="onAllocEmpInput()"/>
+            <div id="allocLookupSpinner" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%)"><div class="spinner" style="width:14px;height:14px;border-width:2px"></div></div>
+          </div>
+        </div>
+        <div class="field" style="grid-column:span 2">
+          <label>Accountable Staff (Full Name) *</label>
+          <input type="text" id="alStaff" placeholder="Auto-filled from Masterlist"/>
+        </div>
+      </div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field"><label>Designation</label><input type="text" id="alDesig" placeholder="Auto-filled"/></div>
+        <div class="field"><label>Division</label><select id="alDiv" onchange="onAllocDivisionChange()"><option value="">Select…</option></select></div>
+        <div class="field"><label>District</label><select id="alDist"><option value="">Select…</option></select></div>
+        <div class="field"><label>Area</label><select id="alArea"><option value="">Select…</option></select></div>
+        <div class="field form-span2"><label>Branch / Office</label><input type="text" id="alBranch" placeholder="e.g. Makati Branch"/></div>
+      </div>
+      <div id="allocLookupMsg" style="font-size:.78rem;margin-bottom:14px;padding:6px 10px;border-radius:6px;display:none"></div>
+      <div class="enroll-section-title">Allocation Details</div>
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="field"><label>Effectivity Date *</label><input type="date" id="alEffDate"/></div>
+        <div class="field form-span2"><label>Remarks</label><input type="text" id="alRemarks" placeholder="Optional notes"/></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('allocateModal')">Cancel</button>
+      <button class="btn btn-primary" style="min-width:160px" onclick="submitAllocate()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Confirm Allocation
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- DEALLOCATE CONFIRM -->
+<div class="modal-backdrop" id="deallocModal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-hdr"><h3>Return to Spare Pool</h3><button class="modal-close" onclick="closeModal('deallocModal')">×</button></div>
+    <div class="modal-body">
+      <div style="padding:12px 16px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:8px;font-size:.85rem;color:#fbbf24;margin-bottom:16px">
+        ⚠️ This will remove the asset from <strong id="deallocStaffName">this staff member</strong> and return it to the Spare Pool.
+      </div>
+      <div class="form-grid">
+        <div class="field form-span2"><label>Barcode</label><input type="text" id="deallocBarcode" readonly style="opacity:.7;font-family:'JetBrains Mono',monospace"/></div>
+        <div class="field form-span2"><label>Reason / Remarks</label><textarea id="deallocRemarks" placeholder="Reason for returning to spare (optional)"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('deallocModal')">Cancel</button>
+      <button class="btn" style="background:rgba(245,158,11,.15);color:var(--yellow);border:1px solid rgba(245,158,11,.35)" onclick="submitDealloc()">Return to Spare</button>
+    </div>
+  </div>
+</div>
+
+<!-- TRANSFER MODAL -->
+<div class="modal-backdrop" id="transferModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <div>
+        <h3>Transfer Accountability</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px">Transfer this asset's accountability to a new staff member</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('transferModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field"><label>Barcode *</label><input type="text" id="tBarcode" placeholder="Asset barcode" oninput="onTransferBarcodeInput()"/></div>
+        <div class="field"><label>Transfer Type *</label>
+          <select id="tType"><option value="Permanent">Permanent</option><option value="Temporary">Temporary</option><option value="Reassignment">Reassignment</option></select>
+        </div>
+        <div class="field"><label>Effectivity Date *</label><input type="date" id="tEffDate"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 40px 1fr;gap:0;align-items:start;margin-bottom:14px">
+        <!-- FROM -->
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px">
+          <div class="enroll-section-title" style="margin-top:0;border-top:none;padding-top:0;margin-bottom:10px">From (Current Holder)</div>
+          <div class="form-grid" style="grid-template-columns:1fr">
+            <div class="field"><label>Staff Name</label><input type="text" id="tFromStaff" placeholder="Auto-filled from barcode"/></div>
+            <div class="field"><label>Employee ID</label><input type="text" id="tFromEmpId" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Designation</label><input type="text" id="tFromDesig" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Division</label><input type="text" id="tFromDiv" placeholder="Auto-filled"/></div>
+            <div class="field"><label>District</label><input type="text" id="tFromDist" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Branch</label><input type="text" id="tFromBranch" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Area</label><input type="text" id="tFromArea" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Remarks</label><input type="text" id="tFromRemarks" placeholder="Optional"/></div>
+          </div>
+        </div>
+        <!-- Arrow -->
+        <div style="display:flex;align-items:center;justify-content:center;padding-top:80px;color:var(--accent2)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <!-- TO -->
+        <div style="background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:14px">
+          <div class="enroll-section-title" style="margin-top:0;border-top:none;padding-top:0;margin-bottom:10px;color:#60a5fa">To (New Holder)</div>
+          <div class="form-grid" style="grid-template-columns:1fr">
+            <div class="field">
+              <label>Employee ID *</label>
+              <div style="position:relative">
+                <input type="text" id="tToEmpId" placeholder="Lookup by ID" oninput="onTransferToInput()"/>
+                <div id="toEmpSpinner" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%)"><div class="spinner" style="width:13px;height:13px;border-width:2px"></div></div>
+              </div>
+            </div>
+            <div class="field"><label>Staff Name *</label><input type="text" id="tToStaff" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Designation</label><input type="text" id="tToDesig" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Division</label><input type="text" id="tToDiv" placeholder="Auto-filled"/></div>
+            <div class="field"><label>District</label><input type="text" id="tToDist" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Branch</label><input type="text" id="tToBranch" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Area</label><input type="text" id="tToArea" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Remarks</label><input type="text" id="tToRemarks" placeholder="Optional"/></div>
+          </div>
+        </div>
+      </div>
+      <div id="transferLookupMsg" style="font-size:.78rem;padding:6px 10px;border-radius:6px;display:none;margin-top:4px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('transferModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitTransfer()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Confirm Transfer
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- BORROW MODAL -->
+<div class="modal-backdrop" id="borrowModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <div>
+        <h3>Record Borrow</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px">Asset is temporarily lent to a borrower</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('borrowModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid" style="margin-bottom:14px">
+        <!--
+          BUG-M02 FIX: Removed hardcoded `readonly`, `opacity:.7`, and `cursor:not-allowed`.
+          The JS function openBorrowModal() now controls these properties dynamically:
+            - When opened from an asset button (barcode pre-filled): sets readonly=true + dim styles
+            - When opened from "New Borrow" button (no barcode): sets readonly=false + enables typing
+          font-family stays as a permanent baseline style.
+        -->
+        <div class="field"><label>Barcode *</label><input type="text" id="bBarcode" placeholder="Asset barcode" style="font-family:'JetBrains Mono',monospace"/></div>
+        <div class="field form-span2">
+          <label>Asset</label>
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius2);padding:9px 12px;font-size:.85rem;color:var(--text2)" id="bAssetLabel">—</div>
+        </div>
+      </div>
+      <div class="enroll-section-title">Borrower Details</div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field">
+          <label>Borrower EmpID</label>
+          <div style="position:relative">
+            <input type="text" id="bEmpId" placeholder="Employee ID (optional)" oninput="onBorrowerInput()"/>
+            <div id="bEmpSpinner" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%)"><div class="spinner" style="width:13px;height:13px;border-width:2px"></div></div>
+          </div>
+        </div>
+        <div class="field form-span2"><label>Borrower Full Name *</label><input type="text" id="bName" placeholder="Full name of borrower"/></div>
+        <div class="field"><label>Designation</label><input type="text" id="bDesig" placeholder="e.g. Field Engineer, Senior Field Engineer…"/></div>
+        <div class="field"><label>Division</label><input type="text" id="bDiv" placeholder="Division"/></div>
+        <div class="field"><label>District</label><input type="text" id="bDistrict" placeholder="District"/></div>
+        <div class="field"><label>Branch</label><input type="text" id="bBranch" placeholder="Branch"/></div>
+      </div>
+      <div class="enroll-section-title">Borrow Period</div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field"><label>Borrow Date *</label><input type="date" id="bDate"/></div>
+        <div class="field"><label>Expected Return *</label><input type="date" id="bExpReturn"/></div>
+        <div class="field form-span2"><label>Remarks</label><input type="text" id="bRemarks" placeholder="Purpose of borrow, conditions…"/></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('borrowModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitBorrow()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        Record Borrow
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- RETURN MODAL -->
+<div class="modal-backdrop" id="returnModal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-hdr"><h3>Return Asset</h3><button class="modal-close" onclick="closeModal('returnModal')">×</button></div>
+    <div class="modal-body">
+      <div style="padding:12px 16px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);border-radius:8px;font-size:.84rem;color:#4ade80;margin-bottom:16px">
+        ✓ Marking this asset as returned will restore it to its previous pool.
+      </div>
+      <div class="form-grid">
+        <div class="field form-span2"><label>Barcode</label><input type="text" id="retBarcode" readonly style="opacity:.7;font-family:'JetBrains Mono',monospace"/></div>
+        <div class="field form-span2"><label>Borrower</label><input type="text" id="retBorrower" readonly style="opacity:.7"/></div>
+        <div class="field form-span2"><label>Return Date *</label><input type="date" id="retDate"/></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('returnModal')">Cancel</button>
+      <button class="btn btn-success" onclick="submitReturn()">Confirm Return</button>
+    </div>
+  </div>
+</div>
+
+<!-- DISPOSAL MODAL -->
+<div class="modal-backdrop" id="disposalModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div>
+        <h3>Dispose Asset</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px">Record this asset as decommissioned</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('disposalModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="padding:10px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:8px;font-size:.82rem;color:#f87171;margin-bottom:16px">
+        ⚠️ This action cannot be undone. The asset will be removed from all active pools.
+      </div>
+      <div class="form-grid">
+        <div class="field form-span2">
+          <label>Barcode</label>
+          <input type="text" id="dBarcode" readonly style="opacity:.7;font-family:'JetBrains Mono',monospace"/>
+        </div>
+        <div class="field form-span2">
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius2);padding:9px 12px;font-size:.82rem;color:var(--text2)" id="dispAssetLabel">—</div>
+        </div>
+        <div class="field form-span2"><label>Reason *</label>
+          <select id="dReason">
+            <option value="">Select reason…</option>
+            <option>End of Life</option><option>Damaged / Irreparable</option>
+            <option>Lost / Stolen</option><option>Obsolete</option>
+            <option>Returned to Supplier</option><option>Other</option>
+          </select>
+        </div>
+        <div class="field"><label>Disposed By</label><input type="text" id="dBy" placeholder="Name of person reporting"/></div>
+        <div class="field"><label>Disposal Date</label><input type="date" id="dDate"/></div>
+        <div class="field form-span2"><label>Remarks</label><textarea id="dRemarks" placeholder="Additional details…"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('disposalModal')">Cancel</button>
+      <button class="btn btn-danger" onclick="submitDisposal()">Confirm Disposal</button>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW ASSET MODAL -->
+<div class="modal-backdrop" id="viewModal">
+  <div class="modal modal-lg" style="display:flex;flex-direction:column;max-height:90vh">
+    <div class="modal-hdr" style="flex-shrink:0">
+      <h3>Asset Details</h3>
+      <button class="modal-close" onclick="closeModal('viewModal')">×</button>
+    </div>
+    <div class="view-modal-tabs" style="flex-shrink:0">
+      <button class="vmt-btn active" id="vmt-details" onclick="switchViewTab('details')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        Asset Details
+      </button>
+      <button class="vmt-btn" id="vmt-xfer" onclick="switchViewTab('xfer')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Transfer History
+      </button>
+    </div>
+    <div class="modal-body" id="viewModalBody" style="overflow-y:auto;flex:1"></div>
+    <div class="modal-body" id="viewModalXferBody" style="display:none;overflow-y:auto;flex:1;padding-top:16px"></div>
+    <div class="modal-footer" id="viewModalFooter" style="flex-shrink:0"></div>
+  </div>
+</div>
+
+<!-- BARCODE VIEWER -->
+<div class="modal-backdrop" id="barcodeModal">
+  <div class="modal"><div class="modal-hdr"><h3>Barcode Label</h3><button class="modal-close" onclick="closeModal('barcodeModal')">×</button></div>
+    <div class="modal-body" id="barcodeModalBody" style="display:flex;flex-direction:column;align-items:center;gap:16px"></div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('barcodeModal')">Close</button><button class="btn btn-primary" onclick="printBarcode()">Print</button></div>
+  </div>
+</div>
+
+<?!= include('Javascript'); ?>
+</body>
+</html>
