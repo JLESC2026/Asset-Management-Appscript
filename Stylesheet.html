@@ -402,6 +402,27 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .st-area .st-label { font-size: .83rem; color: var(--text2); font-weight: 600; }
 .st-area .st-meta  { font-size: .68rem; }
 
+/* ── Branch node (between Area and Employee) ── */
+/* Add this block inside the STAFF ASSETS TREE section of Stylesheet.html */
+/* Right after the .st-area rules */
+
+.st-branch {
+  margin: 4px 10px 4px 32px;
+  border-radius: var(--radius2);
+  box-shadow: none;
+  background: rgba(8, 145, 178, 0.04);
+  border-color: rgba(8, 145, 178, 0.2);
+}
+.st-branch .st-row { padding: 8px 12px; }
+.st-branch .st-label {
+  font-size: .83rem;
+  color: #0891b2;        /* cyan — distinct from area's grey */
+  font-weight: 600;
+}
+.st-branch .st-meta  { font-size: .68rem; }
+.st-branch > .st-row:hover { background: rgba(8, 145, 178, 0.08); }
+.st-branch > .st-row .st-chevron.open { color: #0891b2; }
+
 /* Area → Employee */
 .st-emp {
   margin: 3px 10px 3px 28px;
