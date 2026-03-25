@@ -1845,17 +1845,28 @@ function renderXferHistory(barcode){
   html+=`</div></div>`;
   el.innerHTML=html;
 }
+
 // ═══════════════════════════════════════
-//  STAFF ASSETS MODULE
+//  STAFF ASSETS MODULE  (v5.4 — Bug Fix: onclick quoting + employee expand)
+//
+//  ROOT CAUSE OF BUG:
+//    onclick="stToggle(${JSON.stringify(key)})"
+//    → JSON.stringify("Division 1") produces "Division 1" (with double-quotes)
+//    → Renders as:  onclick="stToggle("Division 1")"
+//    → The inner double-quotes close the HTML attribute → broken onclick
+//
+//  FIX:
+//    Use data-stkey="..." on every clickable row and read it via
+//    this.getAttribute('data-stkey') — no quoting issues regardless of
+//    what characters appear in division / district / area / emp names.
 // ═══════════════════════════════════════
 
 // ── State ────────────────────────────────────────────────────────────────────
-let _stTree       = {};          // built hierarchy
-let _stExpanded   = {};          // { 'div::dist::area::empid': true/false }
+let _stTree       = {};
+let _stExpanded   = {};
 let _stSearchQ    = '';
-let _stBuilt      = false;       // true after first build
 
-// ── Entry point: called by switchPage() ──────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────────
 function renderStaffAssets() {
   _stSearchQ = (document.getElementById('staffAssetsSearch')?.value || '').toLowerCase();
   _stTree = _buildStaffTree();
@@ -1863,24 +1874,19 @@ function renderStaffAssets() {
   _updateStaffBadge();
 }
 
-// ── Search input handler ──────────────────────────────────────────────────────
+// ── Search handler ────────────────────────────────────────────────────────────
 function onStaffAssetsSearch() {
   _stSearchQ = (document.getElementById('staffAssetsSearch')?.value || '').toLowerCase();
   _stTree = _buildStaffTree();
-
-  // Auto-expand nodes that contain matches when searching
   if (_stSearchQ) _stAutoExpand();
   _renderStaffTree();
 }
 
-// ── Build the grouped hierarchy from ASSETS ───────────────────────────────────
+// ── Build hierarchy ───────────────────────────────────────────────────────────
 function _buildStaffTree() {
-  // Only allocated / transfer assets, scoped to user
   const base = _filterByScope(
     ASSETS.filter(a => ['allocated', 'transfer'].includes(a.status))
   );
-
-  // Apply search filter at asset/employee level
   const data = _stSearchQ
     ? base.filter(a => [
         a.Staff, a.EmpID, a.Designation, a.Barcode,
@@ -1889,9 +1895,7 @@ function _buildStaffTree() {
       ].some(v => (v || '').toLowerCase().includes(_stSearchQ)))
     : base;
 
-  // Group: Division → District → Area → EmpID → { info, assets[] }
   const tree = {};
-
   data.forEach(a => {
     const div    = a.Division  || '(No Division)';
     const dist   = a.District  || '(No District)';
@@ -1913,20 +1917,17 @@ function _buildStaffTree() {
     }
     tree[div][dist][area][empId].assets.push(a);
   });
-
   return tree;
 }
 
-// ── Auto-expand nodes that have search hits ───────────────────────────────────
+// ── Auto-expand on search ─────────────────────────────────────────────────────
 function _stAutoExpand() {
   Object.keys(_stTree).forEach(div => {
     Object.keys(_stTree[div]).forEach(dist => {
       Object.keys(_stTree[div][dist]).forEach(area => {
-        const aKey  = `${div}::${dist}`;
-        const bKey  = `${div}::${dist}::${area}`;
         _stExpanded[div]  = true;
-        _stExpanded[aKey] = true;
-        _stExpanded[bKey] = true;
+        _stExpanded[`${div}::${dist}`] = true;
+        _stExpanded[`${div}::${dist}::${area}`] = true;
       });
     });
   });
@@ -1940,6 +1941,9 @@ function stExpandAll() {
       _stExpanded[`${div}::${dist}`] = true;
       Object.keys(_stTree[div][dist]).forEach(area => {
         _stExpanded[`${div}::${dist}::${area}`] = true;
+        Object.keys(_stTree[div][dist][area]).forEach(empId => {
+          _stExpanded[`${div}::${dist}::${area}::${empId}`] = true;
+        });
       });
     });
   });
@@ -1951,7 +1955,7 @@ function stCollapseAll() {
   _renderStaffTree();
 }
 
-// ── Toggle a single node ──────────────────────────────────────────────────────
+// ── Toggle a single node — called via data-stkey attribute ────────────────────
 function stToggle(key) {
   _stExpanded[key] = !_stExpanded[key];
   _renderStaffTree();
@@ -1973,14 +1977,13 @@ function _renderStaffTree() {
 
   const divKeys = Object.keys(_stTree).sort();
 
-  // Summary bar
   let totalEmp = 0, totalAsset = 0;
   divKeys.forEach(div => {
     Object.keys(_stTree[div]).forEach(dist => {
       Object.keys(_stTree[div][dist]).forEach(area => {
-        totalEmp   += Object.keys(_stTree[div][dist][area]).length;
-        Object.keys(_stTree[div][dist][area]).forEach(empId => {
-          totalAsset += _stTree[div][dist][area][empId].assets.length;
+        totalEmp += Object.keys(_stTree[div][dist][area]).length;
+        Object.keys(_stTree[div][dist][area]).forEach(e => {
+          totalAsset += _stTree[div][dist][area][e].assets.length;
         });
       });
     });
@@ -2010,7 +2013,6 @@ function _renderStaffTree() {
     return;
   }
 
-  // Build HTML
   let html = '<div class="st-tree">';
   divKeys.forEach(div => html += _renderDivNode(div));
   html += '</div>';
@@ -2018,11 +2020,12 @@ function _renderStaffTree() {
 }
 
 // ── Division node ─────────────────────────────────────────────────────────────
+// FIX: key stored in data-stkey attribute; onclick reads it via
+//      this.getAttribute('data-stkey') — no HTML quoting issues.
 function _renderDivNode(div) {
-  const distKeys  = Object.keys(_stTree[div]).sort();
-  const isOpen    = !!_stExpanded[div];
+  const distKeys = Object.keys(_stTree[div]).sort();
+  const isOpen   = !!_stExpanded[div];
 
-  // Count assets in this division
   let assetCount = 0, empCount = 0;
   distKeys.forEach(dist => {
     Object.keys(_stTree[div][dist]).forEach(area => {
@@ -2034,7 +2037,7 @@ function _renderDivNode(div) {
 
   let html = `
     <div class="st-node st-div">
-      <div class="st-row" onclick="stToggle(${JSON.stringify(div)})">
+      <div class="st-row" data-stkey="${esc(div)}" onclick="stToggle(this.getAttribute('data-stkey'))">
         <span class="st-chevron ${isOpen ? 'open' : ''}">›</span>
         <span class="st-icon">🏢</span>
         <span class="st-label">${esc(div)}</span>
@@ -2052,9 +2055,9 @@ function _renderDivNode(div) {
 
 // ── District node ─────────────────────────────────────────────────────────────
 function _renderDistNode(div, dist) {
-  const areaKeys  = Object.keys(_stTree[div][dist]).sort();
-  const key       = `${div}::${dist}`;
-  const isOpen    = !!_stExpanded[key];
+  const areaKeys = Object.keys(_stTree[div][dist]).sort();
+  const key      = `${div}::${dist}`;
+  const isOpen   = !!_stExpanded[key];
 
   let assetCount = 0, empCount = 0;
   areaKeys.forEach(area => {
@@ -2065,7 +2068,7 @@ function _renderDistNode(div, dist) {
 
   let html = `
     <div class="st-node st-dist">
-      <div class="st-row" onclick="stToggle(${JSON.stringify(key)})">
+      <div class="st-row" data-stkey="${esc(key)}" onclick="stToggle(this.getAttribute('data-stkey'))">
         <span class="st-chevron ${isOpen ? 'open' : ''}">›</span>
         <span class="st-icon">📍</span>
         <span class="st-label">${esc(dist)}</span>
@@ -2083,22 +2086,24 @@ function _renderDistNode(div, dist) {
 
 // ── Area node ─────────────────────────────────────────────────────────────────
 function _renderAreaNode(div, dist, area) {
-  const empIds  = Object.keys(_stTree[div][dist][area]).sort((a, b) => {
+  const empIds = Object.keys(_stTree[div][dist][area]).sort((a, b) => {
     const na = _stTree[div][dist][area][a].name;
     const nb = _stTree[div][dist][area][b].name;
     return na.localeCompare(nb);
   });
-  const key     = `${div}::${dist}::${area}`;
-  const isOpen  = !!_stExpanded[key];
+  const key    = `${div}::${dist}::${area}`;
+  const isOpen = !!_stExpanded[key];
 
   let assetCount = 0;
   empIds.forEach(e => { assetCount += _stTree[div][dist][area][e].assets.length; });
 
-  const areaLabel = area === '(No Area)' ? '<em style="opacity:.6">No Area</em>' : esc(area);
+  const areaLabel = area === '(No Area)'
+    ? '<em style="opacity:.6">No Area</em>'
+    : esc(area);
 
   let html = `
     <div class="st-node st-area">
-      <div class="st-row" onclick="stToggle(${JSON.stringify(key)})">
+      <div class="st-row" data-stkey="${esc(key)}" onclick="stToggle(this.getAttribute('data-stkey'))">
         <span class="st-chevron ${isOpen ? 'open' : ''}">›</span>
         <span class="st-icon">📁</span>
         <span class="st-label">${areaLabel}</span>
@@ -2115,6 +2120,7 @@ function _renderAreaNode(div, dist, area) {
 }
 
 // ── Employee node ─────────────────────────────────────────────────────────────
+// Clicking an employee row expands/collapses their asset cards below.
 function _renderEmpNode(div, dist, area, empId) {
   const emp    = _stTree[div][dist][area][empId];
   const key    = `${div}::${dist}::${area}::${empId}`;
@@ -2127,24 +2133,33 @@ function _renderEmpNode(div, dist, area, empId) {
 
   let html = `
     <div class="st-node st-emp">
-      <div class="st-row" onclick="stToggle(${JSON.stringify(key)})">
+      <div class="st-row" data-stkey="${esc(key)}" onclick="stToggle(this.getAttribute('data-stkey'))"
+           style="cursor:pointer" title="Click to ${isOpen ? 'hide' : 'show'} assets">
         <span class="st-chevron ${isOpen ? 'open' : ''}">›</span>
         <span class="st-icon">👤</span>
         <div class="st-emp-info">
           <span class="st-label">${esc(emp.name)}</span>
           <span class="st-emp-sub">
             <span class="mono-sm" style="font-size:.7rem">${esc(empId)}</span>
-            ${emp.designation ? `<span style="color:var(--text3)">·</span> <span style="font-size:.72rem;color:var(--text2)">${esc(emp.designation)}</span>` : ''}
+            ${emp.designation
+              ? `<span style="color:var(--text3)">·</span>
+                 <span style="font-size:.72rem;color:var(--text2)">${esc(emp.designation)}</span>`
+              : ''}
             ${locPills}
           </span>
         </div>
-        <span class="st-meta">${count} asset${count !== 1 ? 's' : ''}</span>
+        <span class="st-meta" style="background:${isOpen ? 'rgba(232,81,24,.12)' : ''};
+              border-color:${isOpen ? 'rgba(232,81,24,.3)' : ''};
+              color:${isOpen ? 'var(--accent)' : ''}">
+          ${count} asset${count !== 1 ? 's' : ''} ${isOpen ? '▲' : '▼'}
+        </span>
       </div>`;
 
   if (isOpen) {
-    html += '<div class="st-children st-assets-wrap">';
-    html += _renderEmpAssets(emp.assets);
-    html += '</div>';
+    html += `<div class="st-children st-assets-wrap"
+               style="animation:stFadeIn .15s ease">
+      ${_renderEmpAssets(emp.assets)}
+    </div>`;
   }
   html += '</div>';
   return html;
@@ -2152,23 +2167,31 @@ function _renderEmpNode(div, dist, area, empId) {
 
 // ── Asset cards for an employee ───────────────────────────────────────────────
 function _renderEmpAssets(assets) {
-  if (!assets.length) return '<div class="st-empty-small">No assets</div>';
+  if (!assets.length) {
+    return '<div class="st-empty-small">No assets found.</div>';
+  }
 
   const lcBadge = {
     Allocated: 'allocated', Transfer: 'transfer',
     Borrow: 'borrowed', Active: 'spare', Dispose: 'disposal'
   };
 
-  return assets.map(a => {
-    const lc        = a.Lifecycle || 'Active';
-    const badgeKey  = lcBadge[lc] || 'spare';
-    const condCls   = 'cond-' + (a.Condition || 'good').toLowerCase();
+  // Sort: by Type then Barcode
+  const sorted = [...assets].sort((a, b) =>
+    (a.Type || '').localeCompare(b.Type || '') ||
+    (a.Barcode || '').localeCompare(b.Barcode || '')
+  );
+
+  return sorted.map(a => {
+    const lc       = a.Lifecycle || 'Active';
+    const badgeKey = lcBadge[lc] || 'spare';
+    const condCls  = 'cond-' + (a.Condition || 'good').toLowerCase();
 
     return `
       <div class="st-asset-card">
         <div class="st-asset-left">
           <span class="st-icon" style="font-size:.95rem">💻</span>
-          <div>
+          <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <span class="type-tag">${esc(a.Type)}</span>
               <span style="font-weight:600;font-size:.85rem">${esc(a.Brand) || '—'}</span>
@@ -2178,19 +2201,35 @@ function _renderEmpAssets(assets) {
               <span class="mono-bc" style="font-size:.74rem">${esc(a.Barcode)}</span>
               ${a.Serial ? `<span class="mono-sm">S/N: ${esc(a.Serial)}</span>` : ''}
               <span class="${condCls}" style="font-size:.72rem">${esc(a.Condition)}</span>
-              ${a.EffDate ? `<span style="font-size:.7rem;color:var(--text3)">Since ${fmtDate(a.EffDate)}</span>` : ''}
+              ${a.EffDate
+                ? `<span style="font-size:.7rem;color:var(--text3)">Since ${fmtDate(a.EffDate)}</span>`
+                : ''}
             </div>
+            ${a.Specs ? `<div style="font-size:.7rem;color:var(--text3);margin-top:3px;
+                              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                              max-width:340px">${esc(a.Specs)}</div>` : ''}
           </div>
         </div>
         <div class="st-asset-actions">
-          <button class="btn btn-icon btn-secondary" data-tip="View"
+          <button class="btn btn-icon btn-secondary" data-tip="View Details"
                   onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
-          <button class="btn btn-icon btn-transfer" data-tip="Transfer"
+          <button class="btn btn-icon btn-transfer"  data-tip="Transfer"
                   onclick="openTransferModal('${esc(a.Barcode)}')">${_ICO.transfer}</button>
+          <button class="btn btn-icon btn-borrow"    data-tip="Borrow"
+                  onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>
         </div>
       </div>`;
   }).join('');
 }
+
+// ── Hook into switchPage() ────────────────────────────────────────────────────
+(function () {
+  const _origSwitch = switchPage;
+  switchPage = function (p) {
+    _origSwitch(p);
+    if (p === 'staff-assets') renderStaffAssets();
+  };
+})();
 
 // ── Hook into switchPage() ────────────────────────────────────────────────────
 // Wrap the existing switchPage so Staff Assets renders when navigated to.
