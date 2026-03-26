@@ -1181,3 +1181,54 @@ function getActivityLogs(page, pageSize) {
 
 function syncAll() { return getAllAssets(); }
 function getSpreadsheetUrl() { return _ss().getUrl(); }
+
+// ─── STAFF MOVEMENT ───────────────────────────────────────────────────────────
+function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
+  try {
+    if (!empId) return 'Error: Employee ID is required.';
+    const sh   = _entrySheet();
+    const last = sh.getLastRow();
+    if (last < AE_DATA_START) return 'Error: No assets in system.';
+
+    const count  = last - AE_DATA_START + 1;
+    const data   = sh.getRange(AE_DATA_START, 1, count, TOTAL_COLS).getValues();
+    const nowStr = new Date().toLocaleString('en-PH');
+    const id     = String(empId).trim().toLowerCase();
+    let updated  = 0, skipped = 0;
+
+    for (let i = 0; i < data.length; i++) {
+      const row      = data[i];
+      const rowEmpId = String(row[C.EMP_ID - 1] || '').trim().toLowerCase();
+      if (rowEmpId !== id) continue;
+
+      const rowIdx = i + AE_DATA_START;
+      const lc     = String(row[C.LIFECYCLE - 1] || '').toLowerCase();
+      if (lc === 'borrow')                   { skipped++; continue; }
+      if (lc === 'dispose' || lc === 'disposal') continue;
+
+      const normDiv  = _normDiv(newDiv   || '');
+      const normDist = _normDist(newDist || '');
+
+      if (assetAction === 'spare') {
+        [[C.LIFECYCLE,'Active'],[C.ASSET_STATUS,'Active'],[C.STATUS_LABEL,'Unassigned'],
+         [C.EMP_ID,''],[C.STAFF,''],[C.DESIGNATION,''],[C.EFF_DATE,''],
+         [C.DIVISION,normDiv],[C.DISTRICT,normDist],
+         [C.AREA,newArea||''],[C.BRANCH,newBranch||''],[C.LAST_UPDATED,nowStr]]
+        .forEach(u => sh.getRange(rowIdx, u[0]).setValue(u[1]));
+      } else {
+        [[C.DIVISION,normDiv],[C.DISTRICT,normDist],
+         [C.AREA,newArea||''],[C.BRANCH,newBranch||''],[C.LAST_UPDATED,nowStr]]
+        .forEach(u => sh.getRange(rowIdx, u[0]).setValue(u[1]));
+      }
+      updated++;
+    }
+
+    _log('MOVE_STAFF', empId,
+      `Action:${assetAction} → ${newDiv}/${newDist}/${newBranch} | ${updated} updated, ${skipped} skipped`,
+      empId);
+
+    let msg = `Staff movement recorded. ${updated} asset(s) ${assetAction === 'spare' ? 'returned to spare at new location' : 'moved to new location'}.`;
+    if (skipped) msg += ` (${skipped} skipped — on active borrow)`;
+    return msg;
+  } catch (e) { return 'Error: ' + e.message; }
+}

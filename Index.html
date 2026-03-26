@@ -99,6 +99,16 @@
         <span class="nav-badge" id="nbStaffAssets" style="background:var(--cyan)">0</span>
       </div>
 
+      <div class="nav-item" data-page="equipment-record" onclick="switchPage('equipment-record')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="9" y1="21" x2="9" y2="9"/>
+        </svg>
+        Equipment Record
+        <span class="nav-badge" id="nbEquipment" style="background:var(--green)">0</span>
+      </div>
+
       <div class="nav-section">Asset Pools</div>
       <div class="nav-item" data-page="spare" onclick="switchPage('spare')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
@@ -216,6 +226,26 @@
         <div id="staffAssetsSummary" class="pool-summary"></div>
         <div id="staffAssetsTree">
           <div class="st-empty">Open this page to load the staff hierarchy.</div>
+        </div>
+      </div>
+
+      <!-- ══ EQUIPMENT RECORD ══ -->
+      <div class="page" id="page-equipment-record">
+        <div class="page-header">
+          <div>
+            <h2>Equipment Record</h2>
+            <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Assets organized by physical location — Division → District → Area → Branch</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+            <input type="text" id="equipSearch" placeholder="Search assets, branch, type…"
+                   oninput="renderEquipmentRecord()" class="filter-input"/>
+            <button class="btn btn-secondary btn-sm" onclick="eqExpandAll()">Expand All</button>
+            <button class="btn btn-secondary btn-sm" onclick="eqCollapseAll()">Collapse All</button>
+          </div>
+        </div>
+        <div id="equipSummary" class="pool-summary"></div>
+        <div id="equipTree">
+          <div class="st-empty">Open this page to load the equipment hierarchy.</div>
         </div>
       </div>
 
@@ -886,6 +916,166 @@
   <div class="modal"><div class="modal-hdr"><h3>Barcode Label</h3><button class="modal-close" onclick="closeModal('barcodeModal')">×</button></div>
     <div class="modal-body" id="barcodeModalBody" style="display:flex;flex-direction:column;align-items:center;gap:16px"></div>
     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('barcodeModal')">Close</button><button class="btn btn-primary" onclick="printBarcode()">Print</button></div>
+  </div>
+</div>
+
+<!-- STAFF ASSET VIEW MODAL -->
+<div class="modal-backdrop" id="staffAssetModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr" style="flex-direction:column;align-items:stretch;gap:0;padding-bottom:14px">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div style="width:44px;height:44px;border-radius:50%;background:rgba(59,130,246,.1);border:2px solid rgba(59,130,246,.25);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;margin-top:2px">👤</div>
+        <div style="flex:1;min-width:0">
+          <h3 id="samStaffName" style="font-size:1.05rem;font-weight:700;color:var(--text)">—</h3>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;align-items:center">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:.76rem;color:var(--accent2);background:rgba(124,106,247,.1);padding:2px 8px;border-radius:6px;border:1px solid rgba(124,106,247,.2)" id="samStaffId">—</span>
+            <span style="font-size:.78rem;color:var(--text2)" id="samStaffDesig">—</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('staffAssetModal')">×</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;align-items:center">
+        <span class="loc-pill lp-div"    id="samPillDiv">—</span>
+        <span class="loc-pill lp-dist"   id="samPillDist">—</span>
+        <span class="loc-pill lp-branch" id="samPillBranch">—</span>
+        <span style="margin-left:auto" class="pool-pill pool-pill-blue" id="samStaffCount">0 assets</span>
+      </div>
+    </div>
+    <div class="modal-body" style="padding:0;overflow:hidden">
+      <div class="tbl-wrap" style="border:none;border-radius:0;box-shadow:none;max-height:420px;overflow-y:auto;border-top:1px solid var(--border)">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:115px">Barcode</th>
+              <th style="width:90px">Type</th>
+              <th style="width:90px">Brand</th>
+              <th style="width:115px">Serial No.</th>
+              <th style="width:80px">Condition</th>
+              <th style="width:100px">Date Alloc.</th>
+              <th style="width:80px">Details</th>
+            </tr>
+          </thead>
+          <tbody id="samAssetRows">
+            <tr><td colspan="7" class="tbl-empty">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('staffAssetModal')">Close</button>
+    </div>
+  </div>
+</div>
+<!-- END STAFF ASSET VIEW MODAL -->
+ 
+<!-- EQUIPMENT BRANCH MODAL -->
+<div class="modal-backdrop" id="equipmentBranchModal">
+  <div class="modal modal-lg" style="display:flex;flex-direction:column;max-height:88vh">
+    <div class="modal-hdr" style="flex-shrink:0">
+      <div>
+        <h3 id="eqModalTitle">Branch Assets</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="eqModalSubtitle"></p>
+      </div>
+      <button class="modal-close" onclick="closeModal('equipmentBranchModal')">×</button>
+    </div>
+    <div style="overflow-y:auto;flex:1">
+      <div class="tbl-wrap" style="border:none;border-radius:0;box-shadow:none">
+        <table>
+          <thead><tr>
+            <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th>
+            <th>Condition</th><th>Status</th><th>Assigned To</th><th style="width:50px"></th>
+          </tr></thead>
+          <tbody id="eqModalBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button class="btn btn-secondary" onclick="closeModal('equipmentBranchModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- MOVE STAFF MODAL -->
+<div class="modal-backdrop" id="moveStaffModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div>
+        <h3>Move Staff</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px">Reassign staff to a new branch and manage their assets</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('moveStaffModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <!-- Staff info (read-only) -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:18px">
+        <div style="font-size:.7rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Staff Being Moved</div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+          <div>
+            <div style="font-weight:700;font-size:.95rem" id="msEmpName">—</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:.76rem;color:var(--text3)" id="msEmpId">—</div>
+          </div>
+          <div>
+            <div style="font-size:.7rem;color:var(--text3)">Designation</div>
+            <div style="font-size:.82rem" id="msDesig">—</div>
+          </div>
+          <div>
+            <div style="font-size:.7rem;color:var(--text3)">Current Location</div>
+            <div style="font-size:.82rem;color:var(--accent2)" id="msCurLoc">—</div>
+          </div>
+          <div style="margin-left:auto;text-align:right">
+            <div style="font-size:.76rem;font-weight:600;color:var(--yellow)" id="msAssetCount">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="enroll-section-title">New Location</div>
+      <div class="form-grid" style="margin-bottom:18px">
+        <div class="field">
+          <label>New Division *</label>
+          <select id="msNewDiv" onchange="onMsDivChange()"><option value="">Select Division…</option></select>
+        </div>
+        <div class="field">
+          <label>New District *</label>
+          <select id="msNewDist"><option value="">Select District…</option></select>
+        </div>
+        <div class="field">
+          <label>New Area</label>
+          <input type="text" id="msNewArea" placeholder="e.g. 1, 2, 3…"/>
+        </div>
+        <div class="field">
+          <label>New Branch</label>
+          <input type="text" id="msNewBranch" placeholder="Enter new branch name"/>
+        </div>
+      </div>
+
+      <div class="enroll-section-title">What happens to their assets?</div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+        <label style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:8px;cursor:pointer">
+          <input type="radio" id="msActionMove" name="msAction" value="move" checked style="margin-top:3px;accent-color:var(--blue)"/>
+          <div>
+            <div style="font-weight:600;font-size:.88rem">Move assets with staff</div>
+            <div style="font-size:.76rem;color:var(--text3);margin-top:2px">All allocated assets will be updated to the new location. Staff remains accountable.</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:rgba(217,119,6,.06);border:1px solid rgba(217,119,6,.2);border-radius:8px;cursor:pointer">
+          <input type="radio" id="msActionSpare" name="msAction" value="spare" style="margin-top:3px;accent-color:var(--yellow)"/>
+          <div>
+            <div style="font-weight:600;font-size:.88rem">Leave assets as spare at current location</div>
+            <div style="font-size:.76rem;color:var(--text3);margin-top:2px">Assets will be deallocated and returned to the spare pool at the new location (for the incoming staff to pick up).</div>
+          </div>
+        </label>
+      </div>
+      <div style="margin-top:12px;padding:8px 12px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.18);border-radius:6px;font-size:.76rem;color:#f87171">
+        ⚠ Assets currently on active borrow will be skipped — handle those via the Return flow first.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('moveStaffModal')">Cancel</button>
+      <button class="btn btn-primary" id="msSubmitBtn" onclick="submitMoveStaff()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        Confirm Move
+      </button>
+    </div>
   </div>
 </div>
 

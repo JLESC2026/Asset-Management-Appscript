@@ -24,6 +24,10 @@ let _borrowBarcode   = '';
 let _returnBarcode   = '';
 let _disposalBarcode = '';
 let _viewBarcode     = '';
+let _eqExpanded      = {};
+let _eqBranchReg     = [];
+let _eqSearchQ       = '';
+let _moveStaffEmpId  = '';
 let _empLookupTimer  = null;
 const PAGE_SIZE = 20;
 
@@ -340,6 +344,9 @@ function updateBadges(){
   document.getElementById('nbDisposal').textContent  = disp;
   document.getElementById('nbBorrowActive').textContent = borr;
   document.getElementById('nbBorrowPool').textContent   = pool;
+  const equipCount = _filterByScope(ASSETS.filter(a => a.status !== 'disposal')).length;
+  const equipEl = document.getElementById('nbEquipment');
+  if (equipEl) equipEl.textContent = equipCount;
 }
 
 // ═══════════════════════════════════════
@@ -1864,6 +1871,7 @@ let _stTree       = {};   // built hierarchy
 let _stExpanded   = {};   // { 'key': true/false }
 let _stSearchQ    = '';
 let _stBuilt      = false;
+let _stEmpRegistry = [];
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 function renderStaffAssets() {
@@ -1979,8 +1987,8 @@ function _updateStaffBadge() {
 
 // ── Main render ───────────────────────────────────────────────────────────────
 function _renderStaffTree() {
+  _stEmpRegistry = [];
   const container = document.getElementById('staffAssetsTree');
-  if (!container) return;
 
   const divKeys = Object.keys(_stTree).sort();
 
@@ -2043,7 +2051,11 @@ function _renderDivNode(div) {
       Object.keys(_stTree[div][dist][area]).forEach(branch => {
         const emps = Object.keys(_stTree[div][dist][area][branch]);
         empCount += emps.length;
-        emps.forEach(e => { assetCount += _stTree[div][dist][area][branch][e].assets.length; });
+        emps.forEach(e => { 
+          const empObj = _stTree[div][dist][area][branch][e];
+          // Add || [] to ensure it treats a missing list as an empty array
+          assetCount += (empObj.assets || []).length; 
+        });
       })
     )
   );
@@ -2066,7 +2078,6 @@ function _renderDivNode(div) {
   return html;
 }
 
-// ── District node ─────────────────────────────────────────────────────────────
 // ── District node ─────────────────────────────────────────────────────────────
 function _renderDistNode(div, dist) {
   const areaKeys = Object.keys(_stTree[div][dist]).sort();
@@ -2110,7 +2121,11 @@ function _renderAreaNode(div, dist, area) {
   branchKeys.forEach(branch => {
     const emps = Object.keys(_stTree[div][dist][area][branch]);
     empCount += emps.length;
-    emps.forEach(e => { assetCount += _stTree[div][dist][area][branch][e].assets.length; });
+    emps.forEach(e => { 
+  const empObj = _stTree[div][dist][area][branch][e];
+  // Add || [] to ensure it treats a missing list as an empty array
+  assetCount += (empObj.assets || []).length; 
+});
   });
 
   const areaLabel = area === '(No Area)'
@@ -2146,7 +2161,11 @@ function _renderBranchNode(div, dist, area, branch) {
   const isOpen = !!_stExpanded[key];
 
   let assetCount = 0;
-  empIds.forEach(e => { assetCount += _stTree[div][dist][area][branch][e].assets.length; });
+empIds.forEach(e => { 
+  const empObj = _stTree[div][dist][area][branch][e];
+  // Safety check for the assets array
+  assetCount += (empObj.assets || []).length; 
+});
 
   const branchLabel = branch === '(No Branch)'
     ? '<em style="opacity:.6">No Branch</em>'
@@ -2170,40 +2189,54 @@ function _renderBranchNode(div, dist, area, branch) {
   return html;
 }
 
+// ── Employee node (inline row — no expand/collapse) ───────────────────────────
 // ── Employee node ─────────────────────────────────────────────────────────────
+// 🔧 FIX-A: Correct signature, registry push, and View button restored
 function _renderEmpNode(div, dist, area, branch, empId) {
-  const emp    = _stTree[div][dist][area][branch][empId];
-  const key    = `${div}::${dist}::${area}::${branch}::${empId}`;
-  const isOpen = !!_stExpanded[key];
-  const count  = emp.assets.length;
+  const emp = _stTree?.[div]?.[dist]?.[area]?.[branch]?.[empId];
+  if (!emp) return '';
 
-  let html = `
-    <div class="st-node st-emp">
-      <div class="st-row" data-stkey="${esc(key)}" onclick="stToggle(this.getAttribute('data-stkey'))">
-        <span class="st-chevron ${isOpen ? 'open' : ''}">›</span>
+  const idx = _stEmpRegistry.length;
+  _stEmpRegistry.push({ div, dist, area, branch, empId });
+
+  const typeCounts = {};
+  (emp.assets || []).forEach(a => {
+    if (a && a.Type) typeCounts[a.Type] = (typeCounts[a.Type] || 0) + 1;
+  });
+
+  const chips = Object.entries(typeCounts)
+    .map(([t, c]) => `<span class="st-type-chip">${esc(t)} <strong>${c}</strong></span>`)
+    .join('');
+
+  return `
+    <div class="st-node st-emp st-emp-inline">
+      <div class="st-emp-row">
+<div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="btn btn-icon btn-secondary" data-tip="Move Staff"
+                  onclick="openMoveStaffModal('${esc(empId)}')"
+                  style="color:var(--cyan);border-color:rgba(8,145,178,.3)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+            </svg>
+          </button>
+          <button class="btn btn-icon btn-secondary" data-tip="View Assets (${(emp.assets || []).length})"
+                  onclick="openStaffAssetModal(${idx})">
+            ${_ICO.view}
+          </button>
+        </div>
         <span class="st-icon">👤</span>
         <div class="st-emp-info">
-          <span class="st-label">${esc(emp.name)}</span>
+          <span class="st-label">${esc(emp.name || 'Unknown')}</span>
           <span class="st-emp-sub">
             <span class="mono-sm" style="font-size:.7rem">${esc(empId)}</span>
-            ${emp.designation
-              ? `<span style="color:var(--text3)">·</span>
-                 <span style="font-size:.72rem;color:var(--text2)">${esc(emp.designation)}</span>`
-              : ''}
+            ${emp.designation ? `<span style="color:var(--text3)">·</span>
+            <span style="font-size:.72rem;color:var(--text2)">${esc(emp.designation)}</span>` : ''}
           </span>
         </div>
-        <span class="st-meta">${count} asset${count !== 1 ? 's' : ''}</span>
-      </div>`;
-
-  if (isOpen) {
-    html += '<div class="st-children st-assets-wrap">';
-    html += _renderEmpAssets(emp.assets);
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
+        <div class="st-type-chips">${chips || '<span style="color:var(--text3);font-size:.76rem">—</span>'}</div>
+      </div>
+    </div>`;
 }
-
 
 // ── Asset cards for an employee ───────────────────────────────────────────────
 function _renderEmpAssets(assets) {
@@ -2247,22 +2280,439 @@ function _renderEmpAssets(assets) {
   }).join('');
 }
 
+// ── Open Staff Asset Modal ────────────────────────────────────────────────────
+function openStaffAssetModal(idx) {
+  const reg = _stEmpRegistry[idx];
+  if (!reg) { toast('Staff data not found.', 'err'); return; }
+ 
+  const { div, dist, area, branch, empId } = reg;
+  const emp = _stTree[div]?.[dist]?.[area]?.[branch]?.[empId];
+  if (!emp) { toast('Staff data not found.', 'err'); return; }
+ 
+  const assets = emp.assets;
+ 
+  // ── Header ──
+  document.getElementById('samStaffName').textContent  = emp.name       || '—';
+  document.getElementById('samStaffId').textContent    = empId          || '—';
+  document.getElementById('samStaffDesig').textContent = emp.designation || '—';
+ 
+  const pd = document.getElementById('samPillDiv');
+  const ps = document.getElementById('samPillDist');
+  const pb = document.getElementById('samPillBranch');
+  const pc = document.getElementById('samStaffCount');
+  if (pd) pd.textContent = (div    !== '(No Division)')  ? div    : '—';
+  if (ps) ps.textContent = (dist   !== '(No District)')  ? dist   : '—';
+  if (pb) pb.textContent = (branch !== '(No Branch)')    ? branch : '—';
+  if (pc) pc.textContent = assets.length + ' asset' + (assets.length !== 1 ? 's' : '');
+ 
+  // ── Table ──
+  const tbody = document.getElementById('samAssetRows');
+  if (!tbody) { openModal('staffAssetModal'); return; }
+ 
+  if (!assets.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="tbl-empty">No assets assigned to this staff member</td></tr>';
+  } else {
+    const lcBadge = {
+      Active:'spare', Allocated:'allocated', Transfer:'transfer',
+      Borrow:'borrowed', Returned:'returned', Dispose:'disposal', BorrowItem:'borrow-item'
+    };
+    tbody.innerHTML = assets.map(a => {
+      const lc      = a.Lifecycle || 'Active';
+      const badge   = lcBadge[lc] || 'spare';
+      return `<tr>
+        <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+        <td>
+          <span class="type-tag">${esc(a.Type)}</span>
+        </td>
+        <td style="font-weight:600">${esc(a.Brand) || '—'}</td>
+        <td class="mono-sm">${esc(a.Serial) || '—'}</td>
+        <td>
+          <span class="cond-${(a.Condition || 'good').toLowerCase()}">
+            ${esc(a.Condition) || '—'}
+          </span>
+        </td>
+        <td class="nowrap-sm">${fmtDate(a.EffDate) || '—'}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm"
+                  style="gap:5px;padding:5px 10px"
+                  onclick="closeModal('staffAssetModal');viewAsset('${esc(a.Barcode)}')">
+            ${_ICO.view} View
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+ 
+  openModal('staffAssetModal');
+}
+
+// ═══════════════════════════════════════
+//  EQUIPMENT RECORD MODULE
+// ═══════════════════════════════════════
+
+function renderEquipmentRecord() {
+  _eqSearchQ  = (document.getElementById('equipSearch')?.value || '').toLowerCase();
+  _eqBranchReg = [];
+  const tree  = _buildEquipTree();
+  _renderEquipTree(tree);
+}
+
+function _buildEquipTree() {
+  const base = _filterByScope(ASSETS.filter(a => a.status !== 'disposal'));
+  const data = _eqSearchQ
+    ? base.filter(a => [a.Barcode, a.Type, a.Brand, a.Serial, a.Staff, a.EmpID,
+                        a.Division, a.District, a.Area, a.Branch]
+        .some(v => (v||'').toLowerCase().includes(_eqSearchQ)))
+    : base;
+
+  const tree = {};
+  data.forEach(a => {
+    const div    = a.Division || '(No Division)';
+    const dist   = a.District || '(No District)';
+    const area   = a.Area     || '(No Area)';
+    const branch = a.Branch   || '(No Branch)';
+    if (!tree[div]) tree[div] = {};
+    if (!tree[div][dist]) tree[div][dist] = {};
+    if (!tree[div][dist][area]) tree[div][dist][area] = {};
+    if (!tree[div][dist][area][branch]) tree[div][dist][area][branch] = [];
+    tree[div][dist][area][branch].push(a);
+  });
+  return tree;
+}
+
+function eqExpandAll() {
+  const tree = _buildEquipTree();
+  Object.keys(tree).forEach(div => {
+    _eqExpanded['eq-div::' + div] = true;
+    Object.keys(tree[div]).forEach(dist => {
+      _eqExpanded['eq-dist::' + div + '::' + dist] = true;
+      Object.keys(tree[div][dist]).forEach(area => {
+        _eqExpanded['eq-area::' + div + '::' + dist + '::' + area] = true;
+      });
+    });
+  });
+  renderEquipmentRecord();
+}
+
+function eqCollapseAll() {
+  _eqExpanded = {};
+  renderEquipmentRecord();
+}
+
+function eqToggle(key) {
+  _eqExpanded[key] = !_eqExpanded[key];
+  _eqBranchReg = [];
+  const tree = _buildEquipTree();
+  _renderEquipTree(tree);
+}
+
+function _renderEquipTree(tree) {
+  const container = document.getElementById('equipTree');
+  if (!container) return;
+
+  const divKeys = Object.keys(tree).sort();
+
+  // Summary counts
+  let totalAssets = 0, totalBranches = 0;
+  divKeys.forEach(div =>
+    Object.keys(tree[div]).forEach(dist =>
+      Object.keys(tree[div][dist]).forEach(area => {
+        const bs = Object.keys(tree[div][dist][area]);
+        totalBranches += bs.length;
+        bs.forEach(b => totalAssets += tree[div][dist][area][b].length);
+      })
+    )
+  );
+
+  const summEl = document.getElementById('equipSummary');
+  if (summEl) {
+    summEl.innerHTML = divKeys.length
+      ? `<div class="pool-pill pool-pill-accent">${totalAssets} Assets</div>
+         <div class="pool-pill">${totalBranches} Branch(es)</div>
+         <div class="pool-pill">${divKeys.length} Division(s)</div>`
+      : '';
+  }
+
+  if (!divKeys.length) {
+    container.innerHTML = `<div class="st-empty">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
+           style="margin:0 auto 12px;display:block;color:var(--text3)">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+      </svg>
+      No equipment records found${_eqSearchQ ? ' matching your search' : ' in your scope'}.
+    </div>`;
+    return;
+  }
+
+  let html = '<div class="st-tree">';
+  divKeys.forEach(div => html += _renderEquipDivNode(div, tree[div]));
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function _renderEquipDivNode(div, distTree) {
+  const key     = 'eq-div::' + div;
+  const isOpen  = !!_eqExpanded[key];
+  const distKeys = Object.keys(distTree).sort();
+  let assetCount = 0;
+  distKeys.forEach(dist =>
+    Object.keys(distTree[dist]).forEach(area =>
+      Object.keys(distTree[dist][area]).forEach(b =>
+        assetCount += distTree[dist][area][b].length)));
+
+  let html = `
+    <div class="st-node st-div">
+      <div class="st-row" data-eqkey="${esc(key)}" onclick="eqToggle(this.getAttribute('data-eqkey'))">
+        <span class="st-chevron ${isOpen?'open':''}">›</span>
+        <span class="st-icon">🏢</span>
+        <span class="st-label">${esc(div)}</span>
+        <span class="st-meta">${distKeys.length} district(s) · ${assetCount} assets</span>
+      </div>`;
+  if (isOpen) {
+    html += '<div class="st-children">';
+    distKeys.forEach(dist => html += _renderEquipDistNode(div, dist, distTree[dist]));
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEquipDistNode(div, dist, areaTree) {
+  const key     = 'eq-dist::' + div + '::' + dist;
+  const isOpen  = !!_eqExpanded[key];
+  const areaKeys = Object.keys(areaTree).sort();
+  let assetCount = 0;
+  areaKeys.forEach(area =>
+    Object.keys(areaTree[area]).forEach(b =>
+      assetCount += areaTree[area][b].length));
+
+  let html = `
+    <div class="st-node st-dist">
+      <div class="st-row" data-eqkey="${esc(key)}" onclick="eqToggle(this.getAttribute('data-eqkey'))">
+        <span class="st-chevron ${isOpen?'open':''}">›</span>
+        <span class="st-icon">📍</span>
+        <span class="st-label">${esc(dist)}</span>
+        <span class="st-meta">${areaKeys.length} area(s) · ${assetCount} assets</span>
+      </div>`;
+  if (isOpen) {
+    html += '<div class="st-children">';
+    areaKeys.forEach(area => html += _renderEquipAreaNode(div, dist, area, areaTree[area]));
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEquipAreaNode(div, dist, area, branchTree) {
+  const key       = 'eq-area::' + div + '::' + dist + '::' + area;
+  const isOpen    = !!_eqExpanded[key];
+  const branchKeys = Object.keys(branchTree).sort();
+  let assetCount = 0;
+  branchKeys.forEach(b => assetCount += branchTree[b].length);
+  const areaLabel = area === '(No Area)'
+    ? '<em style="opacity:.6">No Area</em>' : esc(area);
+
+  let html = `
+    <div class="st-node st-area">
+      <div class="st-row" data-eqkey="${esc(key)}" onclick="eqToggle(this.getAttribute('data-eqkey'))">
+        <span class="st-chevron ${isOpen?'open':''}">›</span>
+        <span class="st-icon">📁</span>
+        <span class="st-label">${areaLabel}</span>
+        <span class="st-meta">${branchKeys.length} branch(es) · ${assetCount} assets</span>
+      </div>`;
+  if (isOpen) {
+    html += '<div class="st-children">';
+    branchKeys.forEach(branch => html += _renderEquipBranchNode(div, dist, area, branch, branchTree[branch]));
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEquipBranchNode(div, dist, area, branch, assets) {
+  const idx = _eqBranchReg.length;
+  _eqBranchReg.push({ div, dist, area, branch, assets });
+
+  const typeCounts = {};
+  assets.forEach(a => { if (a.Type) typeCounts[a.Type] = (typeCounts[a.Type]||0)+1; });
+
+  const chips = Object.entries(typeCounts)
+    .map(([t,c]) => `<span class="st-type-chip">${esc(t)} <strong>${c}</strong></span>`)
+    .join('');
+
+  const allocated = assets.filter(a => ['allocated','transfer'].includes(a.status)).length;
+  const spare     = assets.filter(a => a.status === 'spare').length;
+  const borrowed  = assets.filter(a => a.status === 'borrowed').length;
+
+  const branchLabel = branch === '(No Branch)'
+    ? '<em style="opacity:.6">No Branch</em>' : esc(branch);
+
+  return `
+    <div class="st-node st-emp" style="margin-left:28px">
+      <div class="st-row" style="cursor:default;gap:10px">
+        <span class="st-icon">🏬</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:.88rem;color:var(--text)">${branchLabel}</div>
+          <div style="display:flex;gap:5px;margin-top:4px;flex-wrap:wrap;align-items:center">
+            ${allocated ? `<span class="badge badge-allocated" style="font-size:.65rem;padding:1px 6px">${allocated} allocated</span>` : ''}
+            ${spare     ? `<span class="badge badge-spare"     style="font-size:.65rem;padding:1px 6px">${spare} spare</span>` : ''}
+            ${borrowed  ? `<span class="badge badge-borrowed"  style="font-size:.65rem;padding:1px 6px">${borrowed} on borrow</span>` : ''}
+          </div>
+        </div>
+        <div class="st-type-chips" style="flex:0 1 auto">${chips}</div>
+        <button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal(${idx})"
+                style="flex-shrink:0;gap:5px">
+          ${_ICO.view} View ${assets.length}
+        </button>
+      </div>
+    </div>`;
+}
+
+function openEquipBranchModal(idx) {
+  const rec = _eqBranchReg[idx];
+  if (!rec) return;
+
+  const title    = rec.branch === '(No Branch)' ? 'Assets (No Branch)' : rec.branch;
+  const subtitle = [rec.div, rec.dist, rec.area]
+    .filter(x => x && !x.startsWith('(No')).join(' › ');
+  document.getElementById('eqModalTitle').textContent    = title;
+  document.getElementById('eqModalSubtitle').textContent = subtitle;
+
+  const lcBadge = {
+    Active:'spare', Allocated:'allocated', Transfer:'transfer',
+    Borrow:'borrowed', Returned:'returned', Dispose:'disposal', BorrowItem:'borrow-item'
+  };
+  const tbody = document.getElementById('eqModalBody');
+  if (!tbody) return;
+
+  const sorted = [...rec.assets].sort((a,b) =>
+    (a.Type||'').localeCompare(b.Type||'') || (a.Staff||'').localeCompare(b.Staff||''));
+
+  tbody.innerHTML = sorted.map(a => {
+    const lc = a.Lifecycle || 'Active';
+    return `<tr>
+      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td><span class="type-tag">${esc(a.Type)}</span></td>
+      <td>${esc(a.Brand)||'—'}</td>
+      <td class="mono-sm">${esc(a.Serial)||'—'}</td>
+      <td><span class="cond-${(a.Condition||'good').toLowerCase()}">${esc(a.Condition)}</span></td>
+      <td><span class="badge badge-${lcBadge[lc]||'spare'}" style="font-size:.7rem">${esc(lc)}</span></td>
+      <td>
+        ${a.Staff && a.Staff !== 'Unassigned'
+          ? `<div style="font-weight:600;font-size:.82rem">${esc(a.Staff)}</div>
+             <div style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--text3)">${esc(a.EmpID||'')}</div>`
+          : '<span style="color:var(--text3);font-size:.78rem">—</span>'}
+      </td>
+      <td>
+        <button class="btn btn-icon btn-secondary" data-tip="Details"
+          onclick="closeModal('equipmentBranchModal');viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="tbl-empty">No assets</td></tr>';
+
+  openModal('equipmentBranchModal');
+}
+
+// ═══════════════════════════════════════
+//  MOVE STAFF MODULE
+// ═══════════════════════════════════════
+
+function openMoveStaffModal(empId) {
+  _moveStaffEmpId = empId;
+
+  // Get current info from allocated assets
+  const empAssets = _filterByScope(
+    ASSETS.filter(a => a.EmpID &&
+      a.EmpID.toLowerCase() === empId.toLowerCase() &&
+      ['allocated','transfer'].includes(a.status))
+  );
+  const sample    = empAssets[0];
+  const name      = sample?.Staff || empId;
+  const curDiv    = sample?.Division    || '';
+  const curDist   = sample?.District   || '';
+  const curBranch = sample?.Branch     || '';
+
+  document.getElementById('msEmpName').textContent    = name;
+  document.getElementById('msEmpId').textContent      = empId;
+  document.getElementById('msDesig').textContent      = sample?.Designation || '—';
+  document.getElementById('msCurLoc').textContent     = [curDiv, curDist, curBranch].filter(Boolean).join(' › ') || '—';
+  document.getElementById('msAssetCount').textContent = empAssets.length + ' asset(s) currently allocated';
+
+  // Populate division dropdown
+  const divs  = ENG_LOCATION_DATA.userDivisions || [];
+  const msDiv = document.getElementById('msNewDiv');
+  if (msDiv) {
+    msDiv.innerHTML = '<option value="">Select Division…</option>' +
+      divs.map(d => `<option>${esc(d)}</option>`).join('');
+  }
+  const msDist = document.getElementById('msNewDist');
+  if (msDist) msDist.innerHTML = '<option value="">Select District…</option>';
+
+  document.getElementById('msNewArea').value   = '';
+  document.getElementById('msNewBranch').value = '';
+  document.getElementById('msActionMove').checked = true;
+
+  openModal('moveStaffModal');
+}
+
+function onMsDivChange() {
+  const selDiv  = (document.getElementById('msNewDiv')?.value || '').trim();
+  const distSel = document.getElementById('msNewDist');
+  if (!distSel) return;
+  const map     = ENG_LOCATION_DATA.divDistrictMap || {};
+  const userDists = ENG_LOCATION_DATA.userDistricts || [];
+
+  if (!selDiv) {
+    distSel.innerHTML = '<option value="">Select District…</option>' +
+      userDists.map(d => `<option>${esc(d)}</option>`).join('');
+    return;
+  }
+  const divDists = map[selDiv] || [];
+  const matched  = divDists.filter(d =>
+    userDists.some(ud => ud.toLowerCase() === d.toLowerCase()));
+  const allowed  = matched.length > 0 ? matched
+    : (divDists.length > 0 ? divDists : userDists);
+
+  distSel.innerHTML = '<option value="">Select District…</option>' +
+    allowed.map(d => `<option>${esc(d)}</option>`).join('');
+}
+
+function submitMoveStaff() {
+  const newDiv    = document.getElementById('msNewDiv')?.value    || '';
+  const newDist   = document.getElementById('msNewDist')?.value   || '';
+  const newArea   = document.getElementById('msNewArea')?.value   || '';
+  const newBranch = document.getElementById('msNewBranch')?.value || '';
+  const action    = document.getElementById('msActionMove')?.checked ? 'move' : 'spare';
+
+  if (!newDiv)  { toast('New Division is required.','warn');  return; }
+  if (!newDist) { toast('New District is required.','warn'); return; }
+
+  const btn = document.getElementById('msSubmitBtn');
+  if (btn) { btn.textContent = 'Processing…'; btn.disabled = true; }
+
+  google.script.run
+    .withSuccessHandler(r => {
+      if (btn) { btn.textContent = 'Confirm Move'; btn.disabled = false; }
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('moveStaffModal'); loadData(); }
+    })
+    .withFailureHandler(err => {
+      if (btn) { btn.textContent = 'Confirm Move'; btn.disabled = false; }
+      toast(err.message, 'err');
+    })
+    .moveStaff(_moveStaffEmpId, newDiv, newDist, newArea, newBranch, action);
+}
+
 // ── Hook into switchPage() ────────────────────────────────────────────────────
 (function () {
   const _origSwitch = switchPage;
   switchPage = function (p) {
     _origSwitch(p);
-    if (p === 'staff-assets') renderStaffAssets();
+    if (p === 'staff-assets')     renderStaffAssets();
+    if (p === 'equipment-record') renderEquipmentRecord();
   };
 })();
 
-// ── Hook into switchPage() ────────────────────────────────────────────────────
-// Wrap the existing switchPage so Staff Assets renders when navigated to.
-(function () {
-  const _origSwitch = switchPage;
-  switchPage = function (p) {
-    _origSwitch(p);
-    if (p === 'staff-assets') renderStaffAssets();
-  };
-})();
+
 </script>

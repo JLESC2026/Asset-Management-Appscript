@@ -461,6 +461,44 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .st-dist > .st-row .st-chevron.open { color: var(--accent2); }
 
 /* ── Asset cards wrapper ── */
+
+/* ── Inline employee row (Staff Assets tree) ── */
+/* 🔧 FIX-F: New classes used by the updated _renderEmpNode */
+.st-emp-inline > .st-emp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: default;
+  flex-wrap: wrap;
+}
+.st-emp-inline > .st-emp-row:hover {
+  background: var(--bg3);
+}
+.st-type-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+.st-type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: .7rem;
+  color: var(--text2);
+  white-space: nowrap;
+}
+.st-type-chip strong {
+  color: var(--text);
+  font-weight: 700;
+}
+/* 🔧 END FIX-F */
 .st-assets-wrap {
   padding: 8px 12px;
   display: flex;
@@ -518,4 +556,64 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
   font-size: .78rem;
   font-style: italic;
 }
+/* ═══════════════════════════════════════
+   STAFF ASSETS — INLINE EMPLOYEE ROW
+═══════════════════════════════════════ */
+ 
+.st-emp.st-emp-inline {
+  margin: 2px 10px 2px 28px;
+  border-radius: var(--radius2);
+  transition: border-color .15s, box-shadow .15s;
+}
+.st-emp.st-emp-inline:hover {
+  border-color: var(--border2);
+  box-shadow: 0 2px 8px rgba(27,45,79,.06);
+}
+.st-emp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  min-width: 0;
+}
+.st-type-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+}
+.st-type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: .69rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(59,130,246,.08);
+  border: 1px solid rgba(59,130,246,.2);
+  color: #60a5fa;
+  line-height: 1.5;
+}
+.st-type-chip strong {
+  font-weight: 700;
+  color: #93c5fd;
+}
+.st-type-chip.st-type-chip-more {
+  background: var(--bg3);
+  border-color: var(--border);
+  color: var(--text3);
+}
+ /* ── TYPE CHIPS (Feature 1 & Equipment Record) ── */
+.st-type-chip{background:rgba(124,106,247,.1);border:1px solid rgba(124,106,247,.22);color:var(--accent2);padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600;white-space:nowrap}
+.st-type-chips{display:flex;gap:4px;flex-wrap:wrap;align-items:center;flex:0 1 auto}
+
+/* ── Staff inline row (Feature 1) ── */
+.st-emp-inline .st-emp-row{display:flex;align-items:center;gap:10px;padding:9px 14px;width:100%}
+.st-emp-inline .st-emp-info{display:flex;flex-direction:column;gap:3px;min-width:0;flex:0 0 200px}
+
 </style>
