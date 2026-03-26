@@ -28,9 +28,6 @@ const SH_ALLOC    = 'Allocated';
 const AE_DATA_START = 4;
 
 // ─── COLUMN MAP (1-based) ────────────────────────────────────────────────────
-// NOTE (BUG-C02): The actual Asset Entry sheet must have exactly 56 columns.
-//   Column 56 header = 'Borrow District'.
-//   If it only has 55 columns, add column 56 manually — see MANUAL STEPS below.
 const C = {
   ENTRY_EMP_ID:1, ENTRY_NAME:2,
   EMP_ID:3, STAFF:4, DESIGNATION:5, DIVISION:6,
@@ -50,9 +47,6 @@ const C = {
 const TOTAL_COLS = Math.max(...Object.values(C)); // = 56
 
 // AE_HEADERS: 56 entries, one per column.
-// BUG-M01 note: These match correct English names. The existing sheet may have
-//   minor typos ('Assignement Status', 'Serial') — those are cosmetic and only
-//   matter if the sheet is ever recreated from scratch.
 const AE_HEADERS = [
   'Entry Employee ID','Entered By',
   'Accountable Employee ID','Accountable Staff','Designation','Division',
@@ -140,9 +134,6 @@ function _computeStatus(lc, slb, actReturn, empId, borName, assetStatus) {
   return 'spare';
 }
 
-// BUG-L05 FIX: normalisation helpers now also used on WRITE paths.
-// Previously _normDiv/_normDist were only called during getAllAssets() reads,
-// meaning saved values could be un-normalised and fail scope comparisons.
 function _normDiv(raw) {
   if (!raw) return '';
   const s = String(raw).trim();
@@ -189,9 +180,6 @@ function _isHashed(str) {
 //            Division-scoped: sees all districts in their supervised division.
 //   FE     — All other roles (Field Engineer, Network Engineer, etc.).
 //            District-scoped: sees only their own assigned district.
-//
-// There is no longer a separate admin tier. All users can add, allocate,
-// borrow, transfer, and dispose assets within their scope.
 
 function _classifyRole(roleStr) {
   const r = String(roleStr || '').trim().toLowerCase();
@@ -199,7 +187,7 @@ function _classifyRole(roleStr) {
   return 'fe';
 }
 
-// ─── SUPERVISOR DISTRICT LOOKUP (BUG-C03 FIX) ────────────────────────────────
+// ─── SUPERVISOR DISTRICT LOOKUP ────────────────────────────────
 // New function: returns all districts supervised by a given employee ID.
 // Queries Eng.List column 3 (supervisor ID column, 0-indexed = r[2]).
 // Used to build Senior scope in loginUser() — replaces the broken
@@ -270,9 +258,6 @@ function loginUser(empId, password) {
       const roleTier = _classifyRole(role);
       const locData  = getLocationData(id);
 
-      // BUG-H06 FIX: Prefer Eng.List division/district over Masterlist.
-      // Masterlist can be stale or miscategorised (e.g. Arsaga: ML=Div3, EL=Div8).
-      // Eng.List is the authoritative operational record.
       const division = locData.userDivisions.length > 0
         ? locData.userDivisions[0]
         : mlDivision;
@@ -280,9 +265,6 @@ function loginUser(empId, password) {
         ? locData.userDistricts[0]
         : mlDistrict;
 
-      // BUG-C03 FIX: Build Senior scope from supervisor relationship in Eng.List.
-      // Previously built from userDivisions which was always empty for Seniors
-      // (they appear in col 3 of Eng.List, not col 0).
       let seniorDistrictScope = [];
       if (roleTier === 'senior') {
         const supervisedDistricts = getDistrictsBySupervisor(id);
@@ -479,7 +461,7 @@ function processAsset(obj, isAssign) {
       const sm = STATUS_MAP[statusChoice] || STATUS_MAP['Spare'];
       const isSpare = statusChoice === 'Spare' || statusChoice === 'BorrowItem';
 
-      // BUG-L05 FIX: normalise on write so saved values are consistent
+
       const normDiv  = _normDiv(obj.division  || '');
       const normDist = _normDist(obj.district || '');
 

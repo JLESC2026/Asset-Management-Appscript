@@ -652,7 +652,7 @@ function renderAllocated(){
   const slice=data.slice((pages.allocated-1)*PAGE_SIZE, pages.allocated*PAGE_SIZE);
   const tbody=document.getElementById('tblAllocated');
   if(!tbody) return;
-  if(!data.length){ tbody.innerHTML='<tr><td colspan="14" class="tbl-empty">No allocated assets</td></tr>'; document.getElementById('pagerAllocated').innerHTML=''; return; }
+  if(!data.length){ tbody.innerHTML='<tr><td colspan="11" class="tbl-empty">No allocated assets</td></tr>'; document.getElementById('pagerAllocated').innerHTML=''; return; }
 
   tbody.innerHTML=slice.map(a=>{
     const isXfer=(a.Lifecycle||'').toLowerCase()==='transfer';
@@ -667,9 +667,7 @@ function renderAllocated(){
       </td>
       <td class="mono-sm">${esc(a.EmpID)||'—'}</td>
       <td style="font-size:.78rem;color:var(--text2)">${esc(a.Designation)||'—'}</td>
-      <td>${a.Division?`<span class="loc-pill lp-div">${esc(a.Division)}</span>`:'<span style="color:var(--text3)">—</span>'}</td>
-      <td>${a.District?`<span class="loc-pill lp-dist">${esc(a.District)}</span>`:'<span style="color:var(--text3)">—</span>'}</td>
-      <td>${a.Branch?`<span class="loc-pill lp-branch">${esc(a.Branch)}</span>`:'<span style="color:var(--text3)">—</span>'}</td>
+      <td style="max-width:240px">${renderLocPills(a.Division,a.District,a.Area,a.Branch)}</td>
       <td class="nowrap-sm">${fmtDate(a.EffDate)||'—'}</td>
       <td><span class="cond-${(a.Condition||'good').toLowerCase()}">${esc(a.Condition)}</span></td>
       <td>
@@ -1857,13 +1855,6 @@ function renderXferHistory(barcode){
 //  STAFF ASSETS MODULE  (v2 — Branch Level)
 //
 //  Hierarchy: Division → District → Area → Branch → Staff
-//
-//  WHY THIS WORKS WITHOUT AN EXTRA SHEET:
-//    Each asset row already stores the Branch it belongs to.
-//    So if an employee gets redeployed, their assets keep the old
-//    Branch until they are re-allocated with the new Branch.
-//    This gives an accurate "where are the assets?" view, not just
-//    "where is the employee today?".
 // ═══════════════════════════════════════
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -2189,9 +2180,7 @@ empIds.forEach(e => {
   return html;
 }
 
-// ── Employee node (inline row — no expand/collapse) ───────────────────────────
 // ── Employee node ─────────────────────────────────────────────────────────────
-// 🔧 FIX-A: Correct signature, registry push, and View button restored
 function _renderEmpNode(div, dist, area, branch, empId) {
   const emp = _stTree?.[div]?.[dist]?.[area]?.[branch]?.[empId];
   if (!emp) return '';
