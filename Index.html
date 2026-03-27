@@ -1077,6 +1077,53 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="moveOrgUnitModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div>
+        <h3 id="mouTitle">Move Unit</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="mouSubtitle">All assets will be updated</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('moveOrgUnitModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:18px">
+        <div style="font-size:.7rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Current Location</div>
+        <div id="mouCurrentLoc" style="font-size:.86rem;color:var(--text);font-weight:600">—</div>
+        <div id="mouAssetCount" style="font-size:.76rem;color:var(--yellow);margin-top:5px;font-weight:600"></div>
+      </div>
+      <div class="enroll-section-title">Move To</div>
+      <div class="form-grid">
+        <div class="field" id="mouDivField">
+          <label>New Division *</label>
+          <select id="mouNewDiv" onchange="onMouDivChange()"><option value="">Select Division…</option></select>
+        </div>
+        <div class="field" id="mouDistField" style="display:none">
+          <label>New District *</label>
+          <select id="mouNewDist"><option value="">Select District…</option></select>
+        </div>
+        <div class="field form-span2" id="mouAreaField" style="display:none">
+          <label>New Parent Area *</label>
+          <input type="text" id="mouNewArea" placeholder="Enter the target area name"/>
+        </div>
+      </div>
+      <div style="margin-top:14px;padding:8px 12px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:6px;font-size:.76rem;color:#60a5fa">
+        ℹ All assets under this <span id="mouUnitLabel">unit</span> — including all sub-levels — will move together.
+      </div>
+      <div style="margin-top:8px;padding:8px 12px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.18);border-radius:6px;font-size:.76rem;color:#f87171">
+        ⚠ Disposed assets will be skipped. All other lifecycle states (allocated, spare, borrowed) will be updated.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('moveOrgUnitModal')">Cancel</button>
+      <button class="btn btn-primary" id="mouSubmitBtn" onclick="submitMoveOrgUnit()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        Confirm Move
+      </button>
+    </div>
+  </div>
+</div>
+
 <?!= include('Javascript'); ?>
 </body>
 </html>

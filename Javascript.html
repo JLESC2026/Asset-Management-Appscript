@@ -28,6 +28,8 @@ let _eqExpanded      = {};
 let _eqBranchReg     = [];
 let _eqSearchQ       = '';
 let _moveStaffEmpId  = '';
+let _mouUnitType    = '';
+let _mouCurrentPath = { div:'', dist:'', area:'', branch:'' };
 let _empLookupTimer  = null;
 const PAGE_SIZE = 20;
 
@@ -2468,8 +2470,8 @@ function _renderEquipDivNode(div, distTree) {
 }
 
 function _renderEquipDistNode(div, dist, areaTree) {
-  const key     = 'eq-dist::' + div + '::' + dist;
-  const isOpen  = !!_eqExpanded[key];
+  const key      = 'eq-dist::' + div + '::' + dist;
+  const isOpen   = !!_eqExpanded[key];
   const areaKeys = Object.keys(areaTree).sort();
   let assetCount = 0;
   areaKeys.forEach(area =>
@@ -2483,6 +2485,9 @@ function _renderEquipDistNode(div, dist, areaTree) {
         <span class="st-icon">📍</span>
         <span class="st-label">${esc(dist)}</span>
         <span class="st-meta">${areaKeys.length} area(s) · ${assetCount} assets</span>
+        <button class="btn btn-icon btn-secondary" data-tip="Move District to another Division"
+                onclick="event.stopPropagation();openMoveOrgUnitModal('district','${esc(div)}','${esc(dist)}','','')"
+                style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">${_ICO.transfer}</button>
       </div>`;
   if (isOpen) {
     html += '<div class="st-children">';
@@ -2493,9 +2498,10 @@ function _renderEquipDistNode(div, dist, areaTree) {
   return html;
 }
 
+
 function _renderEquipAreaNode(div, dist, area, branchTree) {
-  const key       = 'eq-area::' + div + '::' + dist + '::' + area;
-  const isOpen    = !!_eqExpanded[key];
+  const key        = 'eq-area::' + div + '::' + dist + '::' + area;
+  const isOpen     = !!_eqExpanded[key];
   const branchKeys = Object.keys(branchTree).sort();
   let assetCount = 0;
   branchKeys.forEach(b => assetCount += branchTree[b].length);
@@ -2509,6 +2515,9 @@ function _renderEquipAreaNode(div, dist, area, branchTree) {
         <span class="st-icon">📁</span>
         <span class="st-label">${areaLabel}</span>
         <span class="st-meta">${branchKeys.length} branch(es) · ${assetCount} assets</span>
+        <button class="btn btn-icon btn-secondary" data-tip="Move Area to another District"
+                onclick="event.stopPropagation();openMoveOrgUnitModal('area','${esc(div)}','${esc(dist)}','${esc(area)}','')"
+                style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">${_ICO.transfer}</button>
       </div>`;
   if (isOpen) {
     html += '<div class="st-children">';
@@ -2519,21 +2528,19 @@ function _renderEquipAreaNode(div, dist, area, branchTree) {
   return html;
 }
 
+// ◆◆◆ MOVE-ORG-UNIT — REPLACE _renderEquipBranchNode ◆◆◆
 function _renderEquipBranchNode(div, dist, area, branch, assets) {
   const idx = _eqBranchReg.length;
   _eqBranchReg.push({ div, dist, area, branch, assets });
 
   const typeCounts = {};
   assets.forEach(a => { if (a.Type) typeCounts[a.Type] = (typeCounts[a.Type]||0)+1; });
-
   const chips = Object.entries(typeCounts)
     .map(([t,c]) => `<span class="st-type-chip">${esc(t)} <strong>${c}</strong></span>`)
     .join('');
-
   const allocated = assets.filter(a => ['allocated','transfer'].includes(a.status)).length;
   const spare     = assets.filter(a => a.status === 'spare').length;
   const borrowed  = assets.filter(a => a.status === 'borrowed').length;
-
   const branchLabel = branch === '(No Branch)'
     ? '<em style="opacity:.6">No Branch</em>' : esc(branch);
 
@@ -2550,6 +2557,9 @@ function _renderEquipBranchNode(div, dist, area, branch, assets) {
           </div>
         </div>
         <div class="st-type-chips" style="flex:0 1 auto">${chips}</div>
+        <button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area"
+                onclick="openMoveOrgUnitModal('branch','${esc(div)}','${esc(dist)}','${esc(area)}','${esc(branch)}')"
+                style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">${_ICO.transfer}</button>
         <button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal(${idx})"
                 style="flex-shrink:0;gap:5px">
           ${_ICO.view} View ${assets.length}
@@ -2702,6 +2712,91 @@ function submitMoveStaff() {
     if (p === 'equipment-record') renderEquipmentRecord();
   };
 })();
+
+function openMoveOrgUnitModal(unitType, div, dist, area, branch) {
+  _mouUnitType    = unitType;
+  _mouCurrentPath = { div, dist, area, branch };
+  const labels = { district:'District', area:'Area', branch:'Branch' };
+  const label  = labels[unitType] || unitType;
+  document.getElementById('mouTitle').textContent     = 'Move ' + label;
+  document.getElementById('mouUnitLabel').textContent = label.toLowerCase();
+  document.getElementById('mouSubtitle').textContent  =
+    `All assets under this ${label.toLowerCase()} will be updated`;
+
+  // Current location breadcrumb
+  const crumbs = [];
+  if (unitType === 'district') crumbs.push('Division: ' + div, 'District: ' + dist);
+  else if (unitType === 'area') crumbs.push('Division: ' + div, 'District: ' + dist, 'Area: ' + area);
+  else crumbs.push('Division: ' + div, 'District: ' + dist, 'Area: ' + area, 'Branch: ' + branch);
+  document.getElementById('mouCurrentLoc').textContent = crumbs.join(' › ');
+
+  // Count affected assets
+  const count = _filterByScope(ASSETS.filter(a => {
+    const aDiv = (a.Division||'').trim(), aDist = (a.District||'').trim();
+    const aArea = (a.Area||'').trim(), aBranch = (a.Branch||'').trim();
+    if (unitType === 'district') return aDist === dist && aDiv === div;
+    if (unitType === 'area')     return aArea === area && aDist === dist && aDiv === div;
+    return aBranch === branch && aArea === area && aDist === dist && aDiv === div;
+  })).length;
+  document.getElementById('mouAssetCount').textContent = count + ' asset(s) will be updated';
+
+  // Show/hide fields
+  document.getElementById('mouDistField').style.display = unitType === 'district' ? 'none' : '';
+  document.getElementById('mouAreaField').style.display  = unitType === 'branch'   ? ''     : 'none';
+
+  // Populate Division dropdown
+  const divs   = ENG_LOCATION_DATA.userDivisions || [];
+  const mouDiv = document.getElementById('mouNewDiv');
+  mouDiv.innerHTML = '<option value="">Select Division…</option>' +
+    divs.map(d => `<option>${esc(d)}</option>`).join('');
+  document.getElementById('mouNewDist').innerHTML = '<option value="">Select District…</option>';
+  document.getElementById('mouNewArea').value = '';
+  openModal('moveOrgUnitModal');
+}
+
+function onMouDivChange() {
+  const selDiv  = (document.getElementById('mouNewDiv')?.value || '').trim();
+  const distSel = document.getElementById('mouNewDist');
+  if (!distSel) return;
+  const map       = ENG_LOCATION_DATA.divDistrictMap || {};
+  const userDists = ENG_LOCATION_DATA.userDistricts  || [];
+  if (!selDiv) {
+    distSel.innerHTML = '<option value="">Select District…</option>' +
+      userDists.map(d => `<option>${esc(d)}</option>`).join('');
+    return;
+  }
+  const divDists = map[selDiv] || [];
+  const matched  = divDists.filter(d => userDists.some(ud => ud.toLowerCase() === d.toLowerCase()));
+  const allowed  = matched.length > 0 ? matched : (divDists.length > 0 ? divDists : userDists);
+  distSel.innerHTML = '<option value="">Select District…</option>' +
+    allowed.map(d => `<option>${esc(d)}</option>`).join('');
+}
+
+function submitMoveOrgUnit() {
+  const newDiv  = document.getElementById('mouNewDiv')?.value  || '';
+  const newDist = document.getElementById('mouNewDist')?.value || '';
+  const newArea = document.getElementById('mouNewArea')?.value || '';
+  if (!newDiv) { toast('New Division is required.', 'warn'); return; }
+  if (_mouUnitType !== 'district' && !newDist) { toast('New District is required.', 'warn'); return; }
+  if (_mouUnitType === 'branch'   && !newArea)  { toast('New Area is required.', 'warn');     return; }
+  const btn = document.getElementById('mouSubmitBtn');
+  if (btn) { btn.textContent = 'Processing…'; btn.disabled = true; }
+  google.script.run
+    .withSuccessHandler(r => {
+      if (btn) { btn.textContent = 'Confirm Move'; btn.disabled = false; }
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('moveOrgUnitModal'); loadData(); }
+    })
+    .withFailureHandler(err => {
+      if (btn) { btn.textContent = 'Confirm Move'; btn.disabled = false; }
+      toast(err.message, 'err');
+    })
+    .moveOrgUnit(
+      _mouUnitType,
+      _mouCurrentPath.div, _mouCurrentPath.dist, _mouCurrentPath.area, _mouCurrentPath.branch,
+      newDiv, newDist, newArea
+    );
+}
 
 
 </script>

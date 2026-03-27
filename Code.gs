@@ -1214,3 +1214,50 @@ function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
     return msg;
   } catch (e) { return 'Error: ' + e.message; }
 }
+
+function moveOrgUnit(unitType, currentDiv, currentDist, currentArea, currentBranch, newDiv, newDist, newArea) {
+  try {
+    const sh   = _entrySheet();
+    const last = sh.getLastRow();
+    if (last < AE_DATA_START) return 'Error: No assets found.';
+    const count  = last - AE_DATA_START + 1;
+    const data   = sh.getRange(AE_DATA_START, 1, count, TOTAL_COLS).getValues();
+    const nowStr = new Date().toLocaleString('en-PH');
+    const normCurDiv  = _normDiv(currentDiv   || '');
+    const normCurDist = _normDist(currentDist || '');
+    const normNewDiv  = _normDiv(newDiv   || '');
+    const normNewDist = _normDist(newDist || '');
+    let updated = 0;
+    data.forEach((row, i) => {
+      const rowDiv    = _normDiv(String(row[C.DIVISION  - 1] || '').trim());
+      const rowDist   = _normDist(String(row[C.DISTRICT - 1] || '').trim());
+      const rowArea   = String(row[C.AREA   - 1] || '').trim();
+      const rowBranch = String(row[C.BRANCH - 1] || '').trim();
+      const lc        = String(row[C.LIFECYCLE - 1] || '').toLowerCase();
+      if (lc === 'dispose' || lc === 'disposal') return;
+      const rowIdx = i + AE_DATA_START;
+      const updates = [];
+      if (unitType === 'district') {
+        if (rowDist === normCurDist && rowDiv === normCurDiv)
+          updates.push([C.DIVISION, normNewDiv]);
+      } else if (unitType === 'area') {
+        if (rowArea === currentArea && rowDist === normCurDist && rowDiv === normCurDiv)
+          updates.push([C.DIVISION, normNewDiv], [C.DISTRICT, normNewDist]);
+      } else if (unitType === 'branch') {
+        if (rowBranch === currentBranch && rowArea === currentArea &&
+            rowDist === normCurDist && rowDiv === normCurDiv)
+          updates.push([C.DIVISION, normNewDiv], [C.DISTRICT, normNewDist], [C.AREA, newArea || '']);
+      }
+      if (updates.length) {
+        updates.push([C.LAST_UPDATED, nowStr]);
+        updates.forEach(u => sh.getRange(rowIdx, u[0]).setValue(u[1]));
+        updated++;
+      }
+    });
+    _log('MOVE_ORG', unitType.toUpperCase(),
+      `${currentDiv}/${currentDist}/${currentArea}/${currentBranch} → ${newDiv}/${newDist}/${newArea} | ${updated} assets`, '');
+    return updated > 0
+      ? `${unitType.charAt(0).toUpperCase() + unitType.slice(1)} moved. ${updated} asset(s) updated.`
+      : 'Move recorded — no matching assets found (check filters or scope).';
+  } catch(e) { return 'Error: ' + e.message; }
+}
