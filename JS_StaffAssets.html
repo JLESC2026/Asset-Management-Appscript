@@ -1,0 +1,329 @@
+<script>
+// ═══════════════════════════════════════
+//  STAFF ASSETS MODULE  (Division → District → Area → Branch → Staff)
+// ═══════════════════════════════════════
+
+function renderStaffAssets() {
+  _stSearchQ = (document.getElementById('staffAssetsSearch')?.value || '').toLowerCase();
+  _stTree = _buildStaffTree();
+  _renderStaffTree();
+  _updateStaffBadge();
+}
+
+function onStaffAssetsSearch() {
+  _stSearchQ = (document.getElementById('staffAssetsSearch')?.value || '').toLowerCase();
+  _stTree = _buildStaffTree();
+  if (_stSearchQ) _stAutoExpand();
+  _renderStaffTree();
+}
+
+function _buildStaffTree() {
+  var base = _filterByScope(
+    ASSETS.filter(function(a){ return ['allocated','transfer'].indexOf(a.status) >= 0; })
+  );
+  var data = _stSearchQ
+    ? base.filter(function(a){
+        return [a.Staff,a.EmpID,a.Designation,a.Barcode,a.Type,a.Brand,a.Serial,a.Division,a.District,a.Area,a.Branch]
+          .some(function(v){ return (v||'').toLowerCase().includes(_stSearchQ); });
+      })
+    : base;
+
+  var tree = {};
+  data.forEach(function(a) {
+    var div    = a.Division    || '(No Division)';
+    var dist   = a.District    || '(No District)';
+    var area   = a.Area        || '(No Area)';
+    var branch = a.Branch      || '(No Branch)';
+    var empId  = a.EmpID       || 'UNKNOWN';
+    var staff  = a.Staff       || 'Unassigned';
+    var desig  = a.Designation || '';
+    if (!tree[div])                             tree[div]                            = {};
+    if (!tree[div][dist])                       tree[div][dist]                      = {};
+    if (!tree[div][dist][area])                 tree[div][dist][area]                = {};
+    if (!tree[div][dist][area][branch])         tree[div][dist][area][branch]        = {};
+    if (!tree[div][dist][area][branch][empId]) {
+      tree[div][dist][area][branch][empId] = {
+        name: staff, empId: empId, designation: desig,
+        division: div, district: dist, area: area, branch: branch,
+        assets: []
+      };
+    }
+    tree[div][dist][area][branch][empId].assets.push(a);
+  });
+  return tree;
+}
+
+function _stAutoExpand() {
+  Object.keys(_stTree).forEach(function(div) {
+    _stExpanded[div] = true;
+    Object.keys(_stTree[div]).forEach(function(dist) {
+      _stExpanded[div+'::'+dist] = true;
+      Object.keys(_stTree[div][dist]).forEach(function(area) {
+        _stExpanded[div+'::'+dist+'::'+area] = true;
+        Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
+          _stExpanded[div+'::'+dist+'::'+area+'::'+branch] = true;
+        });
+      });
+    });
+  });
+}
+
+function stExpandAll() {
+  Object.keys(_stTree).forEach(function(div) {
+    _stExpanded[div] = true;
+    Object.keys(_stTree[div]).forEach(function(dist) {
+      _stExpanded[div+'::'+dist] = true;
+      Object.keys(_stTree[div][dist]).forEach(function(area) {
+        _stExpanded[div+'::'+dist+'::'+area] = true;
+        Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
+          _stExpanded[div+'::'+dist+'::'+area+'::'+branch] = true;
+        });
+      });
+    });
+  });
+  _renderStaffTree();
+}
+
+function stCollapseAll() {
+  _stExpanded = {};
+  _renderStaffTree();
+}
+
+function stToggle(key) {
+  _stExpanded[key] = !_stExpanded[key];
+  _renderStaffTree();
+}
+
+function _updateStaffBadge() {
+  var total = _filterByScope(
+    ASSETS.filter(function(a){ return ['allocated','transfer'].indexOf(a.status) >= 0; })
+  ).length;
+  var el = document.getElementById('nbStaffAssets');
+  if (el) el.textContent = total;
+}
+
+function _renderStaffTree() {
+  _stEmpRegistry = [];
+  var container = document.getElementById('staffAssetsTree');
+  var divKeys = Object.keys(_stTree).sort();
+
+  var totalEmp = 0, totalAsset = 0;
+  divKeys.forEach(function(div) {
+    Object.keys(_stTree[div]).forEach(function(dist) {
+      Object.keys(_stTree[div][dist]).forEach(function(area) {
+        Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
+          var emps = Object.keys(_stTree[div][dist][area][branch]);
+          totalEmp += emps.length;
+          emps.forEach(function(e){ totalAsset += (_stTree[div][dist][area][branch][e].assets||[]).length; });
+        });
+      });
+    });
+  });
+
+  var summEl = document.getElementById('staffAssetsSummary');
+  if (summEl) {
+    summEl.innerHTML = divKeys.length
+      ? '<div class="pool-pill pool-pill-blue">'+totalAsset+' Assets</div>'
+        +'<div class="pool-pill">'+totalEmp+' Staff Members</div>'
+        +'<div class="pool-pill">'+divKeys.length+' Division(s)</div>'
+      : '';
+  }
+
+  if (!divKeys.length) {
+    container.innerHTML = '<div class="st-empty">'
+      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
+      +'No allocated assets found'+((_stSearchQ)?' matching your search':' in your scope')+'.'
+      +'</div>';
+    return;
+  }
+
+  var html = '<div class="st-tree">';
+  divKeys.forEach(function(div){ html += _renderStaffDivNode(div); });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function _renderStaffDivNode(div) {
+  var key = div;
+  var isOpen = !!_stExpanded[key];
+  var distKeys = Object.keys(_stTree[div]).sort();
+  var assetCount = 0, empCount = 0;
+  distKeys.forEach(function(dist) {
+    Object.keys(_stTree[div][dist]).forEach(function(area) {
+      Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
+        var emps = Object.keys(_stTree[div][dist][area][branch]);
+        empCount += emps.length;
+        emps.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
+      });
+    });
+  });
+  var html = '<div class="st-node st-div">'
+    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">🏢</span>'
+    +'<span class="st-label">'+esc(div)+'</span>'
+    +'<span class="st-meta">'+empCount+' staff · '+assetCount+' assets</span>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    distKeys.forEach(function(dist){ html += _renderStaffDistNode(div, dist); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderStaffDistNode(div, dist) {
+  var key = div+'::'+dist;
+  var isOpen = !!_stExpanded[key];
+  var areaKeys = Object.keys(_stTree[div][dist]).sort();
+  var assetCount = 0, empCount = 0;
+  areaKeys.forEach(function(area) {
+    Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
+      var emps = Object.keys(_stTree[div][dist][area][branch]);
+      empCount += emps.length;
+      emps.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
+    });
+  });
+  var html = '<div class="st-node st-dist">'
+    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">📍</span>'
+    +'<span class="st-label">'+esc(dist)+'</span>'
+    +'<span class="st-meta">'+empCount+' staff · '+assetCount+' assets</span>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    areaKeys.forEach(function(area){ html += _renderStaffAreaNode(div, dist, area); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderStaffAreaNode(div, dist, area) {
+  var key = div+'::'+dist+'::'+area;
+  var isOpen = !!_stExpanded[key];
+  var branchKeys = Object.keys(_stTree[div][dist][area]).sort();
+  var assetCount = 0, empCount = 0;
+  branchKeys.forEach(function(branch) {
+    var emps = Object.keys(_stTree[div][dist][area][branch]);
+    empCount += emps.length;
+    emps.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
+  });
+  var areaLabel = area === '(No Area)' ? '<em style="opacity:.6">No Area</em>' : esc(area);
+  var html = '<div class="st-node st-area">'
+    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">📁</span>'
+    +'<span class="st-label">'+areaLabel+'</span>'
+    +'<span class="st-meta">'+empCount+' staff · '+assetCount+' assets</span>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    branchKeys.forEach(function(branch){ html += _renderStaffBranchNode(div, dist, area, branch); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderStaffBranchNode(div, dist, area, branch) {
+  var key = div+'::'+dist+'::'+area+'::'+branch;
+  var isOpen = !!_stExpanded[key];
+  var empIds = Object.keys(_stTree[div][dist][area][branch]).sort(function(a,b){
+    var na = _stTree[div][dist][area][branch][a].name;
+    var nb = _stTree[div][dist][area][branch][b].name;
+    return na.localeCompare(nb);
+  });
+  var assetCount = 0;
+  empIds.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
+  var branchLabel = branch === '(No Branch)' ? '<em style="opacity:.6">No Branch</em>' : esc(branch);
+  var html = '<div class="st-node st-branch">'
+    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">🏬</span>'
+    +'<span class="st-label">'+branchLabel+'</span>'
+    +'<span class="st-meta">'+empIds.length+' staff · '+assetCount+' assets</span>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    empIds.forEach(function(empId){ html += _renderEmpNode(div, dist, area, branch, empId); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEmpNode(div, dist, area, branch, empId) {
+  var emp = _stTree?.[div]?.[dist]?.[area]?.[branch]?.[empId];
+  if (!emp) return '';
+  var idx = _stEmpRegistry.length;
+  _stEmpRegistry.push({ div:div, dist:dist, area:area, branch:branch, empId:empId });
+  var typeCounts = {};
+  (emp.assets||[]).forEach(function(a){ if(a&&a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  var chips = Object.entries(typeCounts)
+    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
+    .join('');
+  return '<div class="st-node st-emp st-emp-inline">'
+    +'<div class="st-emp-row">'
+    +'<div style="display:flex;gap:4px;flex-shrink:0">'
+    +'<button class="btn btn-icon btn-secondary" data-tip="Move Staff" onclick="openMoveStaffModal(\''+esc(empId)+'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3)">'
+    +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>'
+    +'</button>'
+    +'<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal('+idx+')">'
+    +_ICO.view+'</button>'
+    +'</div>'
+    +'<span class="st-icon">👤</span>'
+    +'<div class="st-emp-info">'
+    +'<span class="st-label">'+esc(emp.name||'Unknown')+'</span>'
+    +'<span class="st-emp-sub">'
+    +'<span class="mono-sm" style="font-size:.7rem">'+esc(empId)+'</span>'
+    +(emp.designation?'<span style="color:var(--text3)">·</span><span style="font-size:.72rem;color:var(--text2)">'+esc(emp.designation)+'</span>':'')
+    +'</span>'
+    +'</div>'
+    +'<div class="st-type-chips">'+(chips||'<span style="color:var(--text3);font-size:.76rem">—</span>')+'</div>'
+    +'</div>'
+    +'</div>';
+}
+
+function openStaffAssetModal(idx) {
+  var reg = _stEmpRegistry[idx];
+  if (!reg) { toast('Staff data not found.','err'); return; }
+  var emp = _stTree[reg.div]?.[reg.dist]?.[reg.area]?.[reg.branch]?.[reg.empId];
+  if (!emp) { toast('Staff data not found.','err'); return; }
+  var assets = emp.assets||[];
+
+  document.getElementById('samStaffName').textContent  = emp.name       || '—';
+  document.getElementById('samStaffId').textContent    = reg.empId      || '—';
+  document.getElementById('samStaffDesig').textContent = emp.designation || '—';
+  var pd = document.getElementById('samPillDiv');
+  var ps = document.getElementById('samPillDist');
+  var pb = document.getElementById('samPillBranch');
+  var pc = document.getElementById('samStaffCount');
+  if(pd) pd.textContent = (reg.div    !== '(No Division)')  ? reg.div    : '—';
+  if(ps) ps.textContent = (reg.dist   !== '(No District)')  ? reg.dist   : '—';
+  if(pb) pb.textContent = (reg.branch !== '(No Branch)')    ? reg.branch : '—';
+  if(pc) pc.textContent = assets.length+' asset'+(assets.length!==1?'s':'');
+
+  var tbody = document.getElementById('samAssetRows');
+  if (!tbody) { openModal('staffAssetModal'); return; }
+  var lcBadge = {Active:'spare',Allocated:'allocated',Transfer:'transfer',Borrow:'borrowed',Returned:'returned',Dispose:'disposal',BorrowItem:'borrow-item'};
+  tbody.innerHTML = assets.length
+    ? assets.map(function(a){
+        var lc=a.Lifecycle||'Active';
+        return '<tr>'
+          +'<td><span class="mono-bc">'+esc(a.Barcode)+'</span></td>'
+          +'<td><span class="type-tag">'+esc(a.Type)+'</span></td>'
+          +'<td style="font-weight:600">'+(esc(a.Brand)||'—')+'</td>'
+          +'<td class="mono-sm">'+(esc(a.Serial)||'—')+'</td>'
+          +'<td><span class="cond-'+(a.Condition||'good').toLowerCase()+'">'+(esc(a.Condition)||'—')+'</span></td>'
+          +'<td class="nowrap-sm">'+(fmtDate(a.EffDate)||'—')+'</td>'
+          +'<td><button class="btn btn-secondary btn-sm" style="gap:5px;padding:5px 10px" onclick="closeModal(\'staffAssetModal\');viewAsset(\''+esc(a.Barcode)+'\')">'+_ICO.view+' View</button></td>'
+          +'</tr>';
+      }).join('')
+    : '<tr><td colspan="7" class="tbl-empty">No assets assigned to this staff member</td></tr>';
+
+  openModal('staffAssetModal');
+}
+</script>

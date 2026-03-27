@@ -1,0 +1,77 @@
+<script>
+// ═══════════════════════════════════════
+//  JS_Records.html — Transfers & Activity Log
+// ═══════════════════════════════════════
+
+// ── Transfer Table ────────────────────────────────────────────────────────────
+function renderTransferTable() {
+  const tbody = document.getElementById('tblTransfers');
+  if (!tbody) return;
+
+  const scopedBarcodes = new Set(_filterByScope(ASSETS).map(a => a.Barcode));
+  let data = [...XFERS].filter(r => scopedBarcodes.has(String(r[0]))).reverse();
+
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="tbl-empty">No transfer records</td></tr>';
+    const pg = document.getElementById('pagerTransfers'); if (pg) pg.innerHTML = '';
+    return;
+  }
+
+  if (!pages.xfers) pages.xfers = 1;
+  const totalPages = Math.ceil(data.length / PAGE_SIZE) || 1;
+  if (pages.xfers > totalPages) pages.xfers = totalPages;
+  const slice = data.slice((pages.xfers - 1) * PAGE_SIZE, pages.xfers * PAGE_SIZE);
+
+  tbody.innerHTML = slice.map(r => {
+    const asset = ASSETS.find(a => a.Barcode === r[0]);
+    return `<tr>
+      <td><span class="mono-bc">${esc(r[0])}</span></td>
+      <td><span class="type-tag">${esc(asset?.Type || '—')}</span></td>
+      <td>
+        <div style="font-weight:600">${esc(r[2]) || '—'}</div>
+        <div style="font-size:.72rem;color:var(--text3)">${r[3] ? 'ID: ' + esc(r[3]) : ''}</div>
+      </td>
+      <td>
+        <div style="font-weight:600;color:#60a5fa">${esc(r[10]) || '—'}</div>
+        <div style="font-size:.72rem;color:var(--text3)">${r[11] ? 'ID: ' + esc(r[11]) : ''}</div>
+      </td>
+      <td><span class="badge badge-transfer">${esc(r[1]) || '—'}</span></td>
+      <td class="nowrap-sm">${fmtDate(r[18]) || '—'}</td>
+      <td><span class="badge badge-${r[19] === 'Completed' ? 'returned' : 'transfer'}">${esc(r[19] || 'Pending')}</span></td>
+      <td style="font-size:.74rem;color:var(--text3)">${esc(r[20]) || ''}</td>
+    </tr>`;
+  }).join('');
+
+  renderPager('pagerTransfers', 'xfers', totalPages, pages.xfers);
+}
+
+// ── Activity Log Table ────────────────────────────────────────────────────────
+function renderActivityTable() {
+  const tbody = document.getElementById('tblActivity');
+  if (!tbody) return;
+
+  const scopedBarcodes = new Set(_filterByScope(ASSETS).map(a => a.Barcode));
+  const logs = LOGS.filter(l => l.barcode && scopedBarcodes.has(l.barcode));
+
+  if (!logs.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="tbl-empty">No activity yet</td></tr>';
+    return;
+  }
+
+  const colors = {
+    CREATE:     'var(--green)',  ALLOCATE:   'var(--blue)',
+    ASSIGN:     'var(--blue)',   TRANSFER:   'var(--cyan)',
+    BORROW:     'var(--yellow)', RETURN:     'var(--green)',
+    DISPOSE:    'var(--red)',    DELETE:     'var(--red)',
+    DEALLOCATE: 'var(--orange)'
+  };
+
+  tbody.innerHTML = logs.map(l => `<tr>
+    <td class="nowrap-sm" style="color:var(--text3)">${esc(l.timestamp)}</td>
+    <td><span class="badge" style="background:${colors[l.action] || 'var(--accent)'}22;color:${colors[l.action] || 'var(--accent)'}">${esc(l.action)}</span></td>
+    <td><span class="mono-bc">${esc(l.barcode)}</span></td>
+    <td style="color:var(--text2)">${esc(l.details)}</td>
+    <td style="font-size:.76rem;color:var(--text3);font-family:'JetBrains Mono',monospace">${esc(l.performer || '—')}</td>
+  </tr>`).join('');
+}
+</script>

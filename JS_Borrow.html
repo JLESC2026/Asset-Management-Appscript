@@ -1,0 +1,175 @@
+<script>
+// ═══════════════════════════════════════
+//  JS_Borrow.html — Borrow Management
+// ═══════════════════════════════════════
+
+function switchBorrowTab(tab) {
+  borrowTab = tab;
+  ['active', 'pool', 'history'].forEach(t => {
+    document.getElementById('btab-' + t)?.classList.toggle('active', t === tab);
+    const pane = document.getElementById('borrowPane-' + t);
+    if (pane) pane.style.display = t === tab ? 'block' : 'none';
+  });
+  if (tab === 'active')       renderActiveBorrows();
+  else if (tab === 'pool')    renderBorrowPool();
+  else                        renderBorrowHistory();
+}
+
+// ── Active Borrows ────────────────────────────────────────────────────────────
+function renderActiveBorrows() {
+  _resetTblSel('activeBorrow');
+  const q   = (document.getElementById('activeBorrowSearch')?.value || '').toLowerCase();
+  let data  = _filterByScope(ASSETS.filter(a => a.status === 'borrowed'));
+  if (q) data = data.filter(a =>
+    [a.Barcode, a.BorName, a.BorEmpID, a.Brand, a.Type].some(v => (v || '').toLowerCase().includes(q))
+  );
+
+  // Overdue warning
+  const overdues = data.filter(a => { const d = daysUntil(a.ExpReturn); return d !== null && d < 0; });
+  const warnEl   = document.getElementById('overdueWarn');
+  if (warnEl) {
+    if (overdues.length) {
+      warnEl.style.display = 'block';
+      warnEl.textContent   = `⚠ ${overdues.length} borrow(s) overdue!`;
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
+
+  if (!pages.activeBorrow) pages.activeBorrow = 1;
+  const totalPages = Math.ceil(data.length / PAGE_SIZE) || 1;
+  if (pages.activeBorrow > totalPages) pages.activeBorrow = totalPages;
+  const slice = data.slice((pages.activeBorrow - 1) * PAGE_SIZE, pages.activeBorrow * PAGE_SIZE);
+
+  const tbody = document.getElementById('tblActiveBorrow');
+  if (!tbody) return;
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="tbl-empty">No active borrows</td></tr>';
+    document.getElementById('pagerActiveBorrow').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = slice.map(a => {
+    const days   = daysUntil(a.ExpReturn);
+    const overdue = days !== null && days < 0;
+    const daysLabel = days === null ? '—'
+      : overdue   ? `<span style="color:var(--red);font-weight:700">Overdue ${Math.abs(days)}d</span>`
+      : days === 0 ? '<span style="color:var(--yellow)">Due today</span>'
+      : `<span style="color:var(--green)">${days}d left</span>`;
+
+    return `<tr ${overdue ? 'style="background:rgba(239,68,68,.035)"' : ''}>
+      <td><input type="checkbox" class="cb cb-activeBorrow" value="${esc(a.Barcode)}" onclick="checkSelTable('activeBorrow')"/></td>
+      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td><span class="type-tag">${esc(a.Type)}</span></td>
+      <td>${esc(a.Brand) || '—'}</td>
+      <td>
+        <div style="font-weight:600">${esc(a.BorName) || '—'}</div>
+        <div style="font-size:.72rem;color:var(--text3)">${esc(a.BorDesig || a.Designation) || ''}</div>
+      </td>
+      <td class="mono-sm">${esc(a.BorEmpID) || '—'}</td>
+      <td>${(a.BorDiv || a.Division) ? `<span class="loc-pill lp-div">${esc(a.BorDiv || a.Division)}</span>` : '<span style="color:var(--text3)">—</span>'}</td>
+      <td>${(a.BorBranch || a.Branch) ? `<span class="loc-pill lp-branch">${esc(a.BorBranch || a.Branch)}</span>` : '<span style="color:var(--text3)">—</span>'}</td>
+      <td class="nowrap-sm">${fmtDate(a.BorDate) || '—'}</td>
+      <td class="nowrap-sm" ${overdue ? 'style="color:var(--red)"' : ''}>${fmtDate(a.ExpReturn) || '—'}</td>
+      <td>${daysLabel}</td>
+      <td><button class="btn btn-success btn-sm" onclick="openReturnModal('${esc(a.Barcode)}','${esc(a.BorName || '')}')">Return</button></td>
+    </tr>`;
+  }).join('');
+
+  renderPager('pagerActiveBorrow', 'activeBorrow', totalPages, pages.activeBorrow);
+}
+
+// ── Borrow Pool ───────────────────────────────────────────────────────────────
+function renderBorrowPool() {
+  let data = _filterByScope(ASSETS.filter(a => a.status === 'borrow-item'));
+
+  if (!pages.borrowPool) pages.borrowPool = 1;
+  const totalPages = Math.ceil(data.length / PAGE_SIZE) || 1;
+  if (pages.borrowPool > totalPages) pages.borrowPool = totalPages;
+  const slice = data.slice((pages.borrowPool - 1) * PAGE_SIZE, pages.borrowPool * PAGE_SIZE);
+
+  const tbody = document.getElementById('tblBorrowPool');
+  if (!tbody) return;
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="tbl-empty">No borrow pool assets</td></tr>';
+    document.getElementById('pagerBorrowPool').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = slice.map(a => {
+    const isBorrowed = (a.Lifecycle || '').toLowerCase() === 'borrow';
+    return `<tr>
+      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td><span class="type-tag">${esc(a.Type)}</span></td>
+      <td>${esc(a.Brand) || '—'}</td>
+      <td class="mono-sm">${esc(a.Serial) || '—'}</td>
+      <td><span class="cond-${(a.Condition || 'good').toLowerCase()}">${esc(a.Condition)}</span></td>
+      <td><span class="badge badge-${isBorrowed ? 'borrowed' : 'borrow-item'}">${isBorrowed ? 'Out on Borrow' : 'Available'}</span></td>
+      <td>
+        <div style="display:flex;gap:5px">
+          ${!isBorrowed
+            ? `<button class="btn btn-sm btn-borrow" onclick="openBorrowModal('${esc(a.Barcode)}')">Borrow</button>`
+            : `<button class="btn btn-success btn-sm" onclick="openReturnModal('${esc(a.Barcode)}','${esc(a.BorName || '')}')">Return</button>`}
+          <button class="btn btn-secondary btn-sm" onclick="viewAsset('${esc(a.Barcode)}')">View</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  renderPager('pagerBorrowPool', 'borrowPool', totalPages, pages.borrowPool);
+}
+
+// ── Borrow History ────────────────────────────────────────────────────────────
+function renderBorrowHistory() {
+  const q   = (document.getElementById('borrowHistSearch')?.value || '').toLowerCase();
+  const fSt = document.getElementById('borrowHistStatus')?.value  || '';
+
+  const scopedBarcodes = new Set(_filterByScope(ASSETS).map(a => a.Barcode));
+  let data = [...BORROWS].reverse().filter(b => scopedBarcodes.has(b.barcode));
+
+  if (q)   data = data.filter(b => [b.barcode, b.borrowerName, b.empId, b.branch, b.district].some(v => (v || '').toLowerCase().includes(q)));
+  if (fSt) data = data.filter(b => b.status === fSt);
+
+  if (!pages.borrowHist) pages.borrowHist = 1;
+  const totalPages = Math.ceil(data.length / PAGE_SIZE) || 1;
+  if (pages.borrowHist > totalPages) pages.borrowHist = totalPages;
+  const slice = data.slice((pages.borrowHist - 1) * PAGE_SIZE, pages.borrowHist * PAGE_SIZE);
+
+  const tbody = document.getElementById('tblBorrowHistory');
+  if (!tbody) return;
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">No borrow history</td></tr>';
+    document.getElementById('pagerBorrowHistory').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = slice.map(b => {
+    const asset      = ASSETS.find(a => a.Barcode === b.barcode);
+    const assetLabel = asset
+      ? `${esc(asset.Type || '')}${asset.Brand ? ' – ' + esc(asset.Brand) : ''}`
+      : esc(b.barcode);
+    const isRet = b.status === 'Returned';
+
+    return `<tr>
+      <td><span class="mono-bc">${esc(b.barcode)}</span></td>
+      <td style="font-size:.8rem">${assetLabel}</td>
+      <td>
+        <div style="font-weight:600">${esc(b.borrowerName)}</div>
+        <div style="font-size:.7rem;color:var(--text3)">${esc(b.designation) || ''}</div>
+      </td>
+      <td class="mono-sm">${esc(b.empId) || '—'}</td>
+      <td class="nowrap-sm">${fmtDate(b.borrowDate)     || '—'}</td>
+      <td class="nowrap-sm">${fmtDate(b.expectedReturn) || '—'}</td>
+      <td class="nowrap-sm">${fmtDate(b.actualReturn)   || '—'}</td>
+      <td><span class="badge badge-${isRet ? 'returned' : 'borrowed'}">${isRet ? 'Returned' : 'Active'}</span></td>
+      <td>
+        ${!isRet
+          ? `<button class="btn btn-success btn-sm" onclick="openReturnModal('${esc(b.barcode)}','${esc(b.borrowerName)}')">Return</button>`
+          : '<span style="color:var(--text3);font-size:.76rem">Done</span>'}
+      </td>
+    </tr>`;
+  }).join('');
+
+  renderPager('pagerBorrowHistory', 'borrowHist', totalPages, pages.borrowHist);
+}
+</script>

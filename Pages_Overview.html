@@ -1,0 +1,109 @@
+<!-- ══ DASHBOARD ══ -->
+<div class="page active" id="page-dashboard">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h2 style="font-size:1.4rem;font-weight:700">Dashboard</h2>
+      <p style="color:var(--text2);font-size:.85rem" id="dashDate"></p>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="switchPage('spare');setTimeout(openAddAssetModal,100)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add Asset
+    </button>
+  </div>
+  <div class="dash-stats" id="dashStats"></div>
+  <div class="dash-row">
+    <div class="dash-card">
+      <h3>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Recent Activity
+      </h3>
+      <div id="dashActivity"></div>
+    </div>
+    <div class="dash-card">
+      <h3>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Assets by Type
+      </h3>
+      <div id="dashTypeChart" class="type-bar"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ALL ASSETS ══ -->
+<div class="page" id="page-all-assets">
+  <div class="page-header">
+    <h2>All Assets</h2>
+    <button class="btn btn-secondary btn-sm" id="btnBulkDelete" onclick="bulkDelete()" style="display:none">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      Delete Selected
+    </button>
+  </div>
+  <div class="filter-bar">
+    <input type="text" id="allSearch" placeholder="Search…" oninput="renderAllTable()" class="filter-input"/>
+    <select class="filter-select" id="filterType" onchange="renderAllTable()">
+      <option value="">All Types</option>
+      <option>Laptop</option><option>Laptop Adaptor</option><option>CPU</option>
+      <option>Monitor</option><option>Printer</option><option>Scanner</option><option>Scansnap</option>
+      <option>Keyboard</option><option>Mouse</option><option>UPS</option>
+      <option>Camera</option><option>Speaker</option><option>External Drive</option>
+    </select>
+    <select class="filter-select" id="filterLifecycle" onchange="renderAllTable()">
+      <option value="">All Lifecycle</option>
+      <option>Active</option><option>Allocated</option><option>Transfer</option>
+      <option>Borrow</option><option>Returned</option><option>Dispose</option>
+    </select>
+    <span id="filteredCount" style="margin-left:auto;font-size:.8rem;color:var(--text3)"></span>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th><input type="checkbox" class="cb" id="cbAll" onclick="toggleSelectAll()"/></th>
+        <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th>
+        <th>Condition</th><th>Lifecycle</th><th>Staff</th>
+        <th>Location</th><th>Purch. Date</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="tblAll"></tbody>
+    </table>
+    <div class="pager" id="pagerAll"></div>
+  </div>
+</div>
+
+<!-- ══ STAFF ASSETS ══ -->
+<div class="page" id="page-staff-assets">
+  <div class="page-header">
+    <div>
+      <h2>Staff Assets</h2>
+      <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Assets grouped by division → district → area → branch → staff member</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+      <input type="text" id="staffAssetsSearch" placeholder="Search staff, barcode, type…"
+             oninput="onStaffAssetsSearch()" class="filter-input"/>
+      <button class="btn btn-secondary btn-sm" onclick="stExpandAll()">Expand All</button>
+      <button class="btn btn-secondary btn-sm" onclick="stCollapseAll()">Collapse All</button>
+    </div>
+  </div>
+  <div id="staffAssetsSummary" class="pool-summary"></div>
+  <div id="staffAssetsTree">
+    <div class="st-empty">Open this page to load the staff hierarchy.</div>
+  </div>
+</div>
+
+<!-- ══ EQUIPMENT RECORD ══ -->
+<div class="page" id="page-equipment-record">
+  <div class="page-header">
+    <div>
+      <h2>Equipment Record</h2>
+      <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Assets organized by physical location — Division → District → Area → Branch</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+      <input type="text" id="equipSearch" placeholder="Search assets, branch, type…"
+             oninput="renderEquipmentRecord()" class="filter-input"/>
+      <button class="btn btn-secondary btn-sm" onclick="eqExpandAll()">Expand All</button>
+      <button class="btn btn-secondary btn-sm" onclick="eqCollapseAll()">Collapse All</button>
+    </div>
+  </div>
+  <div id="equipSummary" class="pool-summary"></div>
+  <div id="equipTree">
+    <div class="st-empty">Open this page to load the equipment hierarchy.</div>
+  </div>
+</div>

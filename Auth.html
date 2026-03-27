@@ -1,0 +1,35 @@
+<!-- ══ AUTH SCREEN ══ -->
+<div id="authScreen">
+  <div class="auth-box">
+    <div class="auth-logo">
+      <img src="<?!= include('Logo'); ?>"
+           style="height:56px;object-fit:contain;mix-blend-mode:multiply"
+           alt="LifeBank Foundation"/>
+    </div>
+    <h2>Welcome back</h2>
+    <p>Sign in to your account to continue</p>
+    <div id="authError"></div>
+    <input type="text" id="authUser" placeholder="Employee ID" autocomplete="username"/>
+    <input type="password" id="authPass" placeholder="Password" autocomplete="current-password"/>
+    <button class="btn btn-primary btn-full" onclick="doLogin()">
+      <span id="loginBtnTxt">Sign In</span>
+    </button>
+  </div>
+</div>
+
+<!-- ══ CHANGE PASSWORD SCREEN ══ -->
+<div id="changePwdScreen">
+  <div class="auth-box">
+    <div class="auth-logo">
+      <img src="<?!= include('Logo'); ?>"
+           style="height:56px;object-fit:contain;mix-blend-mode:multiply"
+           alt="LifeBank Foundation"/>
+    </div>
+    <h2>Set New Password</h2>
+    <p>Your default password must be changed before continuing.</p>
+    <div id="pwdError" style="color:var(--red);font-size:.85rem;margin-bottom:12px;display:none"></div>
+    <input type="password" id="newPwd1" placeholder="New Password (min 4 chars)"/>
+    <input type="password" id="newPwd2" placeholder="Confirm New Password"/>
+    <button class="btn btn-primary btn-full" onclick="doChangePwd()">Update Password</button>
+  </div>
+</div>
