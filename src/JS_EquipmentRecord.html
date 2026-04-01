@@ -1,0 +1,251 @@
+<script>
+// ═══════════════════════════════════════
+//  EQUIPMENT RECORD MODULE
+// ═══════════════════════════════════════
+
+function renderEquipmentRecord() {
+  _eqSearchQ  = (document.getElementById('equipSearch')?.value || '').toLowerCase();
+  _eqBranchReg = [];
+  var tree = _buildEquipTree();
+  _renderEquipTree(tree);
+}
+
+function _buildEquipTree() {
+  var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
+  var data = _eqSearchQ
+    ? base.filter(function(a){
+        return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,a.Division,a.District,a.Area,a.Branch]
+          .some(function(v){ return (v||'').toLowerCase().includes(_eqSearchQ); });
+      })
+    : base;
+
+  var tree = {};
+  data.forEach(function(a) {
+    var div    = a.Division || '(No Division)';
+    var dist   = a.District || '(No District)';
+    var area   = a.Area     || '(No Area)';
+    var branch = a.Branch   || '(No Branch)';
+    if (!tree[div])                     tree[div]                    = {};
+    if (!tree[div][dist])               tree[div][dist]              = {};
+    if (!tree[div][dist][area])         tree[div][dist][area]        = {};
+    if (!tree[div][dist][area][branch]) tree[div][dist][area][branch]= [];
+    tree[div][dist][area][branch].push(a);
+  });
+  return tree;
+}
+
+function eqExpandAll() {
+  var tree = _buildEquipTree();
+  Object.keys(tree).forEach(function(div) {
+    _eqExpanded['eq-div::'+div] = true;
+    Object.keys(tree[div]).forEach(function(dist) {
+      _eqExpanded['eq-dist::'+div+'::'+dist] = true;
+      Object.keys(tree[div][dist]).forEach(function(area) {
+        _eqExpanded['eq-area::'+div+'::'+dist+'::'+area] = true;
+      });
+    });
+  });
+  renderEquipmentRecord();
+}
+
+function eqCollapseAll() {
+  _eqExpanded = {};
+  renderEquipmentRecord();
+}
+
+function eqToggle(key) {
+  _eqExpanded[key] = !_eqExpanded[key];
+  _eqBranchReg = [];
+  var tree = _buildEquipTree();
+  _renderEquipTree(tree);
+}
+
+function _renderEquipTree(tree) {
+  var container = document.getElementById('equipTree');
+  if (!container) return;
+  var divKeys = Object.keys(tree).sort();
+
+  var totalAssets = 0, totalBranches = 0;
+  divKeys.forEach(function(div) {
+    Object.keys(tree[div]).forEach(function(dist) {
+      Object.keys(tree[div][dist]).forEach(function(area) {
+        var bs = Object.keys(tree[div][dist][area]);
+        totalBranches += bs.length;
+        bs.forEach(function(b){ totalAssets += tree[div][dist][area][b].length; });
+      });
+    });
+  });
+
+  var summEl = document.getElementById('equipSummary');
+  if (summEl) {
+    summEl.innerHTML = divKeys.length
+      ? '<div class="pool-pill pool-pill-accent">'+totalAssets+' Assets</div>'
+        +'<div class="pool-pill">'+totalBranches+' Branch(es)</div>'
+        +'<div class="pool-pill">'+divKeys.length+' Division(s)</div>'
+      : '';
+  }
+
+  if (!divKeys.length) {
+    container.innerHTML = '<div class="st-empty">'
+      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>'
+      +'No equipment records found'+(_eqSearchQ?' matching your search':' in your scope')+'.'
+      +'</div>';
+    return;
+  }
+
+  var html = '<div class="st-tree">';
+  divKeys.forEach(function(div){ html += _renderEquipDivNode(div, tree[div]); });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function _renderEquipDivNode(div, distTree) {
+  var key = 'eq-div::'+div;
+  var isOpen = !!_eqExpanded[key];
+  var distKeys = Object.keys(distTree).sort();
+  var assetCount = 0;
+  distKeys.forEach(function(dist) {
+    Object.keys(distTree[dist]).forEach(function(area) {
+      Object.keys(distTree[dist][area]).forEach(function(b){ assetCount += distTree[dist][area][b].length; });
+    });
+  });
+  var html = '<div class="st-node st-div">'
+    +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">🏢</span>'
+    +'<span class="st-label">'+esc(div)+'</span>'
+    +'<span class="st-meta">'+distKeys.length+' district(s) · '+assetCount+' assets</span>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    distKeys.forEach(function(dist){ html += _renderEquipDistNode(div, dist, distTree[dist]); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEquipDistNode(div, dist, areaTree) {
+  var key = 'eq-dist::'+div+'::'+dist;
+  var isOpen = !!_eqExpanded[key];
+  var areaKeys = Object.keys(areaTree).sort();
+  var assetCount = 0;
+  areaKeys.forEach(function(area) {
+    Object.keys(areaTree[area]).forEach(function(b){ assetCount += areaTree[area][b].length; });
+  });
+  var html = '<div class="st-node st-dist">'
+    +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">📍</span>'
+    +'<span class="st-label">'+esc(dist)+'</span>'
+    +'<span class="st-meta">'+areaKeys.length+' area(s) · '+assetCount+' assets</span>'
+    +'<button class="btn btn-icon btn-secondary" data-tip="Move District to another Division" onclick="event.stopPropagation();openMoveOrgUnitModal(\'district\',\''+esc(div)+'\',\''+esc(dist)+'\',\'\',\'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">'+_ICO.transfer+'</button>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    areaKeys.forEach(function(area){ html += _renderEquipAreaNode(div, dist, area, areaTree[area]); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEquipAreaNode(div, dist, area, branchTree) {
+  var key = 'eq-area::'+div+'::'+dist+'::'+area;
+  var isOpen = !!_eqExpanded[key];
+  var branchKeys = Object.keys(branchTree).sort();
+  var assetCount = 0;
+  branchKeys.forEach(function(b){ assetCount += branchTree[b].length; });
+  var areaLabel = area === '(No Area)' ? '<em style="opacity:.6">No Area</em>' : esc(area);
+  var html = '<div class="st-node st-area">'
+    +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">📁</span>'
+    +'<span class="st-label">'+areaLabel+'</span>'
+    +'<span class="st-meta">'+branchKeys.length+' branch(es) · '+assetCount+' assets</span>'
+    +'<button class="btn btn-icon btn-secondary" data-tip="Move Area to another District" onclick="event.stopPropagation();openMoveOrgUnitModal(\'area\',\''+esc(div)+'\',\''+esc(dist)+'\',\''+esc(area)+'\',\'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">'+_ICO.transfer+'</button>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    branchKeys.forEach(function(branch){ html += _renderEquipBranchNode(div, dist, area, branch, branchTree[branch]); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEquipBranchNode(div, dist, area, branch, assets) {
+  var idx = _eqBranchReg.length;
+  _eqBranchReg.push({ div:div, dist:dist, area:area, branch:branch, assets:assets });
+  var typeCounts = {};
+  assets.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  var chips = Object.entries(typeCounts)
+    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
+    .join('');
+  var allocated = assets.filter(function(a){ return ['allocated','transfer'].indexOf(a.status)>=0; }).length;
+  var spare     = assets.filter(function(a){ return a.status==='spare'; }).length;
+  var borrowed  = assets.filter(function(a){ return a.status==='borrowed'; }).length;
+  var branchLabel = branch === '(No Branch)' ? '<em style="opacity:.6">No Branch</em>' : esc(branch);
+  return '<div class="st-node st-emp" style="margin-left:28px">'
+    +'<div class="st-row" style="cursor:default;gap:10px">'
+    +'<span class="st-icon">🏬</span>'
+    +'<div style="flex:1;min-width:0">'
+    +'<div style="font-weight:700;font-size:.88rem;color:var(--text)">'+branchLabel+'</div>'
+    +'<div style="display:flex;gap:5px;margin-top:4px;flex-wrap:wrap;align-items:center">'
+    +(allocated?'<span class="badge badge-allocated" style="font-size:.65rem;padding:1px 6px">'+allocated+' allocated</span>':'')
+    +(spare    ?'<span class="badge badge-spare"     style="font-size:.65rem;padding:1px 6px">'+spare+' spare</span>':'')
+    +(borrowed ?'<span class="badge badge-borrowed"  style="font-size:.65rem;padding:1px 6px">'+borrowed+' on borrow</span>':'')
+    +'</div>'
+    +'</div>'
+    +'<div class="st-type-chips" style="flex:0 1 auto">'+chips+'</div>'
+    +'<button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area" onclick="openMoveOrgUnitModal(\'branch\',\''+esc(div)+'\',\''+esc(dist)+'\',\''+esc(area)+'\',\''+esc(branch)+'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">'+_ICO.transfer+'</button>'
+    +'<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal('+idx+')" style="flex-shrink:0;gap:5px">'+_ICO.view+' View '+assets.length+'</button>'
+    +'</div>'
+    +'</div>';
+}
+
+function openEquipBranchModal(idx) {
+  var rec = _eqBranchReg[idx];
+  if (!rec) return;
+  var title    = rec.branch === '(No Branch)' ? 'Assets (No Branch)' : rec.branch;
+  var subtitle = [rec.div, rec.dist, rec.area].filter(function(x){ return x && !x.startsWith('(No'); }).join(' › ');
+  document.getElementById('eqModalTitle').textContent    = title;
+  document.getElementById('eqModalSubtitle').textContent = subtitle;
+
+  var lcBadge = {Active:'spare',Allocated:'allocated',Transfer:'transfer',Borrow:'borrowed',Returned:'returned',Dispose:'disposal',BorrowItem:'borrow-item'};
+  var tbody = document.getElementById('eqModalBody');
+  if (!tbody) return;
+  var sorted = [...rec.assets].sort(function(a,b){
+    return (a.Type||'').localeCompare(b.Type||'') || (a.Staff||'').localeCompare(b.Staff||'');
+  });
+  tbody.innerHTML = sorted.map(function(a) {
+    var lc = a.Lifecycle || 'Active';
+    return '<tr>'
+      +'<td><span class="mono-bc">'+esc(a.Barcode)+'</span></td>'
+      +'<td><span class="type-tag">'+esc(a.Type)+'</span></td>'
+      +'<td>'+(esc(a.Brand)||'—')+'</td>'
+      +'<td class="mono-sm">'+(esc(a.Serial)||'—')+'</td>'
+      +'<td><span class="cond-'+(a.Condition||'good').toLowerCase()+'">'+esc(a.Condition)+'</span></td>'
+      +'<td><span class="badge badge-'+(lcBadge[lc]||'spare')+'" style="font-size:.7rem">'+esc(lc)+'</span></td>'
+      +'<td>'
+        +(a.Staff && a.Staff !== 'Unassigned'
+          ? '<div style="font-weight:600;font-size:.82rem">'+esc(a.Staff)+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:.7rem;color:var(--text3)">'+esc(a.EmpID||'')+'</div>'
+          : '<span style="color:var(--text3);font-size:.78rem">—</span>')
+      +'</td>'
+      +'<td><button class="btn btn-icon btn-secondary" data-tip="Details" onclick="closeModal(\'equipmentBranchModal\');viewAsset(\''+esc(a.Barcode)+'\')">'+_ICO.view+'</button></td>'
+      +'</tr>';
+  }).join('') || '<tr><td colspan="8" class="tbl-empty">No assets</td></tr>';
+
+  openModal('equipmentBranchModal');
+}
+
+// ── switchPage override (runs after both JS_StaffAssets and JS_EquipmentRecord are loaded) ──
+(function () {
+  var _origSwitch = switchPage;
+  switchPage = function (p) {
+    _origSwitch(p);
+    if (p === 'staff-assets')     renderStaffAssets();
+    if (p === 'equipment-record') renderEquipmentRecord();
+  };
+})();
+</script>

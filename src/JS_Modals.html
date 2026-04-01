@@ -1,0 +1,890 @@
+<script>
+// ═══════════════════════════════════════════════════════════
+//  JS_Modals.html  — All modal open / submit / action logic
+// ═══════════════════════════════════════════════════════════
+
+// ─── VIEW ASSET ──────────────────────────────────────────────────────────────
+function viewAsset(barcode) {
+  _viewBarcode = barcode;
+  const a = ASSETS.find(x => x.Barcode === barcode);
+  if (!a) { toast('Asset not found', 'err'); return; }
+
+  switchViewTab('details');
+
+  const lcBadge = {
+    Active:'spare', Allocated:'allocated', Transfer:'transfer',
+    Borrow:'borrowed', Returned:'returned', Dispose:'disposal', BorrowItem:'borrow-item'
+  };
+  const lc = a.Lifecycle || 'Active';
+
+  document.getElementById('viewModalBody').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:12px 16px;
+                  background:var(--bg3);border:1px solid var(--border);border-radius:8px">
+        <div>
+          <div style="font-size:.7rem;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Barcode</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:1.05rem;font-weight:700;color:var(--accent2)">${esc(a.Barcode)}</div>
+        </div>
+        <span class="type-tag" style="font-size:.82rem">${esc(a.Type)}</span>
+        <span class="badge badge-${lcBadge[lc]||'spare'}" style="margin-left:auto">${esc(lc)}</span>
+      </div>
+      ${_vf('Brand', a.Brand)} ${_vf('Serial No.', a.Serial)}
+      ${_vf('Condition', a.Condition)} ${_vf('Purchase Date', fmtDate(a.PurchDate))}
+      ${_vf('Warranty Term', a.WarrantyTerm ? a.WarrantyTerm+' year(s)' : '')}
+      ${_vf('Warranty Exp.', fmtDate(a.WarrantyVal))}
+      ${_vf('Supplier', a.Supplier)}
+      ${_vf('Specifications', a.Specs, true)}
+
+      <div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+        <div style="font-size:.7rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Assignment</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          ${_vf('Accountable Staff', a.Staff || 'Unassigned')}
+          ${_vf('Employee ID', a.EmpID || '—')}
+          ${_vf('Designation', a.Designation)}
+          ${_vf('Division', a.Division)} ${_vf('District', a.District)}
+          ${_vf('Branch', a.Branch)} ${_vf('Effectivity Date', fmtDate(a.EffDate))}
+        </div>
+      </div>
+
+      ${a.BorName ? `
+      <div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+        <div style="font-size:.7rem;font-weight:700;color:var(--yellow);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Active Borrow</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          ${_vf('Borrower', a.BorName)} ${_vf('Borrower ID', a.BorEmpID)}
+          ${_vf('Borrow Date', fmtDate(a.BorDate))} ${_vf('Expected Return', fmtDate(a.ExpReturn))}
+        </div>
+      </div>` : ''}
+
+      ${_vf('Remarks', a.Remarks, true)}
+    </div>`;
+
+  // Footer actions
+  const footer = document.getElementById('viewModalFooter');
+  let actions = '';
+  if (a.status === 'spare') {
+    actions = `
+      <button class="btn btn-allocate btn-sm" onclick="closeModal('viewModal');openAllocateModal('${esc(a.Barcode)}')">Allocate</button>
+      <button class="btn btn-borrow btn-sm"   onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>
+      <button class="btn btn-danger btn-sm"   onclick="closeModal('viewModal');openDisposalModal('${esc(a.Barcode)}')">Dispose</button>`;
+  } else if (a.status === 'allocated' || a.status === 'transfer') {
+    actions = `
+      <button class="btn btn-transfer btn-sm" onclick="closeModal('viewModal');openTransferModal('${esc(a.Barcode)}')">Transfer</button>
+      <button class="btn btn-borrow btn-sm"   onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>
+      <button class="btn btn-spare btn-sm"    onclick="closeModal('viewModal');openDeallocModal('${esc(a.Barcode)}','${esc(a.Staff||'')}')">↩ Spare</button>
+      <button class="btn btn-danger btn-sm"   onclick="closeModal('viewModal');openDisposalModal('${esc(a.Barcode)}')">Dispose</button>`;
+  } else if (a.status === 'borrowed') {
+    actions = `<button class="btn btn-success btn-sm" onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}','${esc(a.BorName||'')}')">Return Asset</button>`;
+  } else if (a.status === 'borrow-item') {
+    const isBorrowed = (a.Lifecycle||'').toLowerCase() === 'borrow';
+    actions = isBorrowed
+      ? `<button class="btn btn-success btn-sm" onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}','${esc(a.BorName||'')}')">Return Asset</button>`
+      : `<button class="btn btn-borrow btn-sm" onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>`;
+  }
+
+  footer.innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="showBarcode('${esc(a.Barcode)}')">🔖 Barcode</button>
+    <div style="flex:1"></div>
+    ${actions}
+    <button class="btn btn-secondary" onclick="closeModal('viewModal')">Close</button>`;
+
+  openModal('viewModal');
+}
+
+function _vf(label, value, fullWidth) {
+  const v = value ? esc(value) : '<span style="color:var(--text3)">—</span>';
+  return `<div${fullWidth ? ' style="grid-column:1/-1"' : ''}>
+    <div style="font-size:.7rem;font-weight:600;color:var(--text3);margin-bottom:3px">${esc(label)}</div>
+    <div style="font-size:.87rem;color:var(--text)">${v}</div>
+  </div>`;
+}
+
+function switchViewTab(tab) {
+  document.getElementById('vmt-details').classList.toggle('active', tab === 'details');
+  document.getElementById('vmt-xfer').classList.toggle('active', tab === 'xfer');
+  document.getElementById('viewModalBody').style.display     = tab === 'details' ? '' : 'none';
+  document.getElementById('viewModalXferBody').style.display = tab === 'xfer'    ? '' : 'none';
+
+  if (tab === 'xfer') {
+    const history = XFERS.filter(r => String(r[0]) === _viewBarcode);
+    const body = document.getElementById('viewModalXferBody');
+    if (!history.length) {
+      body.innerHTML = '<div class="xfer-empty">No transfer history for this asset.</div>';
+      return;
+    }
+    body.innerHTML = '<div class="xfer-tl">' + history.map((r, i) => `
+      <div class="xfer-item">
+        <div class="xfer-dot ${i===0?'xd-start':''}"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="xfer-from">${esc(r[2]||'—')}</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="xfer-to">${esc(r[10]||'—')}</span>
+        </div>
+        <div class="xfer-meta">
+          <span>📋 ${esc(r[1]||'—')}</span>
+          <span>📅 ${fmtDate(r[18])||'—'}</span>
+          <span class="badge badge-${r[19]==='Completed'?'returned':'transfer'}" style="font-size:.68rem">${esc(r[19]||'Pending')}</span>
+        </div>
+      </div>`).join('') + '</div>';
+  }
+}
+
+// ─── BARCODE VIEWER ───────────────────────────────────────────────────────────
+function showBarcode(barcode) {
+  const body = document.getElementById('barcodeModalBody');
+  body.innerHTML = '';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'bcSvg';
+  body.appendChild(svg);
+  const lbl = document.createElement('div');
+  lbl.textContent = barcode;
+  lbl.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:.9rem;font-weight:600;letter-spacing:.05em;color:var(--text);margin-top:8px';
+  body.appendChild(lbl);
+  try {
+    JsBarcode('#bcSvg', barcode, { format:'CODE128', displayValue:false, width:2, height:60, margin:10, background:'#ffffff' });
+  } catch(e) {
+    body.innerHTML = '<div style="color:var(--text3);padding:24px">Could not render barcode</div>';
+  }
+  openModal('barcodeModal');
+}
+
+function printBarcode() {
+  const svg = document.getElementById('bcSvg');
+  if (!svg) return;
+  const data = new XMLSerializer().serializeToString(svg);
+  const w = window.open('','_blank');
+  w.document.write(`<html><body style="text-align:center;padding:30px;font-family:monospace">${data}<br/><div style="font-size:14px;font-weight:700;margin-top:6px">${_viewBarcode||''}</div><script>window.onload=()=>window.print()<\/script></body></html>`);
+  w.document.close();
+}
+
+// ─── ADD ASSET (STEPPER) ─────────────────────────────────────────────────────
+function openAddAssetModal() {
+  enrollStep = 1;
+  _syncEnrollStepper();
+
+  const ids = ['fSerial','fRemarks'];
+  ids.forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  document.getElementById('fBarcode').value   = '';
+  document.getElementById('fCondition').value = 'New';
+  document.getElementById('fPurchDate').value = '';
+  document.getElementById('fWTerm').value     = '0';
+  document.getElementById('fWVal').value      = '';
+  document.getElementById('fFieldType').value = '';
+  document.getElementById('fFieldDetails').style.display = 'none';
+  document.getElementById('laptopSpecsSection').style.display = 'none';
+  document.getElementById('laptopSpecsRows').innerHTML = '';
+  document.getElementById('fEntryEmpId').value = SESSION ? SESSION.username : '';
+  document.getElementById('fEntryName').value  = SESSION ? SESSION.name     : '';
+  document.getElementById('enrolledByLabel').textContent = SESSION ? SESSION.name : '—';
+
+  // Reset category/brand/model
+  onCategoryChange && onCategoryChange();
+  document.getElementById('fCategory').value = '';
+  document.getElementById('fBrand').value    = '';
+  document.getElementById('fBrand').disabled = true;
+  document.getElementById('fModel').value    = '';
+  document.getElementById('fModel').disabled = true;
+
+  // Populate division
+  _fillDivSelect('fDivision');
+  document.getElementById('fDistrict').innerHTML = '<option value="">Select…</option>';
+
+  openModal('addAssetModal');
+}
+
+function _syncEnrollStepper() {
+  [1,2,3].forEach(i => {
+    const ind = document.getElementById('stepInd'+i);
+    if (!ind) return;
+    ind.classList.remove('active','done');
+    if (i < enrollStep)  ind.classList.add('done');
+    if (i === enrollStep) ind.classList.add('active');
+  });
+  const labels = [
+    'Step 1 of 3 — Asset Information',
+    'Step 2 of 3 — Location & Purchase',
+    'Step 3 of 3 — Confirm & Enroll'
+  ];
+  const lbl = document.getElementById('enrollStepLabel');
+  if (lbl) lbl.textContent = labels[enrollStep-1] || '';
+
+  document.getElementById('enrollStep1').style.display = enrollStep===1 ? '' : 'none';
+  document.getElementById('enrollStep2').style.display = enrollStep===2 ? '' : 'none';
+  document.getElementById('enrollStep3').style.display = enrollStep===3 ? '' : 'none';
+  document.getElementById('enrollBackBtn').style.display = enrollStep > 1 ? '' : 'none';
+  document.getElementById('enrollNextBtn').textContent = enrollStep===3 ? 'Enroll Asset' : 'Next →';
+}
+
+function enrollBack() {
+  if (enrollStep > 1) { enrollStep--; _syncEnrollStepper(); }
+}
+
+function enrollNext() {
+  if (enrollStep === 1) {
+    if (!document.getElementById('fCategory').value) { toast('Category is required', 'warn'); return; }
+    if (!document.getElementById('fBarcode').value.trim()) { toast('Barcode is required — click Auto to generate', 'warn'); return; }
+    enrollStep = 2; _syncEnrollStepper();
+  } else if (enrollStep === 2) {
+    enrollStep = 3; _buildEnrollConfirm(); _syncEnrollStepper();
+  } else {
+    _submitEnroll();
+  }
+}
+
+function _buildEnrollConfirm() {
+  const rows = [
+    ['Category',       document.getElementById('fCategory').value        || '—'],
+    ['Brand',          document.getElementById('fBrand').value           || '—'],
+    ['Model',          document.getElementById('fModel').value           || '—'],
+    ['Serial No.',     document.getElementById('fSerial').value          || '—'],
+    ['Barcode',        document.getElementById('fBarcode').value         || '—'],
+    ['Condition',      document.getElementById('fCondition').value       || '—'],
+    ['Purch. Date',    document.getElementById('fPurchDate').value       || '—'],
+    ['Warranty',       (document.getElementById('fWTerm').value||'0')+' year(s)'],
+    ['Warranty Exp.',  document.getElementById('fWVal').value            || '—'],
+    ['Supplier',       document.getElementById('fSupplier').value        || '—'],
+    ['Location Type',  document.getElementById('fFieldType').value       || '—'],
+    ['Division',       document.getElementById('fDivision').value        || '—'],
+    ['District',       document.getElementById('fDistrict').value        || '—'],
+    ['Area',           document.getElementById('fArea').value            || '—'],
+    ['Branch',         document.getElementById('fBranch').value          || '—'],
+    ['Remarks',        document.getElementById('fRemarks').value         || '—'],
+  ];
+  document.getElementById('enrollConfirmBody').innerHTML = `
+    <div style="padding:10px 14px;background:rgba(22,163,74,.08);border:1px solid rgba(22,163,74,.2);
+                border-radius:8px;font-size:.82rem;color:var(--green);margin-bottom:14px">
+      ✓ Review details below. Asset will be added to the <strong>Spare Pool</strong>.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${rows.map(([l,v])=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px">
+        <div style="font-size:.68rem;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em">${esc(l)}</div>
+        <div style="font-size:.86rem;color:var(--text);margin-top:2px">${esc(v)}</div>
+      </div>`).join('')}
+    </div>`;
+}
+
+function _submitEnroll() {
+  const btn = document.getElementById('enrollNextBtn');
+  btn.disabled = true; btn.textContent = 'Enrolling…';
+
+  const specs = [];
+  document.querySelectorAll('#laptopSpecsRows .spec-row').forEach(row => {
+    const t = row.querySelector('.spec-type')?.value || '';
+    const v = row.querySelector('.spec-val')?.value  || '';
+    if (t && v) specs.push(t+': '+v);
+  });
+
+  const obj = {
+    entryEmpId:   document.getElementById('fEntryEmpId').value,
+    entryName:    document.getElementById('fEntryName').value,
+    barcode:      document.getElementById('fBarcode').value.trim(),
+    type:         document.getElementById('fCategory').value,
+    brand:        document.getElementById('fBrand').value    || '',
+    serial:       document.getElementById('fSerial').value   || '',
+    specs:        specs.join(' | ') || (document.getElementById('fModel').value || ''),
+    condition:    document.getElementById('fCondition').value,
+    purchDate:    document.getElementById('fPurchDate').value,
+    wTerm:        document.getElementById('fWTerm').value,
+    wValidity:    document.getElementById('fWVal').value,
+    supplier:     document.getElementById('fSupplier').value || '',
+    division:     document.getElementById('fDivision').value || '',
+    district:     document.getElementById('fDistrict').value || '',
+    area:         document.getElementById('fArea').value     || '',
+    branch:       document.getElementById('fBranch').value   || '',
+    remarks:      document.getElementById('fRemarks').value  || '',
+    statusChoice: 'Spare',
+    enrolledBy:   SESSION ? SESSION.username : ''
+  };
+
+  google.script.run
+    .withSuccessHandler(r => {
+      btn.disabled = false; btn.textContent = 'Enroll Asset';
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('addAssetModal'); loadData(); }
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false; btn.textContent = 'Enroll Asset';
+      toast(err.message, 'err');
+    })
+    .processAsset(obj, false);
+}
+
+function genBarcode() {
+  const cat = document.getElementById('fCategory').value;
+  if (!cat) { toast('Select a category first', 'warn'); return; }
+  google.script.run
+    .withSuccessHandler(bc => { document.getElementById('fBarcode').value = bc; })
+    .withFailureHandler(err => toast(err.message, 'err'))
+    .generateNextBarcode(cat);
+}
+
+function onCategoryChange() {
+  const cat      = document.getElementById('fCategory').value;
+  const brandSel = document.getElementById('fBrand');
+  const modelSel = document.getElementById('fModel');
+  brandSel.innerHTML = '<option value="">Select brand…</option>';
+  modelSel.innerHTML = '<option value="">Select model…</option>';
+  brandSel.disabled  = !cat;
+  modelSel.disabled  = true;
+  if (cat) {
+    const brands = (DROPDOWN_DATA.brands || {})[cat] || [];
+    brands.forEach(b => brandSel.appendChild(new Option(b, b)));
+    genBarcode();
+  }
+  const isLaptop = (cat||'').toLowerCase() === 'laptop';
+  document.getElementById('laptopSpecsSection').style.display = isLaptop ? '' : 'none';
+  if (isLaptop && !document.querySelectorAll('#laptopSpecsRows .spec-row').length) addSpecRow();
+}
+
+function onBrandChange() {
+  const cat   = document.getElementById('fCategory').value;
+  const brand = document.getElementById('fBrand').value;
+  const modelSel = document.getElementById('fModel');
+  modelSel.innerHTML = '<option value="">Select model…</option>';
+  modelSel.disabled  = !brand;
+  if (brand && cat) {
+    ((DROPDOWN_DATA.models || {})[cat+'|'+brand] || []).forEach(m => modelSel.appendChild(new Option(m, m)));
+  }
+}
+
+function addSpecRow() {
+  const specs = (DROPDOWN_DATA.laptopSpecs && DROPDOWN_DATA.laptopSpecs.length)
+    ? DROPDOWN_DATA.laptopSpecs : ['CPU','RAM','Storage','Display','OS'];
+  const container = document.getElementById('laptopSpecsRows');
+  const row = document.createElement('div');
+  row.className = 'spec-row';
+  row.innerHTML = `<select class="spec-type">${specs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
+    <input type="text" class="spec-val" placeholder="Enter value…"/>
+    <button class="btn btn-icon btn-danger" type="button" onclick="this.closest('.spec-row').remove()" style="flex-shrink:0">✕</button>`;
+  container.appendChild(row);
+}
+
+function recalcWarranty() {
+  const pd  = document.getElementById('fPurchDate').value;
+  const yrs = parseInt(document.getElementById('fWTerm').value) || 0;
+  if (!pd || !yrs) { document.getElementById('fWVal').value = ''; return; }
+  const d = new Date(pd);
+  d.setFullYear(d.getFullYear() + yrs);
+  document.getElementById('fWVal').value = d.toISOString().split('T')[0];
+}
+
+function stepWarranty(delta) {
+  const inp = document.getElementById('fWTerm');
+  inp.value = Math.max(0, Math.min(10, (parseInt(inp.value)||0) + delta));
+  recalcWarranty();
+}
+
+function onFieldTypeChange() {
+  document.getElementById('fFieldDetails').style.display =
+    document.getElementById('fFieldType').value === 'Field' ? '' : 'none';
+}
+
+function onDivisionChange() {
+  const div = document.getElementById('fDivision').value;
+  const sel = document.getElementById('fDistrict');
+  const dists = (ENG_LOCATION_DATA.divDistrictMap || {})[div] || [];
+  sel.innerHTML = '<option value="">Select…</option>' + dists.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+}
+
+// ─── ALLOCATE ────────────────────────────────────────────────────────────────
+function openAllocateModal(barcode) {
+  _allocBarcode = barcode;
+  const a = ASSETS.find(x => x.Barcode === barcode);
+  if (!a) { toast('Asset not found', 'err'); return; }
+
+  document.getElementById('allocAssetLabel').textContent    = (a.Type||'') + (a.Brand?' — '+a.Brand:'');
+  document.getElementById('allocAssetBarcode').textContent  = barcode;
+  document.getElementById('allocAssetCondition').textContent= a.Condition || '—';
+  ['alEmpId','alStaff','alDesig','alBranch','alRemarks'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  document.getElementById('alEffDate').value = todayISO();
+
+  _fillDivSelect('alDiv');
+  document.getElementById('alDist').innerHTML = '<option value="">Select…</option>';
+  document.getElementById('alArea').innerHTML = '<option value="">Select…</option>';
+
+  const msg = document.getElementById('allocLookupMsg');
+  if (msg) msg.style.display = 'none';
+
+  openModal('allocateModal');
+}
+
+function onAllocEmpInput() {
+  clearTimeout(_empLookupTimer);
+  const id = document.getElementById('alEmpId').value.trim();
+  if (!id || id.length < 3) return;
+  _empLookupTimer = setTimeout(() => _lookupEmpAlloc(id), 420);
+}
+
+function _lookupEmpAlloc(id) {
+  const spin = document.getElementById('allocLookupSpinner');
+  if (spin) spin.style.display = 'block';
+  google.script.run
+    .withSuccessHandler(r => {
+      if (spin) spin.style.display = 'none';
+      const msg = document.getElementById('allocLookupMsg');
+      if (!r.ok) {
+        if (msg) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent=r.error; }
+        return;
+      }
+      if (msg) msg.style.display = 'none';
+      document.getElementById('alStaff').value  = r.name     || '';
+      document.getElementById('alDesig').value  = r.position || '';
+      document.getElementById('alBranch').value = r.branch   || '';
+
+      const divSel = document.getElementById('alDiv');
+      if (r.division) {
+        for (let i=0;i<divSel.options.length;i++) {
+          if (divSel.options[i].value === r.division) { divSel.selectedIndex=i; break; }
+        }
+        onAllocDivisionChange();
+        setTimeout(() => {
+          const distSel = document.getElementById('alDist');
+          if (r.district) {
+            for (let i=0;i<distSel.options.length;i++) {
+              if (distSel.options[i].value === r.district) { distSel.selectedIndex=i; break; }
+            }
+          }
+        }, 150);
+      }
+    })
+    .withFailureHandler(err => { if(spin) spin.style.display='none'; toast(err.message,'err'); })
+    .getEmployeeById(id);
+}
+
+function submitAllocate() {
+  const empId  = document.getElementById('alEmpId').value.trim();
+  const staff  = document.getElementById('alStaff').value.trim();
+  const desig  = document.getElementById('alDesig').value.trim();
+  const div    = document.getElementById('alDiv').value;
+  const dist   = document.getElementById('alDist').value;
+  const area   = document.getElementById('alArea').value;
+  const branch = document.getElementById('alBranch').value.trim();
+  const effDate= document.getElementById('alEffDate').value;
+  const remarks= document.getElementById('alRemarks').value.trim();
+
+  if (!empId)  { toast('Employee ID is required', 'warn'); return; }
+  if (!staff)  { toast('Staff name is required', 'warn'); return; }
+  if (!effDate){ toast('Effectivity date is required', 'warn'); return; }
+
+  const a = ASSETS.find(x => x.Barcode === _allocBarcode) || {};
+  google.script.run
+    .withSuccessHandler(r => {
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('allocateModal'); loadData(); }
+    })
+    .withFailureHandler(err => toast(err.message,'err'))
+    .allocateAsset({
+      barcode:_allocBarcode, empId, staffName:staff, designation:desig,
+      division:div, district:dist, area, branch, effDate, remarks,
+      type:a.Type||'', brand:a.Brand||'', serial:a.Serial||'',
+      condition:a.Condition||'', allocatedBy:SESSION?SESSION.username:''
+    });
+}
+
+// ─── DEALLOCATE ───────────────────────────────────────────────────────────────
+function openDeallocModal(barcode, staffName) {
+  _deallocBarcode = barcode;
+  document.getElementById('deallocBarcode').value = barcode;
+  document.getElementById('deallocStaffName').textContent = staffName || 'this staff member';
+  document.getElementById('deallocRemarks').value = '';
+  openModal('deallocModal');
+}
+
+function submitDealloc() {
+  const remarks = document.getElementById('deallocRemarks').value.trim();
+  google.script.run
+    .withSuccessHandler(r => {
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('deallocModal'); loadData(); }
+    })
+    .withFailureHandler(err => toast(err.message,'err'))
+    .deallocateAsset(_deallocBarcode, remarks);
+}
+
+// ─── TRANSFER ────────────────────────────────────────────────────────────────
+function openTransferModal(barcode) {
+  _transferBarcode = barcode || '';
+  const a = barcode ? ASSETS.find(x => x.Barcode === barcode) : null;
+
+  document.getElementById('tBarcode').value    = barcode || '';
+  document.getElementById('tBarcode').readOnly = !!barcode;
+  document.getElementById('tEffDate').value    = todayISO();
+
+  ['tToEmpId','tToStaff','tToDesig','tToDiv','tToDist','tToBranch','tToArea','tToRemarks'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+
+  if (a) {
+    document.getElementById('tFromStaff').value  = a.Staff        || '';
+    document.getElementById('tFromEmpId').value  = a.EmpID        || '';
+    document.getElementById('tFromDesig').value  = a.Designation  || '';
+    document.getElementById('tFromDiv').value    = a.Division     || '';
+    document.getElementById('tFromDist').value   = a.District     || '';
+    document.getElementById('tFromBranch').value = a.Branch       || '';
+    document.getElementById('tFromArea').value   = a.Area         || '';
+    document.getElementById('tFromRemarks').value= '';
+  } else {
+    ['tFromStaff','tFromEmpId','tFromDesig','tFromDiv','tFromDist','tFromBranch','tFromArea','tFromRemarks'].forEach(id => {
+      const el = document.getElementById(id); if(el) el.value = '';
+    });
+  }
+
+  const msg = document.getElementById('transferLookupMsg');
+  if (msg) msg.style.display = 'none';
+  openModal('transferModal');
+}
+
+function onTransferBarcodeInput() {
+  const bc = document.getElementById('tBarcode').value.trim();
+  const a  = bc ? ASSETS.find(x => x.Barcode === bc) : null;
+  if (!a) return;
+  document.getElementById('tFromStaff').value  = a.Staff       || '';
+  document.getElementById('tFromEmpId').value  = a.EmpID       || '';
+  document.getElementById('tFromDesig').value  = a.Designation || '';
+  document.getElementById('tFromDiv').value    = a.Division    || '';
+  document.getElementById('tFromDist').value   = a.District    || '';
+  document.getElementById('tFromBranch').value = a.Branch      || '';
+  document.getElementById('tFromArea').value   = a.Area        || '';
+}
+
+function onTransferToInput() {
+  clearTimeout(_toEmpTimer);
+  const id = document.getElementById('tToEmpId').value.trim();
+  if (!id || id.length < 3) return;
+  _toEmpTimer = setTimeout(() => {
+    const spin = document.getElementById('toEmpSpinner');
+    if (spin) spin.style.display = 'block';
+    google.script.run
+      .withSuccessHandler(r => {
+        if (spin) spin.style.display = 'none';
+        if (!r.ok) return;
+        document.getElementById('tToStaff').value  = r.name     || '';
+        document.getElementById('tToDesig').value  = r.position || '';
+        document.getElementById('tToDiv').value    = r.division || '';
+        document.getElementById('tToDist').value   = r.district || '';
+        document.getElementById('tToBranch').value = r.branch   || '';
+      })
+      .withFailureHandler(() => { if(spin) spin.style.display='none'; })
+      .getEmployeeById(id);
+  }, 420);
+}
+
+function submitTransfer() {
+  const barcode = document.getElementById('tBarcode').value.trim();
+  const toEmpId = document.getElementById('tToEmpId').value.trim();
+  const toStaff = document.getElementById('tToStaff').value.trim();
+  const effDate = document.getElementById('tEffDate').value;
+  const tType   = document.getElementById('tType').value;
+
+  if (!barcode) { toast('Barcode is required', 'warn'); return; }
+  if (!toEmpId) { toast('Destination Employee ID is required', 'warn'); return; }
+  if (!toStaff) { toast('Destination Staff Name is required — enter Employee ID first', 'warn'); return; }
+  if (!effDate) { toast('Transfer Date is required', 'warn'); return; }
+
+  google.script.run
+    .withSuccessHandler(r => {
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('transferModal'); loadData(); }
+    })
+    .withFailureHandler(err => toast(err.message,'err'))
+    .saveTransfer({
+      barcode, transferType:tType, effDate,
+      fromStaff:   document.getElementById('tFromStaff').value,
+      fromEmpId:   document.getElementById('tFromEmpId').value,
+      fromDesig:   document.getElementById('tFromDesig').value,
+      fromDiv:     document.getElementById('tFromDiv').value,
+      fromDist:    document.getElementById('tFromDist').value,
+      fromArea:    document.getElementById('tFromArea').value,
+      fromBranch:  document.getElementById('tFromBranch').value,
+      fromRemarks: document.getElementById('tFromRemarks').value,
+      toStaff, toEmpId,
+      toDesig:     document.getElementById('tToDesig').value,
+      toDiv:       document.getElementById('tToDiv').value,
+      toDist:      document.getElementById('tToDist').value,
+      toArea:      document.getElementById('tToArea').value,
+      toBranch:    document.getElementById('tToBranch').value,
+      toRemarks:   document.getElementById('tToRemarks').value,
+      status:      'Completed'
+    });
+}
+
+// ─── BORROW ───────────────────────────────────────────────────────────────────
+function openBorrowModal(barcode) {
+  _borrowBarcode = barcode || '';
+  const a = barcode ? ASSETS.find(x => x.Barcode === barcode) : null;
+
+  document.getElementById('bBarcode').value    = barcode || '';
+  document.getElementById('bBarcode').readOnly = !!barcode;
+  document.getElementById('bAssetLabel').textContent =
+    a ? `${a.Type||''} — ${a.Brand||''} (${a.Condition||''})` : '—';
+
+  ['bEmpId','bName','bDesig','bDiv','bDistrict','bBranch','bRemarks','bExpReturn'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  document.getElementById('bDate').value = todayISO();
+  openModal('borrowModal');
+}
+
+function onBorrowerInput() {
+  clearTimeout(_borrowEmpTimer);
+  const id = document.getElementById('bEmpId').value.trim();
+  if (!id || id.length < 3) return;
+  _borrowEmpTimer = setTimeout(() => {
+    const spin = document.getElementById('bEmpSpinner');
+    if (spin) spin.style.display = 'block';
+    google.script.run
+      .withSuccessHandler(r => {
+        if (spin) spin.style.display = 'none';
+        if (!r.ok) return;
+        document.getElementById('bName').value     = r.name     || '';
+        document.getElementById('bDesig').value    = r.position || '';
+        document.getElementById('bDiv').value      = r.division || '';
+        document.getElementById('bDistrict').value = r.district || '';
+        document.getElementById('bBranch').value   = r.branch   || '';
+      })
+      .withFailureHandler(() => { if(spin) spin.style.display='none'; })
+      .getEmployeeById(id);
+  }, 420);
+}
+
+function submitBorrow() {
+  const barcode = document.getElementById('bBarcode').value.trim();
+  const name    = document.getElementById('bName').value.trim();
+  const bDate   = document.getElementById('bDate').value;
+  const expRet  = document.getElementById('bExpReturn').value;
+
+  if (!barcode) { toast('Barcode is required', 'warn'); return; }
+  if (!name)    { toast('Borrower name is required', 'warn'); return; }
+  if (!bDate)   { toast('Borrow date is required', 'warn'); return; }
+  if (!expRet)  { toast('Expected return date is required', 'warn'); return; }
+
+  google.script.run
+    .withSuccessHandler(r => {
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('borrowModal'); loadData(); }
+    })
+    .withFailureHandler(err => toast(err.message,'err'))
+    .saveBorrow({
+      barcode, borrowerName:name,
+      empId:          document.getElementById('bEmpId').value,
+      designation:    document.getElementById('bDesig').value,
+      division:       document.getElementById('bDiv').value,
+      district:       document.getElementById('bDistrict').value,
+      branch:         document.getElementById('bBranch').value,
+      borrowDate:     bDate,
+      expectedReturn: expRet,
+      remarks:        document.getElementById('bRemarks').value
+    });
+}
+
+// ─── RETURN ───────────────────────────────────────────────────────────────────
+function openReturnModal(barcode, borrowerName) {
+  _returnBarcode = barcode;
+  document.getElementById('retBarcode').value  = barcode;
+  document.getElementById('retBorrower').value = borrowerName || '—';
+  document.getElementById('retDate').value     = todayISO();
+  openModal('returnModal');
+}
+
+function submitReturn() {
+  if (!document.getElementById('retDate').value) { toast('Return date is required', 'warn'); return; }
+  google.script.run
+    .withSuccessHandler(r => {
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('returnModal'); loadData(); }
+    })
+    .withFailureHandler(err => toast(err.message,'err'))
+    .returnAsset(_returnBarcode, document.getElementById('retDate').value);
+}
+
+// ─── DISPOSAL ─────────────────────────────────────────────────────────────────
+function openDisposalModal(barcode) {
+  _disposalBarcode = barcode;
+  const a = ASSETS.find(x => x.Barcode === barcode);
+  document.getElementById('dBarcode').value = barcode;
+  document.getElementById('dispAssetLabel').textContent =
+    a ? `${a.Type||''} — ${a.Brand||''} | Serial: ${a.Serial||'—'}` : barcode;
+  document.getElementById('dReason').value  = '';
+  document.getElementById('dBy').value      = SESSION ? SESSION.name : '';
+  document.getElementById('dDate').value    = todayISO();
+  document.getElementById('dRemarks').value = '';
+  openModal('disposalModal');
+}
+
+function submitDisposal() {
+  const reason = document.getElementById('dReason').value;
+  const by     = document.getElementById('dBy').value.trim();
+  const date   = document.getElementById('dDate').value;
+  if (!reason) { toast('Reason is required', 'warn'); return; }
+  if (!by)     { toast('"Disposed By" is required', 'warn'); return; }
+  google.script.run
+    .withSuccessHandler(r => {
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('disposalModal'); loadData(); }
+    })
+    .withFailureHandler(err => toast(err.message,'err'))
+    .saveDisposal({
+      barcode:_disposalBarcode, reason, disposedBy:by,
+      disposeDate:date, remarks:document.getElementById('dRemarks').value
+    });
+}
+
+// ─── MOVE STAFF ───────────────────────────────────────────────────────────────
+function openMoveStaffModal(empId) {
+  _moveStaffEmpId = empId;
+  const assets = ASSETS.filter(a => a.EmpID === empId && ['allocated','transfer'].includes(a.status));
+  const ref    = assets[0] || ASSETS.find(a => a.EmpID === empId) || {};
+
+  document.getElementById('msEmpName').textContent    = ref.Staff       || '—';
+  document.getElementById('msEmpId').textContent      = empId;
+  document.getElementById('msDesig').textContent      = ref.Designation || '—';
+  document.getElementById('msCurLoc').textContent     =
+    [ref.Division, ref.District, ref.Branch].filter(Boolean).join(' / ') || '—';
+  document.getElementById('msAssetCount').textContent = assets.length + ' asset(s) will be affected';
+
+  _fillDivSelect('msNewDiv');
+  document.getElementById('msNewDist').innerHTML = '<option value="">Select District…</option>';
+  document.getElementById('msNewArea').value    = '';
+  document.getElementById('msNewBranch').value  = '';
+  document.getElementById('msActionMove').checked = true;
+
+  openModal('moveStaffModal');
+}
+
+function onMsDivChange() {
+  const div   = document.getElementById('msNewDiv').value;
+  const dists = (ENG_LOCATION_DATA.divDistrictMap || {})[div] || [];
+  document.getElementById('msNewDist').innerHTML =
+    '<option value="">Select District…</option>' +
+    dists.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+}
+
+function submitMoveStaff() {
+  const newDiv    = document.getElementById('msNewDiv').value;
+  const newDist   = document.getElementById('msNewDist').value;
+  const newArea   = document.getElementById('msNewArea').value;
+  const newBranch = document.getElementById('msNewBranch').value;
+  const action    = document.querySelector('input[name="msAction"]:checked')?.value || 'move';
+
+  if (!newDiv || !newDist) { toast('Division and District are required', 'warn'); return; }
+
+  const btn = document.getElementById('msSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Moving…';
+
+  google.script.run
+    .withSuccessHandler(r => {
+      btn.disabled = false; btn.textContent = 'Confirm Move';
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('moveStaffModal'); loadData(); }
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false; btn.textContent = 'Confirm Move';
+      toast(err.message,'err');
+    })
+    .moveStaff(_moveStaffEmpId, newDiv, newDist, newArea, newBranch, action);
+}
+
+// ─── MOVE ORG UNIT ────────────────────────────────────────────────────────────
+function openMoveOrgUnitModal(unitType, div, dist, area, branch) {
+  _mouUnitType    = unitType;
+  _mouCurrentPath = { div, dist, area, branch };
+
+  const titles = { district:'Move District', area:'Move Area', branch:'Move Branch' };
+  document.getElementById('mouTitle').textContent    = titles[unitType] || 'Move Unit';
+  document.getElementById('mouSubtitle').textContent = 'All assets in this '+unitType+' will be updated';
+  document.getElementById('mouUnitLabel').textContent = unitType;
+
+  document.getElementById('mouCurrentLoc').textContent =
+    [div, dist, area, branch].filter(x => x && !x.startsWith('(No')).join(' › ');
+
+  const affected = ASSETS.filter(a => {
+    if (unitType === 'district') return a.Division === div && a.District === dist;
+    if (unitType === 'area')     return a.Division === div && a.District === dist && a.Area === area;
+    if (unitType === 'branch')   return a.Division === div && a.District === dist && a.Area === area && a.Branch === branch;
+    return false;
+  });
+  document.getElementById('mouAssetCount').textContent = affected.length + ' asset(s) will be affected';
+
+  // Show/hide conditional fields
+  document.getElementById('mouDistField').style.display = (unitType==='area'||unitType==='branch') ? '' : 'none';
+  document.getElementById('mouAreaField').style.display = unitType==='branch' ? '' : 'none';
+
+  _fillDivSelect('mouNewDiv');
+  document.getElementById('mouNewDist').innerHTML = '<option value="">Select District…</option>';
+  const areaEl = document.getElementById('mouNewArea');
+  if (areaEl) areaEl.value = '';
+
+  openModal('moveOrgUnitModal');
+}
+
+function onMouDivChange() {
+  const div   = document.getElementById('mouNewDiv').value;
+  const dists = (ENG_LOCATION_DATA.divDistrictMap || {})[div] || [];
+  document.getElementById('mouNewDist').innerHTML =
+    '<option value="">Select District…</option>' +
+    dists.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+}
+
+function submitMoveOrgUnit() {
+  const newDiv  = document.getElementById('mouNewDiv').value;
+  const newDist = document.getElementById('mouNewDist')?.value || '';
+  const newArea = document.getElementById('mouNewArea')?.value || '';
+
+  if (!newDiv) { toast('Please select a Division', 'warn'); return; }
+  if ((_mouUnitType==='area'||_mouUnitType==='branch') && !newDist) {
+    toast('Please select a District', 'warn'); return;
+  }
+
+  const btn = document.getElementById('mouSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Moving…';
+
+  google.script.run
+    .withSuccessHandler(r => {
+      btn.disabled = false; btn.textContent = 'Confirm Move';
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) { closeModal('moveOrgUnitModal'); loadData(); }
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false; btn.textContent = 'Confirm Move';
+      toast(err.message,'err');
+    })
+    .moveOrgUnit(
+      _mouUnitType,
+      _mouCurrentPath.div,  _mouCurrentPath.dist,
+      _mouCurrentPath.area, _mouCurrentPath.branch,
+      newDiv, newDist, newArea
+    );
+}
+
+// ─── DROPDOWN POPULATION ─────────────────────────────────────────────────────
+function populateCategoryDropdown() {
+  const sel  = document.getElementById('fCategory');
+  if (!sel) return;
+  const cats = DROPDOWN_DATA.categories || [];
+  sel.innerHTML = '<option value="">Select category…</option>' +
+    cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+}
+
+function populateSupplierDropdown() {
+  const sel = document.getElementById('fSupplier');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Select supplier…</option>' +
+    (DROPDOWN_DATA.suppliers || []).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+}
+
+function populateAllLocationDropdowns() {
+  const divs = ENG_LOCATION_DATA.userDivisions || [];
+  ['fDivision','msNewDiv','mouNewDiv','alDiv'].forEach(id => _fillDivSelect(id, divs));
+}
+
+// ─── SHARED HELPERS ───────────────────────────────────────────────────────────
+function _fillDivSelect(id, divs) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const list = divs || ENG_LOCATION_DATA.userDivisions || [];
+  const placeholder = id === 'alDiv' ? 'Select…' : 'Select Division…';
+  sel.innerHTML = `<option value="">${placeholder}</option>` +
+    list.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+}
+</script>
