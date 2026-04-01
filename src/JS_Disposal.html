@@ -1,0 +1,58 @@
+<script>
+// ═══════════════════════════════════════
+//  JS_Disposal.html — Disposal Records
+// ═══════════════════════════════════════
+
+function renderDisposal() {
+  _resetTblSel('disposal');
+  let data = _filterByScope(ASSETS.filter(a => a.status === 'disposal'));
+
+  const q     = (document.getElementById('disposalSearch')?.value    || '').toLowerCase();
+  const fType = document.getElementById('disposalFilterType')?.value  || '';
+  if (q)     data = data.filter(a => [a.Barcode, a.Brand, a.Type, a.Remarks].some(v => (v || '').toLowerCase().includes(q)));
+  if (fType) data = data.filter(a => a.Type === fType);
+
+  if (!pages.disposal) pages.disposal = 1;
+  const totalPages = Math.ceil(data.length / PAGE_SIZE) || 1;
+  if (pages.disposal > totalPages) pages.disposal = totalPages;
+  const slice = data.slice((pages.disposal - 1) * PAGE_SIZE, pages.disposal * PAGE_SIZE);
+
+  const tbody = document.getElementById('tblDisposal');
+  if (!tbody) return;
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="tbl-empty">No disposed assets</td></tr>';
+    document.getElementById('pagerDisposal').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = slice.map(a => {
+    // Try Disposals log first, then fall back to Remarks parsing
+    const dRec = DISPOSALS.find(d => String(d[0]) === a.Barcode) || null;
+    let reason = '—', disposedBy = '—', disposeDate = '—', dispRemarks = '—';
+    if (dRec) {
+      reason      = esc(dRec[1]);
+      disposedBy  = esc(dRec[2]);
+      disposeDate = fmtDate(dRec[3]);
+      dispRemarks = esc(dRec[4]);
+    } else if (a.Remarks) {
+      const match = a.Remarks.match(/DISPOSAL:\s*(.+?)\s+by\s+(.+?)(?:\s*\||$)/i);
+      if (match) { reason = esc(match[1]); disposedBy = esc(match[2]); }
+    }
+
+    return `<tr>
+      <td><input type="checkbox" class="cb cb-disposal" value="${esc(a.Barcode)}" onclick="checkSelTable('disposal')"/></td>
+      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td><span class="type-tag">${esc(a.Type)}</span></td>
+      <td>${esc(a.Brand) || '—'}</td>
+      <td class="mono-sm">${esc(a.Serial) || '—'}</td>
+      <td style="font-size:.8rem;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(a.Staff) || '—'}</td>
+      <td><span class="badge badge-disposal">${reason}</span></td>
+      <td style="font-size:.78rem">${disposedBy}</td>
+      <td class="nowrap-sm">${disposeDate}</td>
+      <td style="font-size:.76rem;color:var(--text2);max-width:150px;overflow:hidden;text-overflow:ellipsis">${dispRemarks}</td>
+    </tr>`;
+  }).join('');
+
+  renderPager('pagerDisposal', 'disposal', totalPages, pages.disposal);
+}
+</script>

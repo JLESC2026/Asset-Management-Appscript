@@ -1,0 +1,216 @@
+<!-- ══ SPARE POOL ══ -->
+<div class="page" id="page-spare">
+  <div class="page-header">
+    <div>
+      <h2>Spare Pool</h2>
+      <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Unallocated assets in storage — ready for assignment</p>
+    </div>
+    <button class="btn btn-bulk-del btn-sm" id="btnBulkDelSpare" onclick="bulkDeleteTable('spare')" style="display:none">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      Delete Selected
+    </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+      <input type="text" id="spareSearch" placeholder="Search spare assets…" oninput="renderSpare()" class="filter-input"/>
+      <select id="spareFilterType" onchange="renderSpare()" class="filter-select">
+        <option value="">All Types</option>
+        <option>Laptop</option><option>Monitor</option><option>CPU</option>
+        <option>Keyboard</option><option>Mouse</option><option>Printer</option>
+        <option>Scanner</option><option>Scansnap</option><option>UPS</option>
+        <option>External Drive</option><option>Camera</option><option>Speaker</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="openAddAssetModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Asset
+      </button>
+    </div>
+  </div>
+  <div id="spareSummary" class="pool-summary"></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:32px"><input type="checkbox" class="cb" id="cbSpare" onclick="toggleSelectAllTable('spare')"/></th>
+        <th style="width:115px">Barcode</th><th style="width:80px">Type</th><th style="width:85px">Brand</th>
+        <th style="width:105px">Serial No.</th><th style="width:78px">Condition</th>
+        <th style="width:88px">Purch. Date</th><th style="width:92px">Warranty Exp.</th>
+        <th style="width:95px">Supplier</th><th style="width:124px">Actions</th>
+      </tr></thead>
+      <tbody id="tblSpare"></tbody>
+    </table>
+    <div class="pager" id="pagerSpare"></div>
+  </div>
+</div>
+
+<!-- ══ ALLOCATED ══ -->
+<div class="page" id="page-allocated">
+  <div class="page-header">
+    <div>
+      <h2>Allocated Assets</h2>
+      <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Assets currently assigned to staff members</p>
+    </div>
+    <button class="btn btn-bulk-del btn-sm" id="btnBulkDelAllocated" onclick="bulkDeleteTable('allocated')" style="display:none">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      Delete Selected
+    </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+      <input type="text" id="allocSearch" placeholder="Search staff, barcode…" oninput="renderAllocated()" class="filter-input"/>
+      <select id="allocFilterType" onchange="renderAllocated()" class="filter-select">
+        <option value="">All Types</option>
+        <option>Laptop</option><option>Monitor</option><option>CPU</option>
+        <option>Keyboard</option><option>Mouse</option><option>Printer</option>
+        <option>Scanner</option><option>Scansnap</option><option>UPS</option>
+      </select>
+      <select id="allocFilterDistrict" onchange="renderAllocated()" class="filter-select">
+        <option value="">All Districts</option>
+      </select>
+    </div>
+  </div>
+  <div id="allocSummary" class="pool-summary"></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:32px"><input type="checkbox" class="cb" id="cbAllocated" onclick="toggleSelectAllTable('allocated')"/></th>
+        <th onclick="sortAlloc('Barcode')" class="sortable" style="width:115px">Barcode</th>
+        <th onclick="sortAlloc('Type')" class="sortable" style="width:78px">Type</th>
+        <th style="width:82px">Brand</th>
+        <th onclick="sortAlloc('Staff')" class="sortable" style="width:125px">Staff</th>
+        <th style="width:76px">EmpID</th>
+        <th style="width:95px">Designation</th>
+        <th style="width:240px">Location</th>
+        <th onclick="sortAlloc('EffDate')" class="sortable" style="width:88px">Date Alloc.</th>
+        <th style="width:78px">Condition</th>
+        <th style="width:158px">Actions</th>
+      </tr></thead>
+      <tbody id="tblAllocated"></tbody>
+    </table>
+    <div class="pager" id="pagerAllocated"></div>
+  </div>
+</div>
+
+<!-- ══ BORROW ══ -->
+<div class="page" id="page-borrow">
+  <div class="page-header">
+    <div>
+      <h2>Borrow Management</h2>
+      <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Track all asset borrowing and returns</p>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-primary btn-sm" onclick="openBorrowModal('')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Borrow
+      </button>
+    </div>
+  </div>
+
+  <!-- Borrow sub-tabs -->
+  <div class="tabs" style="margin-bottom:16px">
+    <button class="tab-btn active" id="btab-active" onclick="switchBorrowTab('active')">
+      Active Borrows
+      <span id="nbBorrowActive" style="background:rgba(245,158,11,.2);color:var(--yellow);font-size:.68rem;padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:700">0</span>
+    </button>
+    <button class="tab-btn" id="btab-pool" onclick="switchBorrowTab('pool')">
+      Borrow Pool
+      <span id="nbBorrowPool" style="background:rgba(249,115,22,.2);color:var(--orange);font-size:.68rem;padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:700">0</span>
+    </button>
+    <button class="tab-btn" id="btab-history" onclick="switchBorrowTab('history')">History</button>
+  </div>
+
+  <!-- Active Borrows pane -->
+  <div id="borrowPane-active">
+    <div class="filter-bar" style="margin-bottom:12px">
+      <input type="text" id="activeBorrowSearch" placeholder="Search borrower, barcode…" oninput="renderActiveBorrows()" class="filter-input"/>
+      <div id="overdueWarn" style="display:none;padding:7px 14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;font-size:.8rem;color:var(--red);font-weight:600"></div>
+      <button class="btn btn-bulk-del btn-sm" id="btnBulkDelActiveBorrow" onclick="bulkDeleteTable('activeBorrow')" style="display:none;margin-left:auto">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        Delete Selected
+      </button>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:32px"><input type="checkbox" class="cb" id="cbActiveBorrow" onclick="toggleSelectAllTable('activeBorrow')"/></th>
+          <th>Barcode</th><th>Type</th><th>Brand</th>
+          <th>Borrower</th><th>EmpID</th><th>Division</th><th>Branch</th>
+          <th>Borrow Date</th><th>Expected Return</th><th>Days Left</th>
+          <th>Actions</th>
+        </tr></thead>
+        <tbody id="tblActiveBorrow"></tbody>
+      </table>
+      <div class="pager" id="pagerActiveBorrow"></div>
+    </div>
+  </div>
+
+  <!-- Borrow Pool pane -->
+  <div id="borrowPane-pool" style="display:none">
+    <div style="padding:10px 14px;background:rgba(249,115,22,.06);border:1px solid rgba(249,115,22,.2);border-radius:8px;font-size:.82rem;color:#fb923c;margin-bottom:12px">
+      <strong>Borrow Pool</strong> — Assets designated specifically for borrowing. These cannot be permanently allocated to staff.
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th>
+          <th>Condition</th><th>Current Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="tblBorrowPool"></tbody>
+      </table>
+      <div class="pager" id="pagerBorrowPool"></div>
+    </div>
+  </div>
+
+  <!-- Borrow History pane -->
+  <div id="borrowPane-history" style="display:none">
+    <div class="filter-bar" style="margin-bottom:12px">
+      <input type="text" id="borrowHistSearch" placeholder="Search borrower, barcode…" oninput="renderBorrowHistory()" class="filter-input"/>
+      <select id="borrowHistStatus" onchange="renderBorrowHistory()" class="filter-select">
+        <option value="">All Status</option>
+        <option value="Borrow">Active</option>
+        <option value="Returned">Returned</option>
+      </select>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Barcode</th><th>Type / Brand</th><th>Borrower</th>
+          <th>EmpID</th><th>Borrow Date</th><th>Expected Return</th>
+          <th>Actual Return</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="tblBorrowHistory"></tbody>
+      </table>
+      <div class="pager" id="pagerBorrowHistory"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ DISPOSAL ══ -->
+<div class="page" id="page-disposal">
+  <div class="page-header">
+    <div>
+      <h2>Disposal Records</h2>
+      <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Damaged, decommissioned, or written-off assets</p>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-bulk-del btn-sm" id="btnBulkDelDisposal" onclick="bulkDeleteTable('disposal')" style="display:none">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        Delete Selected
+      </button>
+      <input type="text" id="disposalSearch" placeholder="Search barcode, reason…" oninput="renderDisposal()" class="filter-input"/>
+      <select id="disposalFilterType" onchange="renderDisposal()" class="filter-select">
+        <option value="">All Types</option>
+        <option>Laptop</option><option>Monitor</option><option>CPU</option>
+        <option>Keyboard</option><option>Mouse</option><option>Printer</option>
+        <option>Scanner</option><option>Scansnap</option><option>UPS</option>
+      </select>
+    </div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:32px"><input type="checkbox" class="cb" id="cbDisposal" onclick="toggleSelectAllTable('disposal')"/></th>
+        <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th>
+        <th>Last Staff</th><th>Reason</th><th>Disposed By</th>
+        <th>Date</th><th>Remarks</th>
+      </tr></thead>
+      <tbody id="tblDisposal"></tbody>
+    </table>
+    <div class="pager" id="pagerDisposal"></div>
+  </div>
+</div>

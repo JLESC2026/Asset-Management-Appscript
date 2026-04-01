@@ -1,0 +1,70 @@
+<script>
+// ═══════════════════════════════════════
+//  JS_Spare.html — Spare Pool
+// ═══════════════════════════════════════
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+function renderSpare() {
+  _resetTblSel('spare');
+  let data = _filterByScope(ASSETS.filter(a => a.status === 'spare'));
+
+  const q      = (document.getElementById('spareSearch')?.value  || '').toLowerCase();
+  const fType  = document.getElementById('spareFilterType')?.value || '';
+  if (q)     data = data.filter(a => [a.Barcode, a.Brand, a.Type, a.Serial, a.Supplier].some(v => (v || '').toLowerCase().includes(q)));
+  if (fType) data = data.filter(a => (a.Type || '').toUpperCase() === fType.toUpperCase());
+
+  // Summary pills
+  const typeCounts = {};
+  data.forEach(a => { if (a.Type) typeCounts[a.Type] = (typeCounts[a.Type] || 0) + 1; });
+  const summEl = document.getElementById('spareSummary');
+  if (summEl) summEl.innerHTML =
+    `<div class="pool-pill pool-pill-accent">${data.length} Available</div>` +
+    Object.entries(typeCounts).sort((a, b) => b[1] - a[1])
+      .map(([t, c]) => `<div class="pool-pill">${esc(t)}: <strong>${c}</strong></div>`).join('');
+
+  if (!pages.spare) pages.spare = 1;
+  const totalPages = Math.ceil(data.length / PAGE_SIZE) || 1;
+  if (pages.spare > totalPages) pages.spare = totalPages;
+  const slice = data.slice((pages.spare - 1) * PAGE_SIZE, pages.spare * PAGE_SIZE);
+
+  const tbody = document.getElementById('tblSpare');
+  if (!tbody) return;
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="tbl-empty">No spare assets</td></tr>';
+    document.getElementById('pagerSpare').innerHTML = '';
+    return;
+  }
+
+  const today = new Date();
+  tbody.innerHTML = slice.map(a => {
+    const wDate    = a.WarrantyVal ? new Date(a.WarrantyVal) : null;
+    const wExpired = wDate && wDate < today;
+    const wLabel   = a.WarrantyVal
+      ? `<span style="color:${wExpired ? 'var(--red)' : 'var(--green)'};font-size:.76rem">${fmtDate(a.WarrantyVal)}${wExpired ? ' ⚠' : ''}</span>`
+      : '<span style="color:var(--text3)">—</span>';
+
+    return `<tr>
+      <td><input type="checkbox" class="cb cb-spare" value="${esc(a.Barcode)}" onclick="checkSelTable('spare')"/></td>
+      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td><span class="type-tag">${esc(a.Type)}</span></td>
+      <td>${esc(a.Brand) || '—'}</td>
+      <td class="mono-sm">${esc(a.Serial) || '—'}</td>
+      <td><span class="cond-${(a.Condition || 'good').toLowerCase()}">${esc(a.Condition)}</span></td>
+      <td class="nowrap-sm">${fmtDate(a.PurchDate) || '—'}</td>
+      <td>${wLabel}</td>
+      <td style="font-size:.78rem;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(a.Supplier) || '—'}</td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-icon btn-allocate" data-tip="Allocate" onclick="openAllocateModal('${esc(a.Barcode)}')">${_ICO.allocate}</button>
+          <button class="btn btn-icon btn-borrow"   data-tip="Borrow"   onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>
+          <button class="btn btn-icon btn-danger"   data-tip="Dispose"  onclick="openDisposalModal('${esc(a.Barcode)}')">${_ICO.dispose}</button>
+          <button class="btn btn-icon btn-secondary"data-tip="View"     onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  renderPager('pagerSpare', 'spare', totalPages, pages.spare);
+}
+</script>
