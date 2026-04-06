@@ -273,25 +273,41 @@ function loginUser(empId, password) {
         ? locData.userDistricts[0]
         : mlDistrict;
 
-      let seniorDistrictScope = [];
+let seniorDistrictScope = [];
       if (roleTier === 'senior') {
-        const supervisedDistricts = getDistrictsBySupervisor(id);
-        if (supervisedDistricts.length > 0) {
-          seniorDistrictScope = supervisedDistricts;
+        // Detect if this senior is a Head Office manager
+        const isHO = division === 'Head Office' ||
+          (locData.userDivisions.length > 0 && locData.userDivisions[0] === 'Head Office');
+
+        if (isHO) {
+          // Head Office senior — scope is all departments
+          const allDepts = locData.headOfficeDepts || getHeadOfficeDepts();
+          seniorDistrictScope = allDepts.length > 0
+            ? allDepts
+            : (locData.userDistricts.length > 0
+                ? locData.userDistricts
+                : (mlDistrict ? [mlDistrict] : []));
         } else {
-          const userDivs = locData.userDivisions.length > 0
-            ? locData.userDivisions
-            : (mlDivision ? [mlDivision] : []);
-          const ddMap = locData.divDistrictMap || {};
-          userDivs.forEach(div => {
-            (ddMap[div] || []).forEach(d => {
-              if (!seniorDistrictScope.includes(d)) seniorDistrictScope.push(d);
+          // Field senior — scope is supervised districts
+          const supervisedDistricts = getDistrictsBySupervisor(id);
+          if (supervisedDistricts.length > 0) {
+            seniorDistrictScope = supervisedDistricts;
+          } else {
+            // Fallback: try division→district map, then userDistricts
+            const userDivs = locData.userDivisions.length > 0
+              ? locData.userDivisions
+              : (mlDivision ? [mlDivision] : []);
+            const ddMap = locData.divDistrictMap || {};
+            userDivs.forEach(div => {
+              (ddMap[div] || []).forEach(d => {
+                if (!seniorDistrictScope.includes(d)) seniorDistrictScope.push(d);
+              });
             });
-          });
-          if (seniorDistrictScope.length === 0) {
-            seniorDistrictScope = locData.userDistricts.length > 0
-              ? locData.userDistricts
-              : (mlDistrict ? [mlDistrict] : []);
+            if (seniorDistrictScope.length === 0) {
+              seniorDistrictScope = locData.userDistricts.length > 0
+                ? locData.userDistricts
+                : (mlDistrict ? [mlDistrict] : []);
+            }
           }
         }
       }
@@ -305,6 +321,7 @@ function loginUser(empId, password) {
                           ? locData.userDistricts
                           : (mlDistrict ? [mlDistrict] : []),
         seniorDistrictScope,
+        headOfficeDepts: locData.headOfficeDepts || [],
         divDistrictMap: locData.divDistrictMap || {},
         area:   String(row[6] || '').trim(),
         branch: String(row[7] || '').trim()
@@ -1024,6 +1041,32 @@ function getDropdownData() {
   }
 }
 
+function getHeadOfficeDepts() {
+  try {
+    const ss    = _ss();
+    const ddSh  = ss.getSheetByName(SH_DROPDOWN);
+    if (!ddSh || ddSh.getLastRow() < 2) return [];
+    const lastCol  = ddSh.getLastColumn();
+    const lastRow  = ddSh.getLastRow();
+    const headerRow = ddSh.getRange(1, 1, 1, lastCol).getValues()[0];
+    let deptCol = -1;
+    for (let c = 0; c < headerRow.length; c++) {
+      const h = String(headerRow[c] || '').trim().toUpperCase();
+      if (h === 'DEPARTMENTS' || h === 'HEAD OFFICE' ||
+          h === 'HO DEPTS'   || h === 'HEAD OFFICE DEPTS') {
+        deptCol = c; break;
+      }
+    }
+    if (deptCol < 0) return [];
+    const depts = [];
+    for (let r = 1; r < lastRow; r++) {
+      const v = String(ddSh.getRange(r + 1, deptCol + 1).getValue() || '').trim();
+      if (v) depts.push(v);
+    }
+    return depts;
+  } catch (e) { return []; }
+}
+
 // ─── ENGINEER LOCATION DATA ───────────────────────────────────────────────────
 function getEngineerLocationData() {
   return getLocationData(null);
@@ -1111,14 +1154,21 @@ function getLocationData(empId) {
       result.userDistricts = [...distSet].sort(numSort);
 
       result.userDivisions.forEach(div => {
-        const mapped = result.divDistrictMap[div] || [];
-        result.userDivisionDistricts[div] = mapped.length > 0 ? mapped : result.userDistricts;
-      });
+              const mapped = result.divDistrictMap[div] || [];
+              result.userDivisionDistricts[div] = mapped.length > 0 ? mapped : result.userDistricts;
+            });
+      // Wire Head Office departments into divDistrictMap so dropdowns work
+      const _hoDepts = getHeadOfficeDepts();
+      result.headOfficeDepts = _hoDepts;
+      if (_hoDepts.length > 0) {
+        result.divDistrictMap['Head Office'] = _hoDepts;
+        result.userDivisionDistricts['Head Office'] = _hoDepts;
+      }
     }
 
     return result;
   } catch (e) {
-    return { divDistrictMap: {}, userDivisions: [], userDistricts: [], userDivisionDistricts: {}, error: e.message };
+    return { divDistrictMap: {}, userDivisions: [], userDistricts: [], userDivisionDistricts: {}, headOfficeDepts: [], error: e.message };
   }
 }
 
