@@ -194,7 +194,16 @@ function _renderStaffDistNode(div, dist) {
     +'</div>';
   if (isOpen) {
     html += '<div class="st-children">';
-    areaKeys.forEach(function(area){ html += _renderStaffAreaNode(div, dist, area); });
+    areaKeys.forEach(function(area) {
+      if (area === '(No Area)') {
+        // Skip the area node — render branches directly under district
+        Object.keys(_stTree[div][dist][area]).sort().forEach(function(branch) {
+          html += _renderStaffBranchNode(div, dist, area, branch);
+        });
+      } else {
+        html += _renderStaffAreaNode(div, dist, area);
+      }
+    });
     html += '</div>';
   }
   html += '</div>';
@@ -229,8 +238,6 @@ function _renderStaffAreaNode(div, dist, area) {
 }
 
 function _renderStaffBranchNode(div, dist, area, branch) {
-  var key = div+'::'+dist+'::'+area+'::'+branch;
-  var isOpen = !!_stExpanded[key];
   var empIds = Object.keys(_stTree[div][dist][area][branch]).sort(function(a,b){
     var na = _stTree[div][dist][area][branch][a].name;
     var nb = _stTree[div][dist][area][branch][b].name;
@@ -238,17 +245,26 @@ function _renderStaffBranchNode(div, dist, area, branch) {
   });
   var assetCount = 0;
   empIds.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
-  var branchLabel = branch === '(No Branch)' ? '<em style="opacity:.6">No Branch</em>' : esc(branch);
+
+  // No real branch — render employees directly without the branch wrapper
+  if (branch === '(No Branch)') {
+    var html = '';
+    empIds.forEach(function(empId) { html += _renderEmpNode(div, dist, area, branch, empId); });
+    return html;
+  }
+
+  var key = div+'::'+dist+'::'+area+'::'+branch;
+  var isOpen = !!_stExpanded[key];
   var html = '<div class="st-node st-branch">'
     +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
     +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
     +'<span class="st-icon">🏬</span>'
-    +'<span class="st-label">'+branchLabel+'</span>'
+    +'<span class="st-label">'+esc(branch)+'</span>'
     +'<span class="st-meta">'+empIds.length+' staff · '+assetCount+' assets</span>'
     +'</div>';
   if (isOpen) {
     html += '<div class="st-children">';
-    empIds.forEach(function(empId){ html += _renderEmpNode(div, dist, area, branch, empId); });
+    empIds.forEach(function(empId) { html += _renderEmpNode(div, dist, area, branch, empId); });
     html += '</div>';
   }
   html += '</div>';

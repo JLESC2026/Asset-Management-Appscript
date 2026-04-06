@@ -125,25 +125,34 @@ function _renderEquipDivNode(div, distTree) {
   return html;
 }
 
-function _renderEquipDistNode(div, dist, areaTree) {
+function _renderEquipDistNode(div, dist, distTree) {
   var key = 'eq-dist::'+div+'::'+dist;
   var isOpen = !!_eqExpanded[key];
-  var areaKeys = Object.keys(areaTree).sort();
+  var areaKeys = Object.keys(distTree).sort();
   var assetCount = 0;
   areaKeys.forEach(function(area) {
-    Object.keys(areaTree[area]).forEach(function(b){ assetCount += areaTree[area][b].length; });
+    Object.keys(distTree[area]).forEach(function(b){ assetCount += distTree[area][b].length; });
   });
   var html = '<div class="st-node st-dist">'
     +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
     +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
     +'<span class="st-icon">📍</span>'
     +'<span class="st-label">'+esc(dist)+'</span>'
-    +'<span class="st-meta">'+areaKeys.length+' area(s) · '+assetCount+' assets</span>'
+    +'<span class="st-meta">'+areaKeys.filter(function(a){return a!=='(No Area)';}).length+' area(s) · '+assetCount+' assets</span>'
     +'<button class="btn btn-icon btn-secondary" data-tip="Move District to another Division" onclick="event.stopPropagation();openMoveOrgUnitModal(\'district\',\''+esc(div)+'\',\''+esc(dist)+'\',\'\',\'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">'+_ICO.transfer+'</button>'
     +'</div>';
   if (isOpen) {
     html += '<div class="st-children">';
-    areaKeys.forEach(function(area){ html += _renderEquipAreaNode(div, dist, area, areaTree[area]); });
+    areaKeys.forEach(function(area) {
+      if (area === '(No Area)') {
+        // Skip area level — render branch cards directly under district
+        Object.keys(distTree[area]).sort().forEach(function(branch) {
+          html += _renderEquipBranchNode(div, dist, area, branch, distTree[area][branch]);
+        });
+      } else {
+        html += _renderEquipAreaNode(div, dist, area, distTree[area]);
+      }
+    });
     html += '</div>';
   }
   html += '</div>';
@@ -185,7 +194,10 @@ function _renderEquipBranchNode(div, dist, area, branch, assets) {
   var allocated = assets.filter(function(a){ return ['allocated','transfer'].indexOf(a.status)>=0; }).length;
   var spare     = assets.filter(function(a){ return a.status==='spare'; }).length;
   var borrowed  = assets.filter(function(a){ return a.status==='borrowed'; }).length;
-  var branchLabel = branch === '(No Branch)' ? '<em style="opacity:.6">No Branch</em>' : esc(branch);
+  var branchLabel = branch === '(No Branch)'
+  ? '<span style="color:var(--text3);font-size:.8rem;font-style:italic">Unassigned Location</span>'
+  : esc(branch);
+  var showMoveBtn = branch !== '(No Branch)';
   return '<div class="st-node st-emp" style="margin-left:28px">'
     +'<div class="st-row" style="cursor:default;gap:10px">'
     +'<span class="st-icon">🏬</span>'
@@ -198,10 +210,11 @@ function _renderEquipBranchNode(div, dist, area, branch, assets) {
     +'</div>'
     +'</div>'
     +'<div class="st-type-chips" style="flex:0 1 auto">'+chips+'</div>'
-    +'<button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area" onclick="openMoveOrgUnitModal(\'branch\',\''+esc(div)+'\',\''+esc(dist)+'\',\''+esc(area)+'\',\''+esc(branch)+'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">'+_ICO.transfer+'</button>'
-    +'<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal('+idx+')" style="flex-shrink:0;gap:5px">'+_ICO.view+' View '+assets.length+'</button>'
-    +'</div>'
-    +'</div>';
+    + '<div class="st-type-chips" style="flex:0 1 auto">' + chips + '</div>'
+    + (showMoveBtn ? '<button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area" onclick="openMoveOrgUnitModal(\'branch\',\'' + esc(div) + '\',\'' + esc(dist) + '\',\'' + esc(area) + '\',\'' + esc(branch) + '\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">' + _ICO.transfer + '</button>' : '')
+    + '<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal(' + idx + ')" style="flex-shrink:0;gap:5px">' + _ICO.view + ' View ' + assets.length + '</button>'
+    + '</div>'
+    + '</div>';
 }
 
 function openEquipBranchModal(idx) {

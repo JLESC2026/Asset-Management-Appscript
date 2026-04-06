@@ -264,7 +264,7 @@ function _buildEnrollConfirm() {
 
 function _submitEnroll() {
   const btn = document.getElementById('enrollNextBtn');
-  btn.disabled = true; btn.textContent = 'Enrolling…';
+  _lockBtn(btn);
 
   const specs = [];
   document.querySelectorAll('#laptopSpecsRows .spec-row').forEach(row => {
@@ -297,12 +297,12 @@ function _submitEnroll() {
 
   google.script.run
     .withSuccessHandler(r => {
-      btn.disabled = false; btn.textContent = 'Enroll Asset';
+      _unlockBtn(btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('addAssetModal'); loadData(); }
     })
     .withFailureHandler(err => {
-      btn.disabled = false; btn.textContent = 'Enroll Asset';
+      _unlockBtn(btn);
       toast(err.message, 'err');
     })
     .processAsset(obj, false);
@@ -462,18 +462,19 @@ function submitAllocate() {
   const branch = document.getElementById('alBranch').value.trim();
   const effDate= document.getElementById('alEffDate').value;
   const remarks= document.getElementById('alRemarks').value.trim();
-
   if (!empId)  { toast('Employee ID is required', 'warn'); return; }
   if (!staff)  { toast('Staff name is required', 'warn'); return; }
   if (!effDate){ toast('Effectivity date is required', 'warn'); return; }
-
+  const _btn = document.querySelector('#allocateModal .modal-footer .btn-primary');
+  _lockBtn(_btn);
   const a = ASSETS.find(x => x.Barcode === _allocBarcode) || {};
   google.script.run
     .withSuccessHandler(r => {
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('allocateModal'); loadData(); }
     })
-    .withFailureHandler(err => toast(err.message,'err'))
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .allocateAsset({
       barcode:_allocBarcode, empId, staffName:staff, designation:desig,
       division:div, district:dist, area, branch, effDate, remarks,
@@ -493,12 +494,15 @@ function openDeallocModal(barcode, staffName) {
 
 function submitDealloc() {
   const remarks = document.getElementById('deallocRemarks').value.trim();
+  const _btn = document.querySelector('#deallocModal .modal-footer .btn:last-child');
+  _lockBtn(_btn);
   google.script.run
     .withSuccessHandler(r => {
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('deallocModal'); loadData(); }
     })
-    .withFailureHandler(err => toast(err.message,'err'))
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .deallocateAsset(_deallocBarcode, remarks);
 }
 
@@ -576,18 +580,19 @@ function submitTransfer() {
   const toStaff = document.getElementById('tToStaff').value.trim();
   const effDate = document.getElementById('tEffDate').value;
   const tType   = document.getElementById('tType').value;
-
   if (!barcode) { toast('Barcode is required', 'warn'); return; }
   if (!toEmpId) { toast('Destination Employee ID is required', 'warn'); return; }
   if (!toStaff) { toast('Destination Staff Name is required — enter Employee ID first', 'warn'); return; }
   if (!effDate) { toast('Transfer Date is required', 'warn'); return; }
-
+  const _btn = document.querySelector('#transferModal .modal-footer .btn-primary');
+  _lockBtn(_btn);
   google.script.run
     .withSuccessHandler(r => {
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('transferModal'); loadData(); }
     })
-    .withFailureHandler(err => toast(err.message,'err'))
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .saveTransfer({
       barcode, transferType:tType, effDate,
       fromStaff:   document.getElementById('tFromStaff').value,
@@ -599,13 +604,13 @@ function submitTransfer() {
       fromBranch:  document.getElementById('tFromBranch').value,
       fromRemarks: document.getElementById('tFromRemarks').value,
       toStaff, toEmpId,
-      toDesig:     document.getElementById('tToDesig').value,
-      toDiv:       document.getElementById('tToDiv').value,
-      toDist:      document.getElementById('tToDist').value,
-      toArea:      document.getElementById('tToArea').value,
-      toBranch:    document.getElementById('tToBranch').value,
-      toRemarks:   document.getElementById('tToRemarks').value,
-      status:      'Completed'
+      toDesig:   document.getElementById('tToDesig').value,
+      toDiv:     document.getElementById('tToDiv').value,
+      toDist:    document.getElementById('tToDist').value,
+      toArea:    document.getElementById('tToArea').value,
+      toBranch:  document.getElementById('tToBranch').value,
+      toRemarks: document.getElementById('tToRemarks').value,
+      status:    'Completed'
     });
 }
 
@@ -653,18 +658,19 @@ function submitBorrow() {
   const name    = document.getElementById('bName').value.trim();
   const bDate   = document.getElementById('bDate').value;
   const expRet  = document.getElementById('bExpReturn').value;
-
   if (!barcode) { toast('Barcode is required', 'warn'); return; }
   if (!name)    { toast('Borrower name is required', 'warn'); return; }
   if (!bDate)   { toast('Borrow date is required', 'warn'); return; }
   if (!expRet)  { toast('Expected return date is required', 'warn'); return; }
-
+  const _btn = document.querySelector('#borrowModal .modal-footer .btn-primary');
+  _lockBtn(_btn);
   google.script.run
     .withSuccessHandler(r => {
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('borrowModal'); loadData(); }
     })
-    .withFailureHandler(err => toast(err.message,'err'))
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .saveBorrow({
       barcode, borrowerName:name,
       empId:          document.getElementById('bEmpId').value,
@@ -689,12 +695,15 @@ function openReturnModal(barcode, borrowerName) {
 
 function submitReturn() {
   if (!document.getElementById('retDate').value) { toast('Return date is required', 'warn'); return; }
+  const _btn = document.querySelector('#returnModal .modal-footer .btn-success');
+  _lockBtn(_btn);
   google.script.run
     .withSuccessHandler(r => {
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('returnModal'); loadData(); }
     })
-    .withFailureHandler(err => toast(err.message,'err'))
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .returnAsset(_returnBarcode, document.getElementById('retDate').value);
 }
 
@@ -718,12 +727,15 @@ function submitDisposal() {
   const date   = document.getElementById('dDate').value;
   if (!reason) { toast('Reason is required', 'warn'); return; }
   if (!by)     { toast('"Disposed By" is required', 'warn'); return; }
+  const _btn = document.querySelector('#disposalModal .modal-footer .btn-danger');
+  _lockBtn(_btn);
   google.script.run
     .withSuccessHandler(r => {
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('disposalModal'); loadData(); }
     })
-    .withFailureHandler(err => toast(err.message,'err'))
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .saveDisposal({
       barcode:_disposalBarcode, reason, disposedBy:by,
       disposeDate:date, remarks:document.getElementById('dRemarks').value
@@ -766,22 +778,16 @@ function submitMoveStaff() {
   const newArea   = document.getElementById('msNewArea').value;
   const newBranch = document.getElementById('msNewBranch').value;
   const action    = document.querySelector('input[name="msAction"]:checked')?.value || 'move';
-
   if (!newDiv || !newDist) { toast('Division and District are required', 'warn'); return; }
-
-  const btn = document.getElementById('msSubmitBtn');
-  btn.disabled = true; btn.textContent = 'Moving…';
-
+  const _btn = document.getElementById('msSubmitBtn');
+  _lockBtn(_btn);
   google.script.run
     .withSuccessHandler(r => {
-      btn.disabled = false; btn.textContent = 'Confirm Move';
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('moveStaffModal'); loadData(); }
     })
-    .withFailureHandler(err => {
-      btn.disabled = false; btn.textContent = 'Confirm Move';
-      toast(err.message,'err');
-    })
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .moveStaff(_moveStaffEmpId, newDiv, newDist, newArea, newBranch, action);
 }
 
@@ -830,25 +836,19 @@ function submitMoveOrgUnit() {
   const newDiv  = document.getElementById('mouNewDiv').value;
   const newDist = document.getElementById('mouNewDist')?.value || '';
   const newArea = document.getElementById('mouNewArea')?.value || '';
-
   if (!newDiv) { toast('Please select a Division', 'warn'); return; }
   if ((_mouUnitType==='area'||_mouUnitType==='branch') && !newDist) {
     toast('Please select a District', 'warn'); return;
   }
-
-  const btn = document.getElementById('mouSubmitBtn');
-  btn.disabled = true; btn.textContent = 'Moving…';
-
+  const _btn = document.getElementById('mouSubmitBtn');
+  _lockBtn(_btn);
   google.script.run
     .withSuccessHandler(r => {
-      btn.disabled = false; btn.textContent = 'Confirm Move';
+      _unlockBtn(_btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
       if (!r.startsWith('Error')) { closeModal('moveOrgUnitModal'); loadData(); }
     })
-    .withFailureHandler(err => {
-      btn.disabled = false; btn.textContent = 'Confirm Move';
-      toast(err.message,'err');
-    })
+    .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .moveOrgUnit(
       _mouUnitType,
       _mouCurrentPath.div,  _mouCurrentPath.dist,

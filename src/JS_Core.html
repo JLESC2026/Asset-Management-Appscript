@@ -136,6 +136,19 @@ function daysUntil(dateStr){
 
 function todayISO(){ return new Date().toISOString().split('T')[0]; }
 
+function _lockBtn(el){
+  if(!el) return;
+  el.style.minWidth=el.offsetWidth+'px';
+  el.classList.add('btn-loading');
+  el.disabled=true;
+}
+function _unlockBtn(el){
+  if(!el) return;
+  el.classList.remove('btn-loading');
+  el.disabled=false;
+  el.style.minWidth='';
+}
+
 // ═══════════════════════════════════════
 //  ACCESS CONTROL
 // ═══════════════════════════════════════
@@ -166,7 +179,7 @@ function _filterByScope(assets){
   if(dists.length === 0) return [];
   return assets.filter(function(a){
     var dist = (a.District||'').toLowerCase();
-    if(!dist && (a.status==='spare' || a.status==='borrow-item')) return true;
+    if(!dist && (a.status==='spare' || a.status==='borrow-item' ||  a.status==='disposal')) return true;
     return dists.indexOf(dist) >= 0;
   });
 }

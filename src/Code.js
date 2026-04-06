@@ -1,18 +1,21 @@
 // ═══════════════════════════════════════════════════════════
-//  ASSET MANAGEMENT SYSTEM — Code.gs  (v5.4 — Bug-Fix Release)
+//  ASSET MANAGEMENT SYSTEM — Code.gs  (v5.5 — Column Map Fix)
 //
-//  Fixes applied vs v5.3:
-//    BUG-C03 — Senior seniorDistrictScope now derived from
-//              Eng.List supervisor column via getDistrictsBySupervisor()
-//    BUG-C04 — getDropdownData() handles 'SCANNER SCANSNAP' merged header
-//    BUG-H06 — SESSION.division/district prefer Eng.List (authoritative)
-//    BUG-H07 — 'network engineer' removed from ADMIN_ROLES
-//    BUG-H08 — 'senior network engineer' added to ADMIN_ROLES
-//    BUG-M04 — returnAsset() now clears BOR_REMARKS after return
-//    BUG-L05 — _normDist()/_normDiv() applied on write paths
-//              (processAsset, allocateAsset)
+//  Fixes applied vs v5.4:
+//    BUG-COL — const C column map corrected to match actual 61-column
+//              sheet layout. The sheet has 5 extra columns not in the
+//              original map, shifting all reads/writes from DIVISION
+//              onwards by up to 5 positions:
+//                Col  6: Department
+//                Col  7: Base Office
+//                Col 12: Assignment
+//                Col 20: Asset Location
+//                Col 28: Notes
+//              This caused Barcode to show staff names, Purchase Date
+//              to show names, etc. across all table views.
+//    BUG-COL — AE_HEADERS updated to 61 entries matching actual sheet
+//    BUG-COL — BOR_DIST safe-read guard updated from >= 56 to >= 61
 //
-//  ⚠ GOOGLE SHEETS MANUAL STEPS REQUIRED (see bottom of this file)
 // ═══════════════════════════════════════════════════════════
 
 const SHEET_ID    = '18tuYQKH2OLLu1NqPJiA28n8n7GNN6XR_SSZXUO4XEe8';
@@ -28,32 +31,50 @@ const SH_ALLOC    = 'Allocated';
 const AE_DATA_START = 4;
 
 // ─── COLUMN MAP (1-based) ────────────────────────────────────────────────────
+// Actual sheet has 61 columns. Extra cols not in logic:
+//   Col  6: Department
+//   Col  7: Base Office
+//   Col 12: Assignment
+//   Col 20: Asset Location
+//   Col 28: Notes
 const C = {
-  ENTRY_EMP_ID:1, ENTRY_NAME:2,
-  EMP_ID:3, STAFF:4, DESIGNATION:5, DIVISION:6,
-  DISTRICT:7, AREA:8, BRANCH:9, EFF_DATE:10,
-  BARCODE:11, TYPE:12, BRAND:13, SERIAL:14, SPECS:15,
-  CONDITION:16, LIFECYCLE:17, STATUS_LABEL:18, ASSET_STATUS:19,
-  PURCH_DATE:20, WARRANTY_TERM:21, WARRANTY_VAL:22, REMARKS:23,
-  XFER_TYPE:24, FR_STAFF:25, FR_EMPID:26, FR_DESIG:27, FR_DIV:28,
-  FR_DIST:29, FR_AREA:30, FR_BRANCH:31, FR_REMARKS:32,
-  TO_STAFF:33, TO_EMPID:34, TO_DESIG:35, TO_DIV:36, TO_DIST:37,
-  TO_AREA:38, TO_BRANCH:39, TO_REMARKS:40, XFER_DATE:41,
-  BOR_NAME:42, BOR_EMPID:43, BOR_DESIG:44, BOR_DIV:45, BOR_BRANCH:46,
-  BOR_DATE:47, EXP_RETURN:48, ACT_RETURN:49, BOR_REMARKS:50,
-  CREATED_AT:51, LAST_UPDATED:52, SUPPLIER:53, LOCATION:54, ENROLLED_BY:55,
-  BOR_DIST:56
+  ENTRY_EMP_ID:1,  ENTRY_NAME:2,
+  EMP_ID:3,        STAFF:4,          DESIGNATION:5,
+  // Col 6 = Department, Col 7 = Base Office (not mapped)
+  DIVISION:8,      DISTRICT:9,       AREA:10,        BRANCH:11,
+  // Col 12 = Assignment (not mapped)
+  EFF_DATE:13,
+  BARCODE:14,      TYPE:15,          BRAND:16,       SERIAL:17,    SPECS:18,
+  CONDITION:19,
+  // Col 20 = Asset Location (not mapped)
+  LIFECYCLE:21,    STATUS_LABEL:22,  ASSET_STATUS:23,
+  PURCH_DATE:24,   WARRANTY_TERM:25, WARRANTY_VAL:26, REMARKS:27,
+  // Col 28 = Notes (not mapped)
+  XFER_TYPE:29,    FR_STAFF:30,      FR_EMPID:31,    FR_DESIG:32,  FR_DIV:33,
+  FR_DIST:34,      FR_AREA:35,       FR_BRANCH:36,   FR_REMARKS:37,
+  TO_STAFF:38,     TO_EMPID:39,      TO_DESIG:40,    TO_DIV:41,    TO_DIST:42,
+  TO_AREA:43,      TO_BRANCH:44,     TO_REMARKS:45,  XFER_DATE:46,
+  BOR_NAME:47,     BOR_EMPID:48,     BOR_DESIG:49,   BOR_DIV:50,   BOR_BRANCH:51,
+  BOR_DATE:52,     EXP_RETURN:53,    ACT_RETURN:54,  BOR_REMARKS:55,
+  CREATED_AT:56,   LAST_UPDATED:57,  SUPPLIER:58,    LOCATION:59,  ENROLLED_BY:60,
+  BOR_DIST:61
 };
-const TOTAL_COLS = Math.max(...Object.values(C)); // = 56
+const TOTAL_COLS = Math.max(...Object.values(C)); // = 61
 
-// AE_HEADERS: 56 entries, one per column.
+// AE_HEADERS: 61 entries matching the actual sheet column layout.
 const AE_HEADERS = [
   'Entry Employee ID','Entered By',
-  'Accountable Employee ID','Accountable Staff','Designation','Division',
-  'District','Area','Branch','Effectivity Date',
+  'Accountable Employee ID','Accountable Staff','Designation',
+  'Department','Base Office',
+  'Division','District','Area','Branch',
+  'Assignment',
+  'Effectivity Date',
   'Barcode','Category','Brand','Serial No.','Specifications',
-  'Condition','Lifecycle Status','Status Label','Assignment Status',
+  'Condition',
+  'Asset Location',
+  'Lifecycle Status','Status Label','Assignment Status',
   'Date of Purchase','Warranty Term','Warranty Validity','Remarks',
+  'Notes',
   'Transfer Type','From Staff','From EmpID','From Designation','From Division',
   'From District','From Area','From Branch','From Remarks',
   'To Staff','To EmpID','To Designation','To Division','To District',
@@ -62,7 +83,7 @@ const AE_HEADERS = [
   'Borrow Division','Borrow Branch','Borrow Date',
   'Expected Return Date','Actual Return Date','Borrow Remarks',
   'Created At','Last Updated','Supplier','Location','Enrolled By',
-  'Borrow District'   // ← col 56  (BUG-C02 fix: header now listed)
+  'Borrow District'   // ← col 61
 ];
 
 // ─── SHEET HELPERS ───────────────────────────────────────────────────────────
@@ -123,7 +144,7 @@ function _computeStatus(lc, slb, actReturn, empId, borName, assetStatus) {
   if (l === 'borrow')                                  return r ? 'returned' : 'borrowed';
   if (l === 'returned')                                return 'returned';
   if (l === 'dispose'  || l === 'disposal'  ||
-      as === 'disposal' || as === 'dispose')           return 'disposal';
+      as === 'disposal' || as === 'dispose' || s === 'disposed')           return 'disposal';
   if (l === 'transfer')                                return 'transfer';
   if (l === 'allocated' || s === 'assigned')           return 'allocated';
 
@@ -138,14 +159,14 @@ function _normDiv(raw) {
   if (!raw) return '';
   const s = String(raw).trim();
   if (!s) return '';
-  return s.replace(/^DIv/i, m => 'Div');          // e.g. 'DIvision 1' → 'Division 1'
+  return s.replace(/^DIv/i, m => 'Div');
 }
 function _normDist(raw) {
   if (!raw) return '';
   const s = String(raw).trim();
   if (!s) return '';
   const m = s.match(/^district\s+0*(\d+)$/i);
-  if (m) return 'District ' + parseInt(m[1]);     // 'district 05' → 'District 5'
+  if (m) return 'District ' + parseInt(m[1]);
   return s;
 }
 
@@ -175,12 +196,6 @@ function _isHashed(str) {
 }
 
 // ─── ROLE CLASSIFICATION ──────────────────────────────────────────────────────
-// Two-tier role system:
-//   SENIOR — Any role whose title contains the word 'senior'.
-//            Division-scoped: sees all districts in their supervised division.
-//   FE     — All other roles (Field Engineer, Network Engineer, etc.).
-//            District-scoped: sees only their own assigned district.
-
 function _classifyRole(roleStr) {
   const r = String(roleStr || '').trim().toLowerCase();
   if (r.includes('senior')) return 'senior';
@@ -188,10 +203,6 @@ function _classifyRole(roleStr) {
 }
 
 // ─── SUPERVISOR DISTRICT LOOKUP ────────────────────────────────
-// New function: returns all districts supervised by a given employee ID.
-// Queries Eng.List column 3 (supervisor ID column, 0-indexed = r[2]).
-// Used to build Senior scope in loginUser() — replaces the broken
-// division→district lookup that always returned empty for Seniors.
 function getDistrictsBySupervisor(empId) {
   try {
     const ss = _ss();
@@ -204,10 +215,8 @@ function getDistrictsBySupervisor(empId) {
     const id = String(empId).trim().toLowerCase();
 
     data.forEach(r => {
-      // col 3 = supervisor ID = r[2] (0-indexed in array)
       const supId = String(r[2] || '').trim().toLowerCase();
       if (supId === id) {
-        // col 9 = district = r[8] (0-indexed)
         const dist = String(r[8] || '').trim();
         if (dist) distSet.add(dist);
       }
@@ -251,7 +260,6 @@ function loginUser(empId, password) {
 
       const firstLogin = (pwd === '1234' || pwd === _hashPwd('1234'));
 
-      // Masterlist values (used as fallback only — BUG-H06 FIX)
       const mlDivision = String(row[4] || '').trim();
       const mlDistrict = String(row[5] || '').trim();
 
@@ -269,10 +277,8 @@ function loginUser(empId, password) {
       if (roleTier === 'senior') {
         const supervisedDistricts = getDistrictsBySupervisor(id);
         if (supervisedDistricts.length > 0) {
-          // Primary path: use all districts this Senior supervises
           seniorDistrictScope = supervisedDistricts;
         } else {
-          // Fallback: try division→district map, then userDistricts
           const userDivs = locData.userDivisions.length > 0
             ? locData.userDivisions
             : (mlDivision ? [mlDivision] : []);
@@ -405,7 +411,7 @@ function getAllAssets() {
           BorDate: get(C.BOR_DATE), ExpReturn: get(C.EXP_RETURN),
           ActReturn: get(C.ACT_RETURN), BorRemarks: get(C.BOR_REMARKS),
           BorDesig: get(C.BOR_DESIG), BorDiv: get(C.BOR_DIV), BorBranch: get(C.BOR_BRANCH),
-          BorDist: colCount >= 56 ? get(C.BOR_DIST) : '',  // safe read if col exists
+          BorDist: colCount >= 61 ? get(C.BOR_DIST) : '',  // safe read
           CreatedAt: get(C.CREATED_AT), LastUpdated: get(C.LAST_UPDATED),
           Supplier: get(C.SUPPLIER), Location: get(C.LOCATION),
           EntryEmpId: get(C.ENTRY_EMP_ID), EntryName: get(C.ENTRY_NAME),
@@ -461,7 +467,6 @@ function processAsset(obj, isAssign) {
       const sm = STATUS_MAP[statusChoice] || STATUS_MAP['Spare'];
       const isSpare = statusChoice === 'Spare' || statusChoice === 'BorrowItem';
 
-
       const normDiv  = _normDiv(obj.division  || '');
       const normDist = _normDist(obj.district || '');
 
@@ -471,8 +476,8 @@ function processAsset(obj, isAssign) {
       row[C.EMP_ID       - 1] = isSpare ? '' : (obj.accEmpId || '');
       row[C.STAFF        - 1] = isSpare ? '' : (obj.accName  || '');
       row[C.DESIGNATION  - 1] = isSpare ? '' : (obj.accRole  || '');
-      row[C.DIVISION     - 1] = normDiv;          // BUG-L05 FIX
-      row[C.DISTRICT     - 1] = normDist;         // BUG-L05 FIX
+      row[C.DIVISION     - 1] = normDiv;
+      row[C.DISTRICT     - 1] = normDist;
       row[C.AREA         - 1] = obj.area      || '';
       row[C.BRANCH       - 1] = obj.branch    || '';
       row[C.EFF_DATE     - 1] = obj.effDate   || '';
@@ -530,8 +535,8 @@ function processAsset(obj, isAssign) {
     _setRow(sh, rowIdx, [
       [C.LIFECYCLE,    lc], [C.ASSET_STATUS, asSt], [C.STATUS_LABEL, stLbl],
       [C.EMP_ID,       obj.employeeId  || ''], [C.STAFF,  staff || ''],
-      [C.DESIGNATION,  obj.designation || ''], [C.DIVISION, _normDiv(obj.division   || '')],  // BUG-L05 FIX
-      [C.DISTRICT,     _normDist(obj.district || '')],                                          // BUG-L05 FIX
+      [C.DESIGNATION,  obj.designation || ''], [C.DIVISION, _normDiv(obj.division   || '')],
+      [C.DISTRICT,     _normDist(obj.district || '')],
       [C.AREA,         obj.area || ''],
       [C.BRANCH,       obj.branch      || ''], [C.EFF_DATE, obj.effDate || '']
     ]);
@@ -580,7 +585,6 @@ function allocateAsset(obj) {
     const rowData = sh.getRange(rowIdx, 1, 1, sh.getLastColumn()).getValues()[0];
     const get = c => String(rowData[c - 1] || '');
 
-    // BUG-L05 FIX: normalise district/division on write
     const normDiv  = _normDiv(obj.division  || '');
     const normDist = _normDist(obj.district || '');
 
@@ -588,7 +592,7 @@ function allocateAsset(obj) {
       [C.LIFECYCLE,   'Allocated'], [C.ASSET_STATUS, 'Active'],
       [C.STATUS_LABEL,'Assigned'],  [C.EMP_ID,       obj.empId       || ''],
       [C.STAFF,       obj.staffName || ''],   [C.DESIGNATION,  obj.designation || ''],
-      [C.DIVISION,    normDiv],               [C.DISTRICT,     normDist],      // BUG-L05 FIX
+      [C.DIVISION,    normDiv],               [C.DISTRICT,     normDist],
       [C.AREA,        obj.area      || ''],   [C.BRANCH,       obj.branch      || ''],
       [C.EFF_DATE,    obj.effDate   || nowStr],[C.REMARKS,      obj.remarks     || '']
     ]);
@@ -708,7 +712,6 @@ function saveTransfer(t) {
       t.effDate, t.status || 'Completed', nowStr
     ]);
 
-    // BUG-L05 FIX: normalise on write
     const normToDiv  = _normDiv(t.toDiv   || '');
     const normToDist = _normDist(t.toDist || '');
 
@@ -716,7 +719,7 @@ function saveTransfer(t) {
       [C.LIFECYCLE,    'Allocated'], [C.ASSET_STATUS, 'Active'],
       [C.STATUS_LABEL, 'Assigned'],  [C.EMP_ID,       t.toEmpId   || ''],
       [C.STAFF,        t.toStaff   || ''],  [C.DESIGNATION,  t.toDesig   || ''],
-      [C.DIVISION,     normToDiv],          [C.DISTRICT,     normToDist],          // BUG-L05 FIX
+      [C.DIVISION,     normToDiv],          [C.DISTRICT,     normToDist],
       [C.AREA,         t.toArea    || ''],  [C.BRANCH,       t.toBranch  || ''],
       [C.EFF_DATE,     t.effDate],          [C.XFER_TYPE,    t.transferType || 'Permanent'],
       [C.FR_STAFF,     t.fromStaff   || ''],[C.FR_EMPID,     t.fromEmpId   || ''],
@@ -806,8 +809,6 @@ function getBorrowData() {
   } catch (e) { return []; }
 }
 
-// BUG-M04 FIX: returnAsset() now clears ALL borrow fields including BOR_REMARKS.
-// Previously BOR_REMARKS was left populated after a return, polluting the asset record.
 function returnAsset(barcode, returnDate) {
   try {
     const sh      = _entrySheet();
@@ -840,7 +841,7 @@ function returnAsset(barcode, returnDate) {
       _setRow(sh, rowIdx, [
         [C.LIFECYCLE,    restoredLC],  [C.STATUS_LABEL, restoredLbl],
         [C.ASSET_STATUS, restoredAS],  [C.ACT_RETURN,   retDate],
-        // BUG-M04 FIX: clear ALL borrow fields including BOR_REMARKS
+        // Clear ALL borrow fields including BOR_REMARKS
         [C.BOR_NAME,''], [C.BOR_EMPID,''], [C.BOR_DESIG,''],
         [C.BOR_DIV,''],  [C.BOR_DIST,''],  [C.BOR_BRANCH,''],
         [C.BOR_DATE,''], [C.EXP_RETURN,''], [C.BOR_REMARKS,'']
@@ -908,13 +909,12 @@ function getEmployeeById(empId) {
     const id   = String(empId).trim().toLowerCase();
     for (const row of data) {
       if (String(row[0] || '').trim().toLowerCase() !== id) continue;
-      // Return normalised division/district for consistent form auto-fill
       return {
         ok:       true,
         empId:    String(row[0]  || '').trim(),
         name:     String(row[2]  || '').trim(),
-        division: _normDiv(String(row[4]  || '').trim()),    // BUG-L05 FIX: normalise on return
-        district: _normDist(String(row[5] || '').trim()),    // BUG-L05 FIX
+        division: _normDiv(String(row[4]  || '').trim()),
+        district: _normDist(String(row[5] || '').trim()),
         area:     String(row[6]  || '').trim(),
         branch:   String(row[7]  || '').trim(),
         position: String(row[11] || '').trim()
@@ -925,8 +925,6 @@ function getEmployeeById(empId) {
 }
 
 // ─── DROPDOWN DATA ────────────────────────────────────────────────────────────
-// BUG-C04 FIX: Added 'SCANNER SCANSNAP' to CAT_MAP and added post-processing
-// to clone Scanner data to Scansnap when the merged header is detected.
 function getDropdownData() {
   try {
     const sh = _ss().getSheetByName(SH_DROPDOWN);
@@ -941,15 +939,12 @@ function getDropdownData() {
       'MONITOR': 'Monitor', 'KEYBOARD': 'Keyboard', 'MOUSE': 'Mouse',
       'PRINTER': 'Printer',
       'SCANNER': 'Scanner', 'SCANSNAP': 'Scansnap',
-      // BUG-C04 FIX: handle merged 'SCANNER SCANSNAP' header — map to Scanner;
-      // Scansnap is cloned from Scanner data after the loop below.
       'SCANNER SCANSNAP': 'Scanner',
       'UPS': 'UPS', 'EXTERNAL DRIVE': 'External Drive',
       'CAMERA': 'Camera', 'SPEAKER': 'Speaker'
     };
     const result = { categories: [], brands: {}, models: {}, suppliers: [], laptopSpecs: [], laptopSpecValues: {} };
     let catPositions = [], supplierCol = -1, laptopSpecCol = -1, fieldSectionCol = -1;
-    // Track whether we used a merged SCANNER SCANSNAP header
     let usedMergedScannerHeader = false;
 
     for (let c = 0; c < row1.length; c++) {
@@ -962,7 +957,6 @@ function getDropdownData() {
         if (fieldSectionCol === -1) fieldSectionCol = c;
         continue;
       }
-      // BUG-C04 FIX: detect merged header
       if (up === 'SCANNER SCANSNAP') {
         catPositions.push({ name: 'Scanner', col: c });
         usedMergedScannerHeader = true;
@@ -994,8 +988,6 @@ function getDropdownData() {
       }
     });
 
-    // BUG-C04 FIX: clone Scanner data to Scansnap when merged header was used.
-    // Only clones if Scansnap doesn't already have its own column in the sheet.
     if (usedMergedScannerHeader && result.brands['Scanner'] && !result.brands['Scansnap']) {
       result.categories.push('Scansnap');
       result.brands['Scansnap'] = [...result.brands['Scanner']];
@@ -1047,7 +1039,6 @@ function getLocationData(empId) {
       userDivisionDistricts: {}
     };
 
-    // ── 1. Build Division→District map from Drop down sheet ──
     const ddSh = ss.getSheetByName(SH_DROPDOWN);
     if (ddSh && ddSh.getLastRow() >= 2) {
       const lastCol = ddSh.getLastColumn();
@@ -1084,7 +1075,6 @@ function getLocationData(empId) {
       }
     }
 
-    // ── 2. Load user's assigned divisions & districts from Eng. List ──
     const engSh = ss.getSheetByName('Eng. List') || ss.getSheetByName('Eng List');
     if (engSh && engSh.getLastRow() > 1) {
       const lastRow = engSh.getLastRow();

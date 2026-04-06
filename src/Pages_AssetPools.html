@@ -5,11 +5,11 @@
       <h2>Spare Pool</h2>
       <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Unallocated assets in storage — ready for assignment</p>
     </div>
-    <button class="btn btn-bulk-del btn-sm" id="btnBulkDelSpare" onclick="bulkDeleteTable('spare')" style="display:none">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-      Delete Selected
-    </button>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+      <button class="btn btn-bulk-del btn-sm" id="btnBulkDelSpare" onclick="bulkDeleteTable('spare')" style="display:none">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        Delete Selected
+      </button>
       <input type="text" id="spareSearch" placeholder="Search spare assets…" oninput="renderSpare()" class="filter-input"/>
       <select id="spareFilterType" onchange="renderSpare()" class="filter-select">
         <option value="">All Types</option>
@@ -47,11 +47,11 @@
       <h2>Allocated Assets</h2>
       <p style="color:var(--text3);font-size:.82rem;margin-top:1px">Assets currently assigned to staff members</p>
     </div>
-    <button class="btn btn-bulk-del btn-sm" id="btnBulkDelAllocated" onclick="bulkDeleteTable('allocated')" style="display:none">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-      Delete Selected
-    </button>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto">
+      <button class="btn btn-bulk-del btn-sm" id="btnBulkDelAllocated" onclick="bulkDeleteTable('allocated')" style="display:none">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        Delete Selected
+      </button>
       <input type="text" id="allocSearch" placeholder="Search staff, barcode…" oninput="renderAllocated()" class="filter-input"/>
       <select id="allocFilterType" onchange="renderAllocated()" class="filter-select">
         <option value="">All Types</option>
