@@ -1,7 +1,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
 <script>
 // ═══════════════════════════════════════
-//  STATE  — all top-level vars are var so they're globally shared across script blocks
+//  STATE
 // ═══════════════════════════════════════
 var SESSION = null;
 var ASSETS  = [];
@@ -35,14 +35,12 @@ var _toEmpTimer      = null;
 var _borrowEmpTimer  = null;
 var PAGE_SIZE = 20;
 
-// Staff Assets module state
 var _stTree        = {};
 var _stExpanded    = {};
 var _stSearchQ     = '';
 var _stBuilt       = false;
 var _stEmpRegistry = [];
 
-// ── Icon map (used across multiple pages) ─────────────────────────────────────
 var _ICO = {
   allocate:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
   borrow:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
@@ -165,12 +163,11 @@ function isHO() {
 
 function _getScopeDistricts(){
   if(!SESSION) return [];
-  
   if(isHO()){
-  var depts = SESSION.seniorDistrictScope || [];
-  if(depts.length > 0) return depts.map(function(d){return d.toLowerCase();});
-  return [];
-}
+    var depts = SESSION.seniorDistrictScope || [];
+    if(depts.length > 0) return depts.map(function(d){return d.toLowerCase();});
+    return [];
+  }
   if(isSenior()){
     var scope = SESSION.seniorDistrictScope || [];
     if(scope.length > 0) return scope.map(function(d){return d.toLowerCase();});
@@ -183,20 +180,17 @@ function _getScopeDistricts(){
   return arr.map(function(d){return d.toLowerCase();});
 }
 
+// ─── FIX: HO users see ALL assets — they have full system visibility ──────────
 function _filterByScope(assets){
+  // Head Office users see everything — no district/dept scoping needed
+  if(isHO()) return assets;
+
   var dists = _getScopeDistricts();
   if(dists.length === 0) return [];
 
-    if(isHO()){
-    return assets.filter(function(a){
-      var dist = (a.District||'').toLowerCase();
-      return !dist || dists.indexOf(dist) >= 0;
-    });
-  }
-
   return assets.filter(function(a){
     var dist = (a.District||'').toLowerCase();
-    if(!dist && (a.status==='spare' || a.status==='borrow-item' ||  a.status==='disposal')) return true;
+    if(!dist && (a.status==='spare' || a.status==='borrow-item' || a.status==='disposal')) return true;
     return dists.indexOf(dist) >= 0;
   });
 }
@@ -217,12 +211,13 @@ function doLogin(){
   var u=document.getElementById('authUser').value.trim();
   var p=document.getElementById('authPass').value;
   var e=document.getElementById('authError');
-  var b=document.getElementById('loginBtnTxt');
+  var btn=document.getElementById('loginBtn');
   if(!u||!p){e.textContent='Enter Employee ID and password.';e.style.display='block';return;}
-  e.style.display='none'; b.textContent='Signing in…';
+  e.style.display='none';
+  _lockBtn(btn);
   google.script.run
     .withSuccessHandler(function(r){
-      b.textContent='Sign In';
+      _unlockBtn(btn);
       if(!r.ok){e.textContent=r.error;e.style.display='block';return;}
       SESSION={
         username:     r.username,
@@ -246,7 +241,7 @@ function doLogin(){
       startApp();
     })
     .withFailureHandler(function(err){
-      b.textContent='Sign In';
+      _unlockBtn(btn);
       e.textContent='Connection error: '+err.message;
       e.style.display='block';
     })
@@ -257,16 +252,23 @@ function doChangePwd(){
   var p1=document.getElementById('newPwd1').value;
   var p2=document.getElementById('newPwd2').value;
   var e=document.getElementById('pwdError');
+  var btn=document.getElementById('changePwdBtn');
   if(p1!==p2){e.textContent='Passwords do not match.';e.style.display='block';return;}
   if(p1.length<4){e.textContent='Minimum 4 characters.';e.style.display='block';return;}
   e.style.display='none';
+  _lockBtn(btn);
   google.script.run
     .withSuccessHandler(function(r){
+      _unlockBtn(btn);
       if(!r.ok){e.textContent=r.error;e.style.display='block';return;}
       document.getElementById('changePwdScreen').style.display='none';
       startApp();
     })
-    .withFailureHandler(function(err){e.textContent=err.message;e.style.display='block';})
+    .withFailureHandler(function(err){
+      _unlockBtn(btn);
+      e.textContent=err.message;
+      e.style.display='block';
+    })
     .changePassword(SESSION.username,p1);
 }
 
@@ -315,7 +317,7 @@ function loadData(){
     .withFailureHandler(function(err){ toast('Load error: '+err.message,'err'); done(); })
     .getAllAssets();
   google.script.run
-    .withSuccessHandler(function(r){ LOGS=(r&&r.rows)?r.rows:(Array.isArray(r)?r:[]); renderActivityTable(); done(); })
+    .withSuccessHandler(function(r){ LOGS=(r&&r.rows)?r.rows:(Array.isArray(r)?r:[]); done(); })
     .withFailureHandler(function(){done();})
     .getActivityLogs();
   google.script.run
@@ -323,7 +325,7 @@ function loadData(){
     .withFailureHandler(function(){done();})
     .getBorrowData();
   google.script.run
-    .withSuccessHandler(function(r){ XFERS=r||[]; renderTransferTable(); done(); })
+    .withSuccessHandler(function(r){ XFERS=r||[]; done(); })
     .withFailureHandler(function(){done();})
     .getTransferData();
   google.script.run
@@ -332,33 +334,72 @@ function loadData(){
     .getDisposalData();
 }
 
+// ─── Comprehensive loading state for all modules ─────────────────────────────
 function showLoading(){
-  ['nbAll','nbSpare','nbAllocated','nbBorrowed','nbDisposal','nbBorrowActive','nbBorrowPool'].forEach(function(id){
+  var loadRow = '<tr><td colspan="20"><div class="tbl-loading-row">'
+    +'<div class="spinner"></div>Loading data…</div></td></tr>';
+  var treeLoad = '<div class="module-loading">'
+    +'<div class="spinner" style="width:24px;height:24px;border-width:3px"></div>'
+    +'<span>Loading…</span></div>';
+
+  // Sidebar badge counters — shimmer animation
+  ['nbAll','nbSpare','nbAllocated','nbBorrowed','nbDisposal',
+   'nbBorrowActive','nbBorrowPool','nbStaffAssets','nbEquipment'].forEach(function(id){
     var el=document.getElementById(id);
-    if(el) el.textContent='…';
+    if(el){ el.textContent=''; el.classList.add('nb-loading'); }
   });
-  var el=document.getElementById('tblAll');
-  if(el) el.innerHTML='<tr class="loading-row"><td colspan="20"><div style="display:flex;align-items:center;justify-content:center;gap:10px"><div class="spinner"></div>Loading…</div></td></tr>';
-}
 
-function loadDropdownData(){
-  google.script.run
-    .withSuccessHandler(function(d){ DROPDOWN_DATA=d; populateCategoryDropdown(); populateSupplierDropdown(); })
-    .withFailureHandler(function(){})
-    .getDropdownData();
-}
+  // All table bodies
+  ['tblAll','tblSpare','tblAllocated','tblActiveBorrow',
+   'tblBorrowPool','tblBorrowHistory','tblDisposal',
+   'tblTransfers','tblActivity'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.innerHTML=loadRow;
+  });
 
-function loadLocationData(){
-  google.script.run
-    .withSuccessHandler(function(d){
-      ENG_LOCATION_DATA = d;
-      populateAllLocationDropdowns();
-      populateDistrictFilter();
-    })
-    .withFailureHandler(function(){})
-    .getLocationData(SESSION ? SESSION.username : null);
+  // Pagers
+  ['pagerAll','pagerSpare','pagerAllocated','pagerActiveBorrow',
+   'pagerBorrowPool','pagerBorrowHistory','pagerDisposal','pagerTransfers'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.innerHTML='';
+  });
+
+  // Tree views
+  var st=document.getElementById('staffAssetsTree');
+  if(st) st.innerHTML=treeLoad;
+  var eq=document.getElementById('equipTree');
+  if(eq) eq.innerHTML=treeLoad;
+
+  // Dashboard stats skeleton
+  var ds=document.getElementById('dashStats');
+  if(ds){
+    ds.innerHTML=[1,2,3,4,5,6].map(function(){
+      return '<div class="stat-card stat-card-skeleton">'
+        +'<div class="skeleton-icon"></div>'
+        +'<div class="skeleton-val"></div>'
+        +'<div class="skeleton-label"></div>'
+        +'</div>';
+    }).join('');
+  }
+
+  // Dashboard activity
+  var da=document.getElementById('dashActivity');
+  if(da){
+    da.innerHTML=[1,2,3].map(function(){
+      return '<div class="activity-item">'
+        +'<div class="act-dot" style="background:var(--border)"></div>'
+        +'<div style="flex:1"><div class="skeleton-text"></div>'
+        +'<div class="skeleton-text" style="width:60%;margin-top:5px"></div></div>'
+        +'</div>';
+    }).join('');
+  }
+
+  // Summary pills
+  ['spareSummary','allocSummary','poolSummary','equipSummary','staffAssetsSummary'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.innerHTML='<div class="skeleton-pill"></div><div class="skeleton-pill"></div>';
+  });
 }
-function loadEngLocationData(){ loadLocationData(); }
 
 // ═══════════════════════════════════════
 //  RENDER ALL
@@ -373,6 +414,8 @@ function renderAll(){
   renderBorrowPool();
   renderBorrowHistory();
   renderDisposal();
+  renderTransferTable();
+  renderActivityTable();
 }
 
 function globalFilter(q){
@@ -383,6 +426,13 @@ function globalFilter(q){
 }
 
 function updateBadges(){
+  // Remove shimmer loading states from badges
+  ['nbAll','nbSpare','nbAllocated','nbBorrowed','nbDisposal',
+   'nbBorrowActive','nbBorrowPool','nbStaffAssets','nbEquipment'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.classList.remove('nb-loading');
+  });
+
   var filtered = _filterByScope(ASSETS);
   var spare  = filtered.filter(function(a){return a.status==='spare';}).length;
   var alloc  = filtered.filter(function(a){return ['allocated','transfer'].indexOf(a.status)>=0;}).length;
@@ -449,4 +499,26 @@ function switchPage(p){
   if(nav) nav.classList.add('active');
   if(p==='borrow') switchBorrowTab(borrowTab);
 }
+
+function loadDropdownData(){
+  google.script.run
+    .withSuccessHandler(function(d){ DROPDOWN_DATA=d; populateCategoryDropdown(); populateSupplierDropdown(); })
+    .withFailureHandler(function(){})
+    .getDropdownData();
+}
+
+function loadLocationData(){
+  google.script.run
+    .withSuccessHandler(function(d){
+      ENG_LOCATION_DATA = d;
+      populateAllLocationDropdowns();
+      populateDistrictFilter();
+    })
+    .withFailureHandler(function(){})
+    .getLocationData(SESSION ? SESSION.username : null);
+}
+function loadEngLocationData(){ loadLocationData(); }
+</script>
+<script>
+// Note: logout() is defined above, this prevents the duplicate
 </script>
