@@ -159,9 +159,18 @@ function isSenior(){
 function isFE(){
   return SESSION && !isSenior();
 }
+function isHO() {
+  return SESSION && SESSION.roleTier === 'ho';
+}
 
 function _getScopeDistricts(){
   if(!SESSION) return [];
+  
+  if(isHO()){
+  var depts = SESSION.seniorDistrictScope || [];
+  if(depts.length > 0) return depts.map(function(d){return d.toLowerCase();});
+  return [];
+}
   if(isSenior()){
     var scope = SESSION.seniorDistrictScope || [];
     if(scope.length > 0) return scope.map(function(d){return d.toLowerCase();});
@@ -177,6 +186,14 @@ function _getScopeDistricts(){
 function _filterByScope(assets){
   var dists = _getScopeDistricts();
   if(dists.length === 0) return [];
+
+    if(isHO()){
+    return assets.filter(function(a){
+      var dist = (a.District||'').toLowerCase();
+      return !dist || dists.indexOf(dist) >= 0;
+    });
+  }
+
   return assets.filter(function(a){
     var dist = (a.District||'').toLowerCase();
     if(!dist && (a.status==='spare' || a.status==='borrow-item' ||  a.status==='disposal')) return true;

@@ -215,7 +215,7 @@ function getDistrictsBySupervisor(empId) {
     const id = String(empId).trim().toLowerCase();
 
     data.forEach(r => {
-      const supId = String(r[2] || '').trim().toLowerCase();
+      const supId = String(r[3] || '').trim().toLowerCase();
       if (supId === id) {
         const dist = String(r[8] || '').trim();
         if (dist) distSet.add(dist);
@@ -260,8 +260,10 @@ function loginUser(empId, password) {
 
       const firstLogin = (pwd === '1234' || pwd === _hashPwd('1234'));
 
-      const mlDivision = String(row[4] || '').trim();
-      const mlDistrict = String(row[5] || '').trim();
+const mlDivision   = String(row[4] || '').trim();
+    const mlDistrict   = String(row[5] || '').trim();
+    const mlBaseOffice = String(row[7] || '').trim();        // FIX: needed for HO detection
+    const isHeadOffice = mlBaseOffice === 'Head Office';     // FIX: true for all HO staff
 
       const roleTier = _classifyRole(role);
       const locData  = getLocationData(id);
@@ -274,9 +276,10 @@ function loginUser(empId, password) {
         : mlDistrict;
 
 let seniorDistrictScope = [];
-      if (roleTier === 'senior') {
-        // Detect if this senior is a Head Office manager
-        const isHO = division === 'Head Office' ||
+      // FIX: HO detection runs for ALL roles, not only senior
+      if (isHeadOffice || roleTier === 'senior') {
+        const isHO = isHeadOffice ||
+          division === 'Head Office' ||
           (locData.userDivisions.length > 0 && locData.userDivisions[0] === 'Head Office');
 
         if (isHO) {
@@ -312,9 +315,12 @@ let seniorDistrictScope = [];
         }
       }
 
-      return {
-        ok: true, username: id, role, roleTier, name, firstLogin,
-        division,
+return {
+        ok: true, username: id, role,
+        roleTier: isHeadOffice ? 'ho' : roleTier,           // FIX: 'ho' tier for all HO staff
+        isHeadOffice,                                        // FIX: explicit flag for frontend
+        name, firstLogin,
+        division: isHeadOffice ? 'Head Office' : division,
         district,
         userDivisions:  locData.userDivisions,
         userDistricts:  locData.userDistricts.length > 0
@@ -324,7 +330,7 @@ let seniorDistrictScope = [];
         headOfficeDepts: locData.headOfficeDepts || [],
         divDistrictMap: locData.divDistrictMap || {},
         area:   String(row[6] || '').trim(),
-        branch: String(row[7] || '').trim()
+        branch: mlBaseOffice                                 // FIX: was row[7] (Base Office string), kept intentionally
       };
     }
     return { ok: false, error: 'Employee ID not found.' };
