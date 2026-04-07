@@ -1,20 +1,17 @@
 // ═══════════════════════════════════════════════════════════
-//  ASSET MANAGEMENT SYSTEM — Code.gs  (v5.5 — Column Map Fix)
+//  ASSET MANAGEMENT SYSTEM — Code.gs  (v5.6 — HO Department Support)
 //
-//  Fixes applied vs v5.4:
-//    BUG-COL — const C column map corrected to match actual 61-column
-//              sheet layout. The sheet has 5 extra columns not in the
-//              original map, shifting all reads/writes from DIVISION
-//              onwards by up to 5 positions:
-//                Col  6: Department
-//                Col  7: Base Office
-//                Col 12: Assignment
-//                Col 20: Asset Location
-//                Col 28: Notes
-//              This caused Barcode to show staff names, Purchase Date
-//              to show names, etc. across all table views.
-//    BUG-COL — AE_HEADERS updated to 61 entries matching actual sheet
-//    BUG-COL — BOR_DIST safe-read guard updated from >= 56 to >= 61
+//  Changes vs v5.5:
+//    DEPT-COL — Added DEPARTMENT (col 6) and BASE_OFFICE (col 7) to
+//               the column map. These were present in the sheet but
+//               not mapped, causing HO assets to be invisible in the
+//               Staff Assets and Equipment Record trees (they showed
+//               under "(No Division)/(No District)").
+//    DEPT-COL — getAllAssets() now returns Department and BaseOffice
+//               fields so the frontend can use them for HO tree views.
+//    DEPT-COL — processAsset() now writes Department and BaseOffice
+//               when supplied.
+//    DEPT-COL — allocateAsset() and deallocateAsset() preserve Dept/BO.
 //
 // ═══════════════════════════════════════════════════════════
 
@@ -31,16 +28,16 @@ const SH_ALLOC    = 'Allocated';
 const AE_DATA_START = 4;
 
 // ─── COLUMN MAP (1-based) ────────────────────────────────────────────────────
-// Actual sheet has 61 columns. Extra cols not in logic:
-//   Col  6: Department
-//   Col  7: Base Office
-//   Col 12: Assignment
-//   Col 20: Asset Location
-//   Col 28: Notes
+// Actual sheet has 61 columns.
+// Col  6: Department   ← NEW mapping
+// Col  7: Base Office  ← NEW mapping
+// Col 12: Assignment (not mapped)
+// Col 20: Asset Location (not mapped)
+// Col 28: Notes (not mapped)
 const C = {
   ENTRY_EMP_ID:1,  ENTRY_NAME:2,
   EMP_ID:3,        STAFF:4,          DESIGNATION:5,
-  // Col 6 = Department, Col 7 = Base Office (not mapped)
+  DEPARTMENT:6,    BASE_OFFICE:7,    // ← Added
   DIVISION:8,      DISTRICT:9,       AREA:10,        BRANCH:11,
   // Col 12 = Assignment (not mapped)
   EFF_DATE:13,
@@ -110,7 +107,7 @@ function _xferSheet()    { return _getOrCreate(SH_XFER,    ['Barcode','Type','Fr
 function _borrowSheet()  { return _getOrCreate(SH_BORROW,  ['Barcode','BorrowerName','EmpID','Designation','Division','District','Branch','BorrowDate','ExpectedReturn','ActualReturn','Status','Remarks','Timestamp']); }
 function _disposeSheet() { return _getOrCreate(SH_DISPOSE, ['Barcode','Reason','DisposedBy','DisposeDate','Remarks','Timestamp']); }
 function _logSheet()     { return _getOrCreate(SH_LOG,     ['Timestamp','Action','Barcode','Details','Performed By']); }
-function _allocLogSheet(){ return _getOrCreate(SH_ALLOC,   ['Barcode','Category','Brand','Serial No.','Employee ID','Accountable Staff','Designation','Division','District','Area','Branch','Effectivity Date','Condition','Remarks','Timestamp','Allocated By']); }
+function _allocLogSheet(){ return _getOrCreate(SH_ALLOC,   ['Barcode','Category','Brand','Serial No.','Employee ID','Accountable Staff','Designation','Department','Base Office','Division','District','Area','Branch','Effectivity Date','Condition','Remarks','Timestamp','Allocated By']); }
 
 // ─── ROW FINDERS / SETTERS ───────────────────────────────────────────────────
 function _findRow(sheet, barcode) {
@@ -260,10 +257,10 @@ function loginUser(empId, password) {
 
       const firstLogin = (pwd === '1234' || pwd === _hashPwd('1234'));
 
-const mlDivision   = String(row[4] || '').trim();
-    const mlDistrict   = String(row[5] || '').trim();
-    const mlBaseOffice = String(row[7] || '').trim();        // FIX: needed for HO detection
-    const isHeadOffice = mlBaseOffice === 'Head Office';     // FIX: true for all HO staff
+      const mlDivision   = String(row[4] || '').trim();
+      const mlDistrict   = String(row[5] || '').trim();
+      const mlBaseOffice = String(row[7] || '').trim();
+      const isHeadOffice = mlBaseOffice === 'Head Office';
 
       const roleTier = _classifyRole(role);
       const locData  = getLocationData(id);
@@ -275,15 +272,13 @@ const mlDivision   = String(row[4] || '').trim();
         ? locData.userDistricts[0]
         : mlDistrict;
 
-let seniorDistrictScope = [];
-      // FIX: HO detection runs for ALL roles, not only senior
+      let seniorDistrictScope = [];
       if (isHeadOffice || roleTier === 'senior') {
         const isHO = isHeadOffice ||
           division === 'Head Office' ||
           (locData.userDivisions.length > 0 && locData.userDivisions[0] === 'Head Office');
 
         if (isHO) {
-          // Head Office senior — scope is all departments
           const allDepts = locData.headOfficeDepts || getHeadOfficeDepts();
           seniorDistrictScope = allDepts.length > 0
             ? allDepts
@@ -291,12 +286,10 @@ let seniorDistrictScope = [];
                 ? locData.userDistricts
                 : (mlDistrict ? [mlDistrict] : []));
         } else {
-          // Field senior — scope is supervised districts
           const supervisedDistricts = getDistrictsBySupervisor(id);
           if (supervisedDistricts.length > 0) {
             seniorDistrictScope = supervisedDistricts;
           } else {
-            // Fallback: try division→district map, then userDistricts
             const userDivs = locData.userDivisions.length > 0
               ? locData.userDivisions
               : (mlDivision ? [mlDivision] : []);
@@ -315,10 +308,10 @@ let seniorDistrictScope = [];
         }
       }
 
-return {
+      return {
         ok: true, username: id, role,
-        roleTier: isHeadOffice ? 'ho' : roleTier,           // FIX: 'ho' tier for all HO staff
-        isHeadOffice,                                        // FIX: explicit flag for frontend
+        roleTier: isHeadOffice ? 'ho' : roleTier,
+        isHeadOffice,
         name, firstLogin,
         division: isHeadOffice ? 'Head Office' : division,
         district,
@@ -330,7 +323,7 @@ return {
         headOfficeDepts: locData.headOfficeDepts || [],
         divDistrictMap: locData.divDistrictMap || {},
         area:   String(row[6] || '').trim(),
-        branch: mlBaseOffice                                 // FIX: was row[7] (Base Office string), kept intentionally
+        branch: mlBaseOffice
       };
     }
     return { ok: false, error: 'Employee ID not found.' };
@@ -425,7 +418,10 @@ function getAllAssets() {
           PurchDate: get(C.PURCH_DATE), WarrantyTerm: get(C.WARRANTY_TERM),
           WarrantyVal: get(C.WARRANTY_VAL), Remarks: get(C.REMARKS),
           EmpID: get(C.EMP_ID) || 'N/A', Staff: get(C.STAFF) || 'Unassigned',
-          Designation: get(C.DESIGNATION), Division: div,
+          Designation: get(C.DESIGNATION),
+          Department: get(C.DEPARTMENT),          // ← Added
+          BaseOffice: get(C.BASE_OFFICE),         // ← Added
+          Division: div,
           District: dist, Area: get(C.AREA), Branch: get(C.BRANCH),
           EffDate: get(C.EFF_DATE), XferType: get(C.XFER_TYPE),
           ToStaff: get(C.TO_STAFF), ToEmpID: get(C.TO_EMPID),
@@ -434,7 +430,7 @@ function getAllAssets() {
           BorDate: get(C.BOR_DATE), ExpReturn: get(C.EXP_RETURN),
           ActReturn: get(C.ACT_RETURN), BorRemarks: get(C.BOR_REMARKS),
           BorDesig: get(C.BOR_DESIG), BorDiv: get(C.BOR_DIV), BorBranch: get(C.BOR_BRANCH),
-          BorDist: colCount >= 61 ? get(C.BOR_DIST) : '',  // safe read
+          BorDist: colCount >= 61 ? get(C.BOR_DIST) : '',
           CreatedAt: get(C.CREATED_AT), LastUpdated: get(C.LAST_UPDATED),
           Supplier: get(C.SUPPLIER), Location: get(C.LOCATION),
           EntryEmpId: get(C.ENTRY_EMP_ID), EntryName: get(C.ENTRY_NAME),
@@ -460,7 +456,8 @@ function getAssetByBarcode(barcode) {
       purchaseDate: get(C.PURCH_DATE), warrantyTerm: get(C.WARRANTY_TERM),
       warrantyValidity: get(C.WARRANTY_VAL), remarks: get(C.REMARKS),
       employeeId: get(C.EMP_ID) || 'N/A', staff: get(C.STAFF) || 'Unassigned',
-      designation: get(C.DESIGNATION), division: _normDiv(get(C.DIVISION)),
+      designation: get(C.DESIGNATION), department: get(C.DEPARTMENT),
+      baseOffice: get(C.BASE_OFFICE), division: _normDiv(get(C.DIVISION)),
       district: _normDist(get(C.DISTRICT)), area: get(C.AREA), branch: get(C.BRANCH),
       effDate: get(C.EFF_DATE), supplier: get(C.SUPPLIER),
       borrowDate: get(C.BOR_DATE), returnDate: get(C.EXP_RETURN),
@@ -494,32 +491,34 @@ function processAsset(obj, isAssign) {
       const normDist = _normDist(obj.district || '');
 
       const row = new Array(TOTAL_COLS).fill('');
-      row[C.ENTRY_EMP_ID - 1] = obj.entryEmpId || '';
-      row[C.ENTRY_NAME   - 1] = obj.entryName  || '';
-      row[C.EMP_ID       - 1] = isSpare ? '' : (obj.accEmpId || '');
-      row[C.STAFF        - 1] = isSpare ? '' : (obj.accName  || '');
-      row[C.DESIGNATION  - 1] = isSpare ? '' : (obj.accRole  || '');
+      row[C.ENTRY_EMP_ID - 1] = obj.entryEmpId  || '';
+      row[C.ENTRY_NAME   - 1] = obj.entryName   || '';
+      row[C.EMP_ID       - 1] = isSpare ? '' : (obj.accEmpId  || '');
+      row[C.STAFF        - 1] = isSpare ? '' : (obj.accName   || '');
+      row[C.DESIGNATION  - 1] = isSpare ? '' : (obj.accRole   || '');
+      row[C.DEPARTMENT   - 1] = obj.department  || '';   // ← Added
+      row[C.BASE_OFFICE  - 1] = obj.baseOffice  || '';   // ← Added
       row[C.DIVISION     - 1] = normDiv;
       row[C.DISTRICT     - 1] = normDist;
-      row[C.AREA         - 1] = obj.area      || '';
-      row[C.BRANCH       - 1] = obj.branch    || '';
-      row[C.EFF_DATE     - 1] = obj.effDate   || '';
+      row[C.AREA         - 1] = obj.area        || '';
+      row[C.BRANCH       - 1] = obj.branch      || '';
+      row[C.EFF_DATE     - 1] = obj.effDate     || '';
       row[C.BARCODE      - 1] = obj.barcode;
-      row[C.TYPE         - 1] = obj.type      || '';
-      row[C.BRAND        - 1] = obj.brand     || '';
+      row[C.TYPE         - 1] = obj.type        || '';
+      row[C.BRAND        - 1] = obj.brand       || '';
       row[C.SERIAL       - 1] = obj.serial ? String(obj.serial) : '';
-      row[C.SPECS        - 1] = obj.specs     || '';
-      row[C.CONDITION    - 1] = obj.condition || 'New';
+      row[C.SPECS        - 1] = obj.specs       || '';
+      row[C.CONDITION    - 1] = obj.condition   || 'New';
       row[C.LIFECYCLE    - 1] = sm.lc;
       row[C.ASSET_STATUS - 1] = sm.asSt;
       row[C.STATUS_LABEL - 1] = sm.stLbl;
-      row[C.PURCH_DATE   - 1] = obj.purchDate || '';
-      row[C.WARRANTY_TERM- 1] = obj.wTerm     || '';
-      row[C.WARRANTY_VAL - 1] = obj.wValidity || '';
-      row[C.REMARKS      - 1] = obj.remarks   || '';
-      row[C.SUPPLIER     - 1] = obj.supplier  || '';
-      row[C.LOCATION     - 1] = obj.location  || '';
-      row[C.ENROLLED_BY  - 1] = obj.enrolledBy || obj.entryEmpId || '';
+      row[C.PURCH_DATE   - 1] = obj.purchDate   || '';
+      row[C.WARRANTY_TERM- 1] = obj.wTerm       || '';
+      row[C.WARRANTY_VAL - 1] = obj.wValidity   || '';
+      row[C.REMARKS      - 1] = obj.remarks     || '';
+      row[C.SUPPLIER     - 1] = obj.supplier    || '';
+      row[C.LOCATION     - 1] = obj.location    || '';
+      row[C.ENROLLED_BY  - 1] = obj.enrolledBy  || obj.entryEmpId || '';
       row[C.CREATED_AT   - 1] = nowStr;
       row[C.LAST_UPDATED - 1] = nowStr;
 
@@ -558,7 +557,10 @@ function processAsset(obj, isAssign) {
     _setRow(sh, rowIdx, [
       [C.LIFECYCLE,    lc], [C.ASSET_STATUS, asSt], [C.STATUS_LABEL, stLbl],
       [C.EMP_ID,       obj.employeeId  || ''], [C.STAFF,  staff || ''],
-      [C.DESIGNATION,  obj.designation || ''], [C.DIVISION, _normDiv(obj.division   || '')],
+      [C.DESIGNATION,  obj.designation || ''],
+      [C.DEPARTMENT,   obj.department  || ''],  // ← Added
+      [C.BASE_OFFICE,  obj.baseOffice  || ''],  // ← Added
+      [C.DIVISION, _normDiv(obj.division   || '')],
       [C.DISTRICT,     _normDist(obj.district || '')],
       [C.AREA,         obj.area || ''],
       [C.BRANCH,       obj.branch      || ''], [C.EFF_DATE, obj.effDate || '']
@@ -612,22 +614,24 @@ function allocateAsset(obj) {
     const normDist = _normDist(obj.district || '');
 
     _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,   'Allocated'], [C.ASSET_STATUS, 'Active'],
-      [C.STATUS_LABEL,'Assigned'],  [C.EMP_ID,       obj.empId       || ''],
-      [C.STAFF,       obj.staffName || ''],   [C.DESIGNATION,  obj.designation || ''],
-      [C.DIVISION,    normDiv],               [C.DISTRICT,     normDist],
-      [C.AREA,        obj.area      || ''],   [C.BRANCH,       obj.branch      || ''],
-      [C.EFF_DATE,    obj.effDate   || nowStr],[C.REMARKS,      obj.remarks     || '']
+      [C.LIFECYCLE,    'Allocated'], [C.ASSET_STATUS, 'Active'],
+      [C.STATUS_LABEL, 'Assigned'],  [C.EMP_ID,       obj.empId       || ''],
+      [C.STAFF,        obj.staffName || ''], [C.DESIGNATION,  obj.designation || ''],
+      [C.DEPARTMENT,   obj.department  || ''],   // ← Added
+      [C.BASE_OFFICE,  obj.baseOffice  || ''],   // ← Added
+      [C.DIVISION,     normDiv],                  [C.DISTRICT,     normDist],
+      [C.AREA,         obj.area      || ''],      [C.BRANCH,       obj.branch      || ''],
+      [C.EFF_DATE,     obj.effDate   || nowStr],  [C.REMARKS,      obj.remarks     || '']
     ]);
     _allocLogSheet().appendRow([
       obj.barcode, obj.type || get(C.TYPE), obj.brand || get(C.BRAND),
       obj.serial || get(C.SERIAL), obj.empId, obj.staffName,
-      obj.designation || '', normDiv, normDist,
-      obj.area || '', obj.branch || '', obj.effDate || nowStr,
-      obj.condition || get(C.CONDITION) || 'Good',
+      obj.designation || '', obj.department || '', obj.baseOffice || '',
+      normDiv, normDist, obj.area || '', obj.branch || '',
+      obj.effDate || nowStr, obj.condition || get(C.CONDITION) || 'Good',
       obj.remarks || '', nowStr, obj.allocatedBy || ''
     ]);
-    _log('ALLOCATE', obj.barcode, obj.staffName + ' | ' + (obj.branch || normDiv || ''), obj.allocatedBy || obj.empId || '');
+    _log('ALLOCATE', obj.barcode, obj.staffName + ' | ' + (obj.branch || obj.baseOffice || normDiv || ''), obj.allocatedBy || obj.empId || '');
     return 'Asset allocated to ' + obj.staffName;
   } catch (e) { return 'Error: ' + e.message; }
 }
@@ -646,6 +650,7 @@ function deallocateAsset(barcode, remarks) {
       [C.LIFECYCLE,   'Active'], [C.ASSET_STATUS, 'Active'],
       [C.STATUS_LABEL,'Unassigned'], [C.EMP_ID, ''], [C.STAFF, ''],
       [C.DESIGNATION, ''], [C.EFF_DATE, ''],
+      // Note: preserve Department/BaseOffice — the asset stays in its location
       [C.DIVISION, ''], [C.DISTRICT, ''], [C.AREA, ''], [C.BRANCH, '']
     ];
     if (remarks) updates.push([C.REMARKS, remarks]);
@@ -864,7 +869,6 @@ function returnAsset(barcode, returnDate) {
       _setRow(sh, rowIdx, [
         [C.LIFECYCLE,    restoredLC],  [C.STATUS_LABEL, restoredLbl],
         [C.ASSET_STATUS, restoredAS],  [C.ACT_RETURN,   retDate],
-        // Clear ALL borrow fields including BOR_REMARKS
         [C.BOR_NAME,''], [C.BOR_EMPID,''], [C.BOR_DESIG,''],
         [C.BOR_DIV,''],  [C.BOR_DIST,''],  [C.BOR_BRANCH,''],
         [C.BOR_DATE,''], [C.EXP_RETURN,''], [C.BOR_REMARKS,'']
@@ -933,14 +937,14 @@ function getEmployeeById(empId) {
     for (const row of data) {
       if (String(row[0] || '').trim().toLowerCase() !== id) continue;
       return {
-        ok:       true,
-        empId:    String(row[0]  || '').trim(),
-        name:     String(row[2]  || '').trim(),
-        division: _normDiv(String(row[4]  || '').trim()),
-        district: _normDist(String(row[5] || '').trim()),
-        area:     String(row[6]  || '').trim(),
-        branch:   String(row[7]  || '').trim(),
-        position: String(row[11] || '').trim()
+        ok:         true,
+        empId:      String(row[0]  || '').trim(),
+        name:       String(row[2]  || '').trim(),
+        division:   _normDiv(String(row[4]  || '').trim()),
+        district:   _normDist(String(row[5] || '').trim()),
+        area:       String(row[6]  || '').trim(),
+        branch:     String(row[7]  || '').trim(),
+        position:   String(row[11] || '').trim()
       };
     }
     return { ok: false, error: 'Employee ID not found: ' + empId };
@@ -1160,10 +1164,10 @@ function getLocationData(empId) {
       result.userDistricts = [...distSet].sort(numSort);
 
       result.userDivisions.forEach(div => {
-              const mapped = result.divDistrictMap[div] || [];
-              result.userDivisionDistricts[div] = mapped.length > 0 ? mapped : result.userDistricts;
-            });
-      // Wire Head Office departments into divDistrictMap so dropdowns work
+        const mapped = result.divDistrictMap[div] || [];
+        result.userDivisionDistricts[div] = mapped.length > 0 ? mapped : result.userDistricts;
+      });
+
       const _hoDepts = getHeadOfficeDepts();
       result.headOfficeDepts = _hoDepts;
       if (_hoDepts.length > 0) {

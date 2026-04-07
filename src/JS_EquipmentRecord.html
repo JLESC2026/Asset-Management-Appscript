@@ -1,15 +1,178 @@
 <script>
 // ═══════════════════════════════════════
 //  EQUIPMENT RECORD MODULE
+//  Field users: Division → District → Area → Branch → Assets
+//  HO users:    Head Office → Department → Base Office → Assets
 // ═══════════════════════════════════════
 
 function renderEquipmentRecord() {
-  _eqSearchQ  = (document.getElementById('equipSearch')?.value || '').toLowerCase();
+  _eqSearchQ   = (document.getElementById('equipSearch')?.value || '').toLowerCase();
   _eqBranchReg = [];
+  if (isHO()) {
+    _renderHOEquipTree();
+    return;
+  }
   var tree = _buildEquipTree();
   _renderEquipTree(tree);
 }
 
+// ── HO Equipment Tree ─────────────────────────────────────────────────────────
+function _buildHOEquipTree() {
+  var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
+  var data = _eqSearchQ
+    ? base.filter(function(a){
+        return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,a.Department,a.BaseOffice]
+          .some(function(v){ return (v||'').toLowerCase().includes(_eqSearchQ); });
+      })
+    : base;
+
+  // { dept: { baseOffice: [ assets ] } }
+  var tree = {};
+  data.forEach(function(a) {
+    var dept = a.Department || '(No Department)';
+    var bo   = a.BaseOffice || a.Branch || '(No Location)';
+    if (!tree[dept])     tree[dept]    = {};
+    if (!tree[dept][bo]) tree[dept][bo]= [];
+    tree[dept][bo].push(a);
+  });
+  return tree;
+}
+
+function _renderHOEquipTree() {
+  var container = document.getElementById('equipTree');
+  if (!container) return;
+  var tree    = _buildHOEquipTree();
+  var deptKeys = Object.keys(tree).sort();
+
+  var totalAssets = 0, totalLocations = 0;
+  deptKeys.forEach(function(dept) {
+    var bos = Object.keys(tree[dept]);
+    totalLocations += bos.length;
+    bos.forEach(function(bo){ totalAssets += tree[dept][bo].length; });
+  });
+
+  var summEl = document.getElementById('equipSummary');
+  if (summEl) {
+    summEl.innerHTML = deptKeys.length
+      ? '<div class="pool-pill pool-pill-accent">'+totalAssets+' Assets</div>'
+        +'<div class="pool-pill">'+totalLocations+' Location(s)</div>'
+        +'<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">🏛 Head Office</div>'
+        +'<div class="pool-pill">'+deptKeys.length+' Department(s)</div>'
+      : '';
+  }
+
+  if (!deptKeys.length) {
+    container.innerHTML = '<div class="st-empty">'
+      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>'
+      +'No Head Office equipment found'+(_eqSearchQ?' matching your search':'')+'.'
+      +'</div>';
+    return;
+  }
+
+  // Root: Head Office node
+  var html = '<div class="st-tree">'
+    +'<div class="st-node st-div" style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.03)">'
+    +'<div class="st-row" style="cursor:default;background:rgba(8,145,178,.06)">'
+    +'<span class="st-icon">🏛</span>'
+    +'<span class="st-label" style="color:#0891b2">Head Office</span>'
+    +'<span class="st-meta">'+deptKeys.length+' dept(s) · '+totalAssets+' assets</span>'
+    +'</div>'
+    +'<div class="st-children">';
+  deptKeys.forEach(function(dept){ html += _renderHOEquipDeptNode(dept, tree[dept]); });
+  html += '</div></div></div>';
+  container.innerHTML = html;
+}
+
+function _renderHOEquipDeptNode(dept, boTree) {
+  var key = 'eq-ho-dept::'+dept;
+  var isOpen = !!_eqExpanded[key];
+  var boKeys = Object.keys(boTree).sort();
+  var assetCount = 0;
+  boKeys.forEach(function(bo){ assetCount += boTree[bo].length; });
+
+  var html = '<div class="st-node st-dist" style="background:rgba(124,106,247,.03);border-color:rgba(124,106,247,.25)">'
+    +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
+    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
+    +'<span class="st-icon">🏢</span>'
+    +'<span class="st-label" style="color:var(--accent2)">'+esc(dept)+'</span>'
+    +'<span class="st-meta">'+boKeys.length+' location(s) · '+assetCount+' assets</span>'
+    +'</div>';
+  if (isOpen) {
+    html += '<div class="st-children">';
+    boKeys.forEach(function(bo){ html += _renderHOEquipLocationNode(dept, bo, boTree[bo]); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderHOEquipLocationNode(dept, bo, assets) {
+  var idx = _eqBranchReg.length;
+  _eqBranchReg.push({ hoMode: true, dept: dept, bo: bo, assets: assets });
+
+  var typeCounts = {};
+  assets.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  var chips = Object.entries(typeCounts)
+    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
+    .join('');
+  var allocated = assets.filter(function(a){ return ['allocated','transfer'].indexOf(a.status)>=0; }).length;
+  var spare     = assets.filter(function(a){ return a.status==='spare'; }).length;
+  var borrowed  = assets.filter(function(a){ return a.status==='borrowed'; }).length;
+  var boLabel   = bo === '(No Location)'
+    ? '<span style="color:var(--text3);font-size:.8rem;font-style:italic">No Location</span>'
+    : esc(bo);
+
+  return '<div class="st-node st-emp" style="margin-left:28px">'
+    +'<div class="st-row" style="cursor:default;gap:10px">'
+    +'<span class="st-icon">🗂</span>'
+    +'<div style="flex:1;min-width:0">'
+    +'<div style="font-weight:700;font-size:.88rem;color:var(--text)">'+boLabel+'</div>'
+    +'<div style="display:flex;gap:5px;margin-top:4px;flex-wrap:wrap;align-items:center">'
+    +(allocated?'<span class="badge badge-allocated" style="font-size:.65rem;padding:1px 6px">'+allocated+' allocated</span>':'')
+    +(spare    ?'<span class="badge badge-spare"     style="font-size:.65rem;padding:1px 6px">'+spare+' spare</span>':'')
+    +(borrowed ?'<span class="badge badge-borrowed"  style="font-size:.65rem;padding:1px 6px">'+borrowed+' on borrow</span>':'')
+    +'</div>'
+    +'</div>'
+    +'<div class="st-type-chips" style="flex:0 1 auto">'+chips+'</div>'
+    +'<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal('+idx+')" style="flex-shrink:0;gap:5px">'+_ICO.view+' View '+assets.length+'</button>'
+    +'</div>'
+    +'</div>';
+}
+
+function eqExpandAll() {
+  if (isHO()) {
+    var tree = _buildHOEquipTree();
+    Object.keys(tree).forEach(function(dept){ _eqExpanded['eq-ho-dept::'+dept] = true; });
+    renderEquipmentRecord();
+    return;
+  }
+  var tree = _buildEquipTree();
+  Object.keys(tree).forEach(function(div) {
+    _eqExpanded['eq-div::'+div] = true;
+    Object.keys(tree[div]).forEach(function(dist) {
+      _eqExpanded['eq-dist::'+div+'::'+dist] = true;
+      Object.keys(tree[div][dist]).forEach(function(area) {
+        _eqExpanded['eq-area::'+div+'::'+dist+'::'+area] = true;
+      });
+    });
+  });
+  renderEquipmentRecord();
+}
+
+function eqCollapseAll() {
+  _eqExpanded = {};
+  renderEquipmentRecord();
+}
+
+function eqToggle(key) {
+  _eqExpanded[key] = !_eqExpanded[key];
+  _eqBranchReg = [];
+  if (isHO()) { _renderHOEquipTree(); return; }
+  var tree = _buildEquipTree();
+  _renderEquipTree(tree);
+}
+
+// ── Field Equipment Tree (unchanged logic) ────────────────────────────────────
 function _buildEquipTree() {
   var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
   var data = _eqSearchQ
@@ -32,32 +195,6 @@ function _buildEquipTree() {
     tree[div][dist][area][branch].push(a);
   });
   return tree;
-}
-
-function eqExpandAll() {
-  var tree = _buildEquipTree();
-  Object.keys(tree).forEach(function(div) {
-    _eqExpanded['eq-div::'+div] = true;
-    Object.keys(tree[div]).forEach(function(dist) {
-      _eqExpanded['eq-dist::'+div+'::'+dist] = true;
-      Object.keys(tree[div][dist]).forEach(function(area) {
-        _eqExpanded['eq-area::'+div+'::'+dist+'::'+area] = true;
-      });
-    });
-  });
-  renderEquipmentRecord();
-}
-
-function eqCollapseAll() {
-  _eqExpanded = {};
-  renderEquipmentRecord();
-}
-
-function eqToggle(key) {
-  _eqExpanded[key] = !_eqExpanded[key];
-  _eqBranchReg = [];
-  var tree = _buildEquipTree();
-  _renderEquipTree(tree);
 }
 
 function _renderEquipTree(tree) {
@@ -145,7 +282,6 @@ function _renderEquipDistNode(div, dist, distTree) {
     html += '<div class="st-children">';
     areaKeys.forEach(function(area) {
       if (area === '(No Area)') {
-        // Skip area level — render branch cards directly under district
         Object.keys(distTree[area]).sort().forEach(function(branch) {
           html += _renderEquipBranchNode(div, dist, area, branch, distTree[area][branch]);
         });
@@ -185,7 +321,7 @@ function _renderEquipAreaNode(div, dist, area, branchTree) {
 
 function _renderEquipBranchNode(div, dist, area, branch, assets) {
   var idx = _eqBranchReg.length;
-  _eqBranchReg.push({ div:div, dist:dist, area:area, branch:branch, assets:assets });
+  _eqBranchReg.push({ hoMode: false, div:div, dist:dist, area:area, branch:branch, assets:assets });
   var typeCounts = {};
   assets.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
   var chips = Object.entries(typeCounts)
@@ -195,8 +331,8 @@ function _renderEquipBranchNode(div, dist, area, branch, assets) {
   var spare     = assets.filter(function(a){ return a.status==='spare'; }).length;
   var borrowed  = assets.filter(function(a){ return a.status==='borrowed'; }).length;
   var branchLabel = branch === '(No Branch)'
-  ? '<span style="color:var(--text3);font-size:.8rem;font-style:italic">Unassigned Location</span>'
-  : esc(branch);
+    ? '<span style="color:var(--text3);font-size:.8rem;font-style:italic">Unassigned Location</span>'
+    : esc(branch);
   var showMoveBtn = branch !== '(No Branch)';
   return '<div class="st-node st-emp" style="margin-left:28px">'
     +'<div class="st-row" style="cursor:default;gap:10px">'
@@ -210,18 +346,25 @@ function _renderEquipBranchNode(div, dist, area, branch, assets) {
     +'</div>'
     +'</div>'
     +'<div class="st-type-chips" style="flex:0 1 auto">'+chips+'</div>'
-    + '<div class="st-type-chips" style="flex:0 1 auto">' + chips + '</div>'
-    + (showMoveBtn ? '<button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area" onclick="openMoveOrgUnitModal(\'branch\',\'' + esc(div) + '\',\'' + esc(dist) + '\',\'' + esc(area) + '\',\'' + esc(branch) + '\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">' + _ICO.transfer + '</button>' : '')
-    + '<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal(' + idx + ')" style="flex-shrink:0;gap:5px">' + _ICO.view + ' View ' + assets.length + '</button>'
-    + '</div>'
-    + '</div>';
+    +(showMoveBtn ? '<button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area" onclick="openMoveOrgUnitModal(\'branch\',\''+esc(div)+'\',\''+esc(dist)+'\',\''+esc(area)+'\',\''+esc(branch)+'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">'+_ICO.transfer+'</button>' : '')
+    +'<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal('+idx+')" style="flex-shrink:0;gap:5px">'+_ICO.view+' View '+assets.length+'</button>'
+    +'</div>'
+    +'</div>';
 }
 
+// ── Branch / Location detail modal ────────────────────────────────────────────
 function openEquipBranchModal(idx) {
   var rec = _eqBranchReg[idx];
   if (!rec) return;
-  var title    = rec.branch === '(No Branch)' ? 'Assets (No Branch)' : rec.branch;
-  var subtitle = [rec.div, rec.dist, rec.area].filter(function(x){ return x && !x.startsWith('(No'); }).join(' › ');
+
+  var title, subtitle;
+  if (rec.hoMode) {
+    title    = rec.bo === '(No Location)' ? 'Unassigned Location' : rec.bo;
+    subtitle = '🏛 Head Office › ' + rec.dept;
+  } else {
+    title    = rec.branch === '(No Branch)' ? 'Assets (No Branch)' : rec.branch;
+    subtitle = [rec.div, rec.dist, rec.area].filter(function(x){ return x && !x.startsWith('(No'); }).join(' › ');
+  }
   document.getElementById('eqModalTitle').textContent    = title;
   document.getElementById('eqModalSubtitle').textContent = subtitle;
 
@@ -252,7 +395,7 @@ function openEquipBranchModal(idx) {
   openModal('equipmentBranchModal');
 }
 
-// ── switchPage override (runs after both JS_StaffAssets and JS_EquipmentRecord are loaded) ──
+// ── switchPage override ────────────────────────────────────────────────────────
 (function () {
   var _origSwitch = switchPage;
   switchPage = function (p) {
