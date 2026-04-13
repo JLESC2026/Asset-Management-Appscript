@@ -5,6 +5,14 @@
 
 function switchBorrowTab(tab) {
   borrowTab = tab;
+
+  var pageKeyMap = {
+    active:  'activeBorrow',
+    pool:    'borrowPool',
+    history: 'borrowHist'
+  };
+  if (pageKeyMap[tab]) pages[pageKeyMap[tab]] = 1;
+
   ['active', 'pool', 'history'].forEach(t => {
     document.getElementById('btab-' + t)?.classList.toggle('active', t === tab);
     const pane = document.getElementById('borrowPane-' + t);

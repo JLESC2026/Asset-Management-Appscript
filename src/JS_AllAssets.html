@@ -1,12 +1,3 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <base target="_top">
-  </head>
-  <body>
-    
-  </body>
-</html>
 <script>
 // ═══════════════════════════════════════
 //  ALL ASSETS TABLE
@@ -20,7 +11,9 @@ var _TBL_SEL = {
 
 function renderAllTable(){
   var data = _filterByScope(ASSETS);
-  var q=(document.getElementById('allSearch')?.value||'').toLowerCase()||searchQuery;
+  var q = (document.getElementById('allSearch')?.value || '').toLowerCase();
+  if (q) searchQuery = '';
+  if (!q) q = searchQuery;
   var fType=document.getElementById('filterType')?.value||'';
   var fLC  =document.getElementById('filterLifecycle')?.value||'';
   if(q) data=data.filter(function(a){return [a.Barcode,a.Brand,a.Type,a.Staff,a.EmpID,a.District,a.Serial].some(function(v){return (v||'').toLowerCase().includes(q);});});
@@ -78,7 +71,7 @@ function bulkDelete(){
   google.script.run
     .withSuccessHandler(function(r){ toast(r, r.startsWith('Error')?'err':'ok'); loadData(); })
     .withFailureHandler(function(err){toast(err.message,'err');})
-    .deleteAssets(bcs);
+    .deleteAssets(bcs, SESSION ? SESSION.username : '');
 }
 
 // ── Per-table bulk select / delete ────────────────────────────────────────────

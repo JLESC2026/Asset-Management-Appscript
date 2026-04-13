@@ -232,10 +232,6 @@ function _renderHODeptNode(dept) {
 function _renderHOEmpNode(dept, empId) {
   var emp = _stTree[dept] && _stTree[dept][empId];
   if (!emp) return '';
-  var idx = _stEmpRegistry.length;
-  // Store with a flag so openStaffAssetModal knows this is HO
-  _stEmpRegistry.push({ hoMode: true, dept: dept, empId: empId });
-
   var typeCounts = {};
   (emp.assets||[]).forEach(function(a){ if(a&&a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
   var chips = Object.entries(typeCounts)
@@ -245,7 +241,7 @@ function _renderHOEmpNode(dept, empId) {
   return '<div class="st-node st-emp st-emp-inline">'
     +'<div class="st-emp-row">'
     +'<div style="display:flex;gap:4px;flex-shrink:0">'
-    +'<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal('+idx+')">'
++ '<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal(\''+esc(empId)+'\',\''+esc(dept)+'\',\'\',\'\',\'\',\'ho\')">'
     +_ICO.view+'</button>'
     +'</div>'
     +'<span class="st-icon">👤</span>'
@@ -290,10 +286,45 @@ function _renderFieldStaffTree() {
   }
 
   if (!divKeys.length) {
-    container.innerHTML = '<div class="st-empty">'
-      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
-      +'No allocated assets found'+((_stSearchQ)?' matching your search':' in your scope')+'.'
-      +'</div>';
+    var isSearching = !!_stSearchQ;
+    var emptyHtml = '<div class="st-empty">'
+      + '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="1.2" style="margin:0 auto 14px;display:block;color:var(--text3)">'
+      + '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>'
+      + '<circle cx="9" cy="7" r="4"/>'
+      + '<path d="M23 21v-2a4 4 0 0 0-3-3.87"/>'
+      + '<path d="M16 3.13a4 4 0 0 1 0 7.75"/>'
+      + '</svg>';
+
+    if (isSearching) {
+      emptyHtml += '<div style="font-weight:700;font-size:.95rem;margin-bottom:6px">'
+        + 'No staff found matching "' + esc(_stSearchQ) + '"</div>'
+        + '<div style="color:var(--text3);font-size:.82rem;margin-bottom:16px">'
+        + 'Try searching by name, Employee ID, barcode, or location.</div>'
+        + '<button class="btn btn-secondary btn-sm" onclick="'
+        + 'document.getElementById(\'staffAssetsSearch\').value=\'\';'
+        + 'onStaffAssetsSearch()">'
+        + 'Clear Search</button>';
+    } else {
+      emptyHtml += '<div style="font-weight:700;font-size:.95rem;margin-bottom:6px">'
+        + 'No allocated assets in your scope</div>'
+        + '<div style="color:var(--text3);font-size:.82rem;margin-bottom:6px">'
+        + 'Assets allocated to staff in your district will appear here.</div>'
+        + '<div style="color:var(--text3);font-size:.78rem;margin-bottom:16px;'
+        + 'padding:8px 14px;background:var(--bg3);border:1px solid var(--border);'
+        + 'border-radius:var(--radius2);text-align:left;max-width:360px;margin-left:auto;'
+        + 'margin-right:auto">'
+        + '💡 Your scope: <strong>'
+        + (SESSION && SESSION.userDistricts && SESSION.userDistricts.length
+            ? SESSION.userDistricts.join(', ')
+            : 'No district assigned')
+        + '</strong></div>'
+        + '<button class="btn btn-primary btn-sm" onclick="switchPage(\'spare\');'
+        + 'setTimeout(openAddAssetModal,100)">'
+        + '+ Enroll First Asset</button>';
+    }
+    emptyHtml += '</div>';
+    container.innerHTML = emptyHtml;
     return;
   }
 
@@ -432,8 +463,6 @@ function _renderStaffBranchNode(div, dist, area, branch) {
 function _renderEmpNode(div, dist, area, branch, empId) {
   var emp = _stTree?.[div]?.[dist]?.[area]?.[branch]?.[empId];
   if (!emp) return '';
-  var idx = _stEmpRegistry.length;
-  _stEmpRegistry.push({ hoMode: false, div:div, dist:dist, area:area, branch:branch, empId:empId });
   var typeCounts = {};
   (emp.assets||[]).forEach(function(a){ if(a&&a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
   var chips = Object.entries(typeCounts)
@@ -445,7 +474,7 @@ function _renderEmpNode(div, dist, area, branch, empId) {
     +'<button class="btn btn-icon btn-secondary" data-tip="Move Staff" onclick="openMoveStaffModal(\''+esc(empId)+'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3)">'
     +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>'
     +'</button>'
-    +'<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal('+idx+')">'
+    +'<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal(\''+esc(empId)+'\',\''+esc(div||'')+'\',\''+esc(dist||'')+'\',\''+esc(area||'')+'\',\''+esc(branch||'')+'\')">'
     +_ICO.view+'</button>'
     +'</div>'
     +'<span class="st-icon">👤</span>'
@@ -462,22 +491,23 @@ function _renderEmpNode(div, dist, area, branch, empId) {
 }
 
 // ── Staff Asset Modal (handles both HO and field) ─────────────────────────────
-function openStaffAssetModal(idx) {
-  var reg = _stEmpRegistry[idx];
-  if (!reg) { toast('Staff data not found.','err'); return; }
-
+function openStaffAssetModal(empId, div, dist, area, branch, mode) {
   var emp, assets;
-  if (reg.hoMode) {
-    emp    = _stTree[reg.dept] && _stTree[reg.dept][reg.empId];
+  if (mode === 'ho') {
+    var dept = div;
+    emp = _stTree[dept] && _stTree[dept][empId];
     assets = emp ? (emp.assets||[]) : [];
   } else {
-    emp    = _stTree[reg.div]?.[reg.dist]?.[reg.area]?.[reg.branch]?.[reg.empId];
+    emp = _stTree[div]?.[dist]?.[area]?.[branch]?.[empId];
     assets = emp ? (emp.assets||[]) : [];
   }
   if (!emp) { toast('Staff data not found.','err'); return; }
 
   document.getElementById('samStaffName').textContent  = emp.name       || '—';
-  document.getElementById('samStaffId').textContent    = reg.empId      || '—';
+  var nameEl = document.getElementById('samStaffName');
+  nameEl.title           = emp.name || ''; // native tooltip on truncated names
+  nameEl.dataset.fullname= emp.name || '';
+  document.getElementById('samStaffId').textContent    = empId         || '—';
   document.getElementById('samStaffDesig').textContent = emp.designation || '—';
 
   var pd = document.getElementById('samPillDiv');
@@ -485,15 +515,14 @@ function openStaffAssetModal(idx) {
   var pb = document.getElementById('samPillBranch');
   var pc = document.getElementById('samStaffCount');
 
-  if (reg.hoMode) {
-    // HO: show Department + Base Office
+  if (mode === 'ho') {
     if(pd){ pd.textContent = '🏛 Head Office'; pd.className = 'loc-pill lp-div'; }
-    if(ps){ ps.textContent = reg.dept || '—'; ps.className = 'loc-pill lp-dist'; }
+    if(ps){ ps.textContent = div || '—'; ps.className = 'loc-pill lp-dist'; }
     if(pb){ pb.textContent = emp.baseOffice || '—'; pb.className = 'loc-pill lp-branch'; }
   } else {
-    if(pd) pd.textContent = (reg.div    !== '(No Division)')  ? reg.div    : '—';
-    if(ps) ps.textContent = (reg.dist   !== '(No District)')  ? reg.dist   : '—';
-    if(pb) pb.textContent = (reg.branch !== '(No Branch)')    ? reg.branch : '—';
+    if(pd) pd.textContent = (div !== '(No Division)')  ? div    : '—';
+    if(ps) ps.textContent = (dist !== '(No District)')  ? dist   : '—';
+    if(pb) pb.textContent = (branch !== '(No Branch)')  ? branch : '—';
   }
   if(pc) pc.textContent = assets.length+' asset'+(assets.length!==1?'s':'');
 

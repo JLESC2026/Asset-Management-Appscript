@@ -9,7 +9,9 @@ function renderSpare() {
   _resetTblSel('spare');
   let data = _filterByScope(ASSETS.filter(a => a.status === 'spare'));
 
-  const q      = (document.getElementById('spareSearch')?.value  || '').toLowerCase();
+  var q = (document.getElementById('spareSearch')?.value || '').toLowerCase();
+  if (q) searchQuery = '';
+  if (!q) q = searchQuery;
   const fType  = document.getElementById('spareFilterType')?.value || '';
   if (q)     data = data.filter(a => [a.Barcode, a.Brand, a.Type, a.Serial, a.Supplier].some(v => (v || '').toLowerCase().includes(q)));
   if (fType) data = data.filter(a => (a.Type || '').toUpperCase() === fType.toUpperCase());

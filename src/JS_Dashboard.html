@@ -9,22 +9,84 @@ function renderDashboard(){
   var borr  = dashData.filter(function(a){return a.status==='borrowed';}).length;
   var disp  = dashData.filter(function(a){return a.status==='disposal';}).length;
   var pool  = dashData.filter(function(a){return a.status==='borrow-item';}).length;
+  
+  // Count overdue borrows (due date passed) (UX-9)
+  var overdueCount = BORROWS.filter(function(b){
+    var expReturn = b[4]; // Expected Return date is at index 4
+    if (!expReturn) return false;
+    var exp = new Date(expReturn);
+    return exp < new Date() && (b[7] || '').toLowerCase() !== 'returned'; // not yet returned
+  }).length;
+  
+  // Count recent disposals (within 7 days)
+  var weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  var recentDisposals = DISPOSALS.filter(function(d){
+    var dispDate = d[3]; // Dispose Date at index 3
+    if (!dispDate) return false;
+    var disp = new Date(dispDate);
+    return disp >= weekAgo;
+  }).length;
 
   var stats=[
-    {label:'Total Assets', val:dashData.length, color:'var(--accent)',  icon:'📦', page:'all-assets'},
+    {label:'Total Assets', val:dashData.length, color:'var(--accent)',  icon:'📦', page:'all-assets', size:'lg'},
     {label:'Allocated',    val:alloc,            color:'var(--blue)',    icon:'👤', page:'allocated'},
     {label:'Spare Pool',   val:spare,            color:'var(--accent2)', icon:'🗄️', page:'spare'},
+    {label:'On Borrow',    val:borr,             color:'var(--yellow)',  icon:'📤', page:'borrow',
+      badge: overdueCount > 0 ? overdueCount + ' overdue' : null,
+      badgeColor: 'var(--red)'},
     {label:'Borrow Pool',  val:pool,             color:'var(--orange)',  icon:'📋', page:'borrow'},
-    {label:'On Borrow',    val:borr,             color:'var(--yellow)',  icon:'📤', page:'borrow'},
-    {label:'Disposed',     val:disp,             color:'var(--red)',     icon:'🗑️', page:'disposal'},
+    {label:'Disposed',     val:disp,             color:'var(--red)',     icon:'🗑️', page:'disposal',
+      badge: recentDisposals > 0 ? recentDisposals + ' this week' : null,
+      badgeColor: 'var(--red)'},
   ];
+  
   document.getElementById('dashStats').innerHTML=stats.map(function(s){
-    return '<div class="stat-card" onclick="switchPage(\''+s.page+'\')" style="cursor:pointer">'
-      +'<div class="stat-icon" style="background:'+s.color+'22;font-size:1.1rem">'+s.icon+'</div>'
-      +'<div class="stat-val" style="color:'+s.color+'">'+s.val+'</div>'
-      +'<div class="stat-label">'+s.label+'</div>'
+    var isLarge = s.size === 'lg';
+    return '<div class="stat-card'+(isLarge?' stat-card-primary':'')+'" '
+      + 'onclick="switchPage(\''+s.page+'\')" style="cursor:pointer;'
+      + (isLarge ? 'grid-column:span 2;' : '') + '">'
+      + '<div class="stat-icon" style="background:'+s.color+'22;font-size:1.1rem">'
+      +   s.icon
+      + '</div>'
+      + '<div class="stat-val" style="color:'+s.color+';'
+      +   (isLarge ? 'font-size:2.8rem;' : '') + '">'
+      +   s.val
+      + '</div>'
+      + '<div class="stat-label">'+s.label+'</div>'
+      + (s.badge
+          ? '<div style="margin-top:4px;font-size:.7rem;font-weight:700;'
+            + 'color:'+s.badgeColor+';background:'+s.badgeColor+'18;'
+            + 'padding:2px 8px;border-radius:10px;display:inline-block">'
+            + '⚠ '+s.badge+'</div>'
+          : '')
+      + '</div>';
+  }).join('');
+
+  var actColors={CREATE:'var(--green)',ALLOCATE:'var(--blue)',ASSIGN:'var(--blue)',TRANSFER:'var(--cyan)',BORROW:'var(--yellow)',RETURN:'var(--green)',DISPOSE:'var(--red)',DELETE:'var(--red)',DEALLOCATE:'var(--orange)'};
+  document.getElementById('dashActivity').innerHTML=LOGS.slice(0,8).map(function(l){
+    return '<div class="activity-item">'
+      +'<div class="act-dot" style="background:'+(actColors[l.action]||'var(--accent)')+'"></div>'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="font-weight:600">'+esc(l.action)+' — <span style="font-family:\'JetBrains Mono\',monospace;font-size:.78rem">'+esc(l.barcode)+'</span></div>'
+      +'<div style="color:var(--text2)">'+esc(l.details)+'</div>'
+      +'<div class="act-time">'+esc(l.timestamp)+'</div>'
+      +'</div></div>';
+  }).join('')||'<div style="color:var(--text3);padding:16px 0;text-align:center;font-size:.85rem">No recent activity</div>';
+
+  var typeCounts={};
+  dashData.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  var vals=Object.values(typeCounts);
+  var max=vals.length?Math.max.apply(null,vals):1;
+  document.getElementById('dashTypeChart').innerHTML=Object.entries(typeCounts).sort(function(a,b){return b[1]-a[1];}).slice(0,8).map(function(entry){
+    var t=entry[0], c=entry[1];
+    return '<div class="type-row">'
+      +'<div class="type-label" title="'+t+'">'+t+'</div>'
+      +'<div class="type-track"><div class="type-fill" style="width:'+(c/max*100).toFixed(1)+'%"></div></div>'
+      +'<div class="type-count">'+c+'</div>'
       +'</div>';
   }).join('');
+}
 
   var actColors={CREATE:'var(--green)',ALLOCATE:'var(--blue)',ASSIGN:'var(--blue)',TRANSFER:'var(--cyan)',BORROW:'var(--yellow)',RETURN:'var(--green)',DISPOSE:'var(--red)',DELETE:'var(--red)',DEALLOCATE:'var(--orange)'};
   document.getElementById('dashActivity').innerHTML=LOGS.slice(0,8).map(function(l){

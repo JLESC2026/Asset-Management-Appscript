@@ -55,11 +55,49 @@ function onAllocDivisionChange() {
     allowed.map(d => `<option>${esc(d)}</option>`).join('');
 }
 
+function onAllocDistrictChange() {
+  const div     = (document.getElementById('alDiv')?.value || '').trim();
+  const dist    = (document.getElementById('alDist')?.value || '').trim();
+  const areaSel = document.getElementById('alArea');
+  if (!areaSel) return;
+
+  const areas = new Set();
+  ASSETS.forEach(function(a) {
+    if ((a.Division || '') === div && (a.District || '') === dist && (a.Area || '').trim()) {
+      areas.add(a.Area.trim());
+    }
+  });
+
+  const sorted = [...areas].sort();
+  areaSel.innerHTML = '<option value="">Select…</option>' +
+    sorted.map(function(a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('') +
+    '<option value="__custom__">+ Enter custom area…</option>';
+
+  areaSel.onchange = function() {
+    if (areaSel.value === '__custom__') {
+      const custom = prompt('Enter area (e.g. 1, 2, 3):');
+      if (custom && custom.trim()) {
+        const trimmed = custom.trim();
+        const opt = document.createElement('option');
+        opt.value = trimmed;
+        opt.textContent = trimmed;
+        opt.selected = true;
+        areaSel.insertBefore(opt, areaSel.lastElementChild);
+        areaSel.value = trimmed;
+      } else {
+        areaSel.value = '';
+      }
+    }
+  };
+}
+
 function renderAllocated() {
   _resetTblSel('allocated');
   let data = _filterByScope(ASSETS.filter(a => ['allocated', 'transfer'].includes(a.status)));
 
-  const q        = (document.getElementById('allocSearch')?.value     || '').toLowerCase();
+  var q = (document.getElementById('allocSearch')?.value || '').toLowerCase();
+  if (q) searchQuery = '';
+  if (!q) q = searchQuery;
   const fType    = document.getElementById('allocFilterType')?.value   || '';
   const dropVal  = (document.getElementById('allocFilterDistrict')?.value || '').toLowerCase();
 
