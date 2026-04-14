@@ -43,6 +43,7 @@ var _stSearchQ     = '';
 var _stBuilt       = false;
 var _stEmpRegistry = [];
 var _dirtyPages    = [];
+var _scopeCache    = null;
 
 var _ICO = {
   allocate:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
@@ -223,7 +224,13 @@ function _getScopeDistricts(){
 
 // ─── FIX: HO users see ALL assets — they have full system visibility ──────────
 function _filterByScope(assets) {
-  if (isHO()) return assets;
+  // Only cache the full ASSETS array result, not partial arrays
+  if (assets === ASSETS && _scopeCache) return _scopeCache;
+  
+  if (isHO()) {
+    if (assets === ASSETS) _scopeCache = assets;
+    return assets;
+  }
 
   var dists = _getScopeDistricts();
   if (dists.length === 0) return [];
@@ -232,7 +239,7 @@ function _filterByScope(assets) {
     return d.toLowerCase();
   });
 
-  return assets.filter(function(a) {
+  var result = assets.filter(function(a) {
     var dist = (a.District || '').toLowerCase();
     var div  = (a.Division  || '').toLowerCase();
 
@@ -245,6 +252,9 @@ function _filterByScope(assets) {
     // Truly unlocated assets: Senior can see, FE cannot
     return isSenior();
   });
+
+  if (assets === ASSETS) _scopeCache = result;
+  return result;
 }
 
 function _getFEDistricts(){ return _getScopeDistricts(); }
@@ -490,29 +500,19 @@ function logout(){
 //  DATA LOADING
 // ═══════════════════════════════════════
 function loadData(){
+  _scopeCache = null;
   showLoading();
-  var pending=5;
-  function done(){ if(--pending===0) renderAll(); }
   google.script.run
-    .withSuccessHandler(function(r){ if(r.success) ASSETS=r.data||[]; done(); })
-    .withFailureHandler(function(err){ toast('Load error: '+err.message,'err'); done(); })
-    .getAllAssets();
-google.script.run
-  .withSuccessHandler(function(r) { LOGS = (r && r.rows) ? r.rows : []; done();})
-  .withFailureHandler(function() { done(); })
-  .getActivityLogs(1, 200);
-  google.script.run
-    .withSuccessHandler(function(r){ BORROWS=r||[]; done(); })
-    .withFailureHandler(function(){done();})
-    .getBorrowData();
-  google.script.run
-    .withSuccessHandler(function(r){ XFERS=r||[]; done(); })
-    .withFailureHandler(function(){done();})
-    .getTransferData();
-  google.script.run
-    .withSuccessHandler(function(r){ DISPOSALS=r||[]; done(); })
-    .withFailureHandler(function(){done();})
-    .getDisposalData();
+    .withSuccessHandler(function(r) {
+      ASSETS    = r.assets;
+      BORROWS   = r.borrows;
+      XFERS     = r.transfers;
+      DISPOSALS = r.disposals;
+      LOGS      = r.logs;
+      renderAll();
+    })
+    .withFailureHandler(function(err) { toast('Load error: ' + err.message, 'err'); })
+    .getInitialData();
 }
 
 // ─── Comprehensive loading state for all modules ─────────────────────────────

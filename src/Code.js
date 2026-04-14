@@ -458,6 +458,7 @@ function getAllAssets() {
         const div  = _normDiv(get(C.DIVISION));
         const dist = _normDist(get(C.DISTRICT));
 
+        const hasXfer = displayLC === 'Transfer';
         return {
           Barcode: get(C.BARCODE), Type: get(C.TYPE), Brand: get(C.BRAND),
           Serial: get(C.SERIAL), Specs: get(C.SPECS),
@@ -468,13 +469,17 @@ function getAllAssets() {
           WarrantyVal: get(C.WARRANTY_VAL), Remarks: get(C.REMARKS),
           EmpID: get(C.EMP_ID) || 'N/A', Staff: get(C.STAFF) || 'Unassigned',
           Designation: get(C.DESIGNATION),
-          Department: get(C.DEPARTMENT),          // ← Added
-          BaseOffice: get(C.BASE_OFFICE),         // ← Added
+          Department: get(C.DEPARTMENT),
+          BaseOffice: get(C.BASE_OFFICE),
           Division: div,
           District: dist, Area: get(C.AREA), Branch: get(C.BRANCH),
-          EffDate: get(C.EFF_DATE), XferType: get(C.XFER_TYPE),
-          ToStaff: get(C.TO_STAFF), ToEmpID: get(C.TO_EMPID),
-          ToDiv: get(C.TO_DIV), ToBranch: get(C.TO_BRANCH), XferDate: get(C.XFER_DATE),
+          EffDate: get(C.EFF_DATE), 
+          XferType:  hasXfer ? get(C.XFER_TYPE)  : '',
+          ToStaff:   hasXfer ? get(C.TO_STAFF)   : '',
+          ToEmpID:   hasXfer ? get(C.TO_EMPID)   : '',
+          ToDiv:     hasXfer ? get(C.TO_DIV)     : '',
+          ToBranch:  hasXfer ? get(C.TO_BRANCH)  : '',
+          XferDate:  hasXfer ? get(C.XFER_DATE)  : '',
           BorName: get(C.BOR_NAME), BorEmpID: get(C.BOR_EMPID),
           BorDate: get(C.BOR_DATE), ExpReturn: get(C.EXP_RETURN),
           ActReturn: get(C.ACT_RETURN), BorRemarks: get(C.BOR_REMARKS),
@@ -1624,4 +1629,15 @@ function updateAssetDetails(barcode, updates) {
     _log('EDIT', barcode, 'Updated: ' + Object.keys(updates).join(', '), '');
     return 'Asset details updated.';
   } catch(e) { return 'Error: ' + e.message; }
+}
+
+// ─── BATCH DATA LOADING ───────────────────────────────────────────────────────
+function getInitialData() {
+  return {
+    assets:    getAllAssets().data    || [],
+    borrows:   getBorrowData()        || [],
+    transfers: getTransferData()      || [],
+    disposals: getDisposalData()      || [],
+    logs:      getActivityLogs(1, 200).rows || []
+  };
 }
