@@ -26,14 +26,6 @@ const SH_DROPDOWN = 'Drop down';
 const SH_ALLOC    = 'Allocated';
 
 const AE_DATA_START = 4;
-
-// ─── COLUMN MAP (1-based) ────────────────────────────────────────────────────
-// Actual sheet has 61 columns.
-// Col  6: Department   ← NEW mapping
-// Col  7: Base Office  ← NEW mapping
-// Col 12: Assignment (not mapped)
-// Col 20: Asset Location (not mapped)
-// Col 28: Notes (not mapped)
 const C = {
   ENTRY_EMP_ID:1,  ENTRY_NAME:2,
   EMP_ID:3,        STAFF:4,          DESIGNATION:5,
@@ -403,24 +395,30 @@ function generateNextBarcode(type) {
     let max = 0;
 
     if (last >= AE_DATA_START) {
-      const finder = sh.createTextFinder('^' + pre + '-')
-        .useRegularExpression(true)
-        .matchEntireCell(false);
-      let found = finder.findNext();
-      while (found) {
-        if (found.getColumn() === C.BARCODE) {
-          const parts = found.getValue().split('-');
-          const n = parseInt(parts[parts.length - 1]);
+      const barcodes = sh.getRange(
+        AE_DATA_START, C.BARCODE,
+        last - AE_DATA_START + 1, 1
+      ).getValues();
+
+      // FIX: filter strictly by prefix AND year before extracting sequence
+      const pattern = new RegExp('^' + pre + '-' + yr + '-(\\d+)$');
+      barcodes.forEach(r => {
+        const bc = String(r[0] || '').trim();
+        const match = bc.match(pattern);
+        if (match) {
+          const n = parseInt(match[1], 10);
           if (!isNaN(n) && n > max) max = n;
         }
-        found = finder.findNext();
-      }
+      });
     }
 
-    let candidate = pre + '-' + yr + '-' + String(max + 1).padStart(3, '0');
+    let seq = max + 1;
+    let candidate = pre + '-' + yr + '-' + String(seq).padStart(3, '0');
+    
+    // Collision guard
     while (_findRow(sh, candidate) > 0) {
-      max++;
-      candidate = pre + '-' + yr + '-' + String(max + 1).padStart(3, '0');
+      seq++;
+      candidate = pre + '-' + yr + '-' + String(seq).padStart(3, '0');
     }
     return candidate;
   } finally {
