@@ -505,8 +505,20 @@ function openStaffAssetModal(empId, div, dist, area, branch, mode) {
 
   document.getElementById('samStaffName').textContent  = emp.name       || '—';
   var nameEl = document.getElementById('samStaffName');
-  nameEl.title           = emp.name || ''; // native tooltip on truncated names
-  nameEl.dataset.fullname= emp.name || '';
+  var fullName = emp.name || '';
+  nameEl.textContent = fullName;
+  nameEl.title = fullName;
+  nameEl.dataset.fullname = fullName;
+
+  // Add a subtle "show full" link for long names
+  if (fullName.length > 32) {
+    nameEl.style.cursor = 'pointer';
+    nameEl.onclick = function() {
+      this.style.whiteSpace = this.style.whiteSpace === 'normal' ? '' : 'normal';
+      this.style.wordBreak = this.style.wordBreak === 'break-word' ? '' : 'break-word';
+    };
+    nameEl.title = 'Click to expand full name';
+  }
   document.getElementById('samStaffId').textContent    = empId         || '—';
   document.getElementById('samStaffDesig').textContent = emp.designation || '—';
 

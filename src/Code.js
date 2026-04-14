@@ -403,18 +403,18 @@ function generateNextBarcode(type) {
     let max = 0;
 
     if (last >= AE_DATA_START) {
-      const barcodes = sh.getRange(
-        AE_DATA_START, C.BARCODE, 
-        last - AE_DATA_START + 1, 1
-      ).getValues();
-      barcodes.forEach(r => {
-        const bc = String(r[0] || '');
-        const parts = bc.split('-');
-        if (parts.length >= 3 && parts[0] === pre) {
+      const finder = sh.createTextFinder('^' + pre + '-')
+        .useRegularExpression(true)
+        .matchEntireCell(false);
+      let found = finder.findNext();
+      while (found) {
+        if (found.getColumn() === C.BARCODE) {
+          const parts = found.getValue().split('-');
           const n = parseInt(parts[parts.length - 1]);
           if (!isNaN(n) && n > max) max = n;
         }
-      });
+        found = finder.findNext();
+      }
     }
 
     let candidate = pre + '-' + yr + '-' + String(max + 1).padStart(3, '0');
@@ -725,6 +725,12 @@ function deleteAssets(barcodes, callerEmpId) {
 
 // ─── ALLOCATE ASSET ──────────────────────────────────────────────────────────
 function allocateAsset(obj) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+  } catch(e) {
+    return 'Error: System is busy. Please try again in a few seconds.';
+  }
   try {
     if (!obj.barcode)   return 'Error: Barcode is required.';
     if (!obj.empId)     return 'Error: Employee ID is required.';
@@ -736,6 +742,11 @@ function allocateAsset(obj) {
     if (currentLC === 'borrow')    return 'Error: Asset is currently borrowed. Return it first.';
     if (currentLC === 'dispose')   return 'Error: Disposed assets cannot be allocated.';
     if (currentLC === 'transfer')  return 'Error: Asset is in an active transfer.';
+    const currentAS = String(sh.getRange(rowIdx, C.ASSET_STATUS).getValue() || '').toLowerCase();
+    if (currentAS === 'borrowitem') {
+      return 'Error: This asset is part of the Borrow Pool and cannot be permanently allocated. '
+        + 'To assign it, first change its status via the Spare Pool.';
+    }
     if (currentLC === 'allocated') {
   // Log the implicit deallocation before re-allocating
   const prevStaff = String(sh.getRange(rowIdx, C.STAFF).getValue() || '');
@@ -770,12 +781,21 @@ function allocateAsset(obj) {
     ]);
     _log('ALLOCATE', obj.barcode, _sanitize(obj.staffName, 100) + ' | ' + (_sanitize(obj.branch, 150) || obj.baseOffice || normDiv || ''), obj.allocatedBy || obj.empId || '');
     return 'Asset allocated to ' + _sanitize(obj.staffName, 100);
-  } catch (e) { return 'Error: ' + e.message; }
-  
+  } catch(e) {
+    return 'Error: ' + e.message;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ─── DEALLOCATE ASSET ────────────────────────────────────────────────────────
 function deallocateAsset(barcode, remarks) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+  } catch(e) {
+    return 'Error: System is busy. Please try again in a few seconds.';
+  }
   try {
     const sh = _entrySheet();
     const rowIdx = _findRow(sh, barcode);
@@ -795,7 +815,9 @@ function deallocateAsset(barcode, remarks) {
     _setRow(sh, rowIdx, updates);
     _log('DEALLOCATE', barcode, `From: ${prevStaff} → Spare Pool. ${_sanitize(remarks, 500)||''}`, '');
     return 'Asset returned to spare pool';
-  } catch (e) { return 'Error: ' + e.message; }
+  } catch (e) { return 'Error: ' + e.message; } finally {
+    lock.releaseLock();
+  }
 }
 
 // ─── UPDATE ASSET DETAILS (UX-5: Edit Modal) ──────────────────────────────────
@@ -901,6 +923,12 @@ function getActiveBorrows() {
 
 // ─── TRANSFERS ───────────────────────────────────────────────────────────────
 function saveTransfer(t) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+  } catch(e) {
+    return 'Error: System is busy. Please try again in a few seconds.';
+  }
   try {
     if (!t.barcode)      return 'Error: Barcode is required.';
     if (!t.toEmpId)      return 'Error: Destination Employee ID is required.';
@@ -946,7 +974,9 @@ function saveTransfer(t) {
     ]);
     _log('TRANSFER', t.barcode, (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100), t.fromEmpId || '');
     return 'Transfer saved';
-  } catch (e) { return 'Error: ' + e.message; }
+  } catch (e) { return 'Error: ' + e.message; } finally {
+    lock.releaseLock();
+  }
 }
 
 function getTransferData() {
@@ -961,6 +991,12 @@ function getTransferData() {
 
 // ─── BORROWS ─────────────────────────────────────────────────────────────────
 function saveBorrow(b) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+  } catch(e) {
+    return 'Error: System is busy. Please try again in a few seconds.';
+  }
   try {
     const sh     = _entrySheet();
     const bSh    = _borrowSheet();
@@ -1001,7 +1037,9 @@ function saveBorrow(b) {
     ]);
     _log('BORROW', b.barcode, _sanitize(b.borrowerName, 100) + ' | due: ' + b.expectedReturn, b.empId || '');
     return 'Borrow saved';
-  } catch (e) { return 'Error: ' + e.message; }
+  } catch (e) { return 'Error: ' + e.message; } finally {
+    lock.releaseLock();
+  }
 }
 
 function getBorrowData() {
@@ -1051,16 +1089,19 @@ function returnAsset(barcode, returnDate) {
       const restoredLbl  = (isBorrowItem || !hasOwner) ? 'Unassigned' : 'Assigned';
       const restoredAS   = isBorrowItem ? 'BorrowItem' : 'Active';
       _setRow(sh, rowIdx, [
-        [C.LIFECYCLE,    'Borrow'],
-        [C.ASSET_STATUS, isBorrowItem ? 'BorrowItem' : 'Active'],
-        [C.STATUS_LABEL, 'Assigned'],
-        [C.ACT_RETURN,   ''],
-        [C.BOR_NAME,     b.borrowerName   || ''],
-        [C.LIFECYCLE,    restoredLC],  [C.STATUS_LABEL, restoredLbl],
-        [C.ASSET_STATUS, restoredAS],  [C.ACT_RETURN,   retDate],
-        [C.BOR_NAME,''], [C.BOR_EMPID,''], [C.BOR_DESIG,''],
-        [C.BOR_DIV,''],  [C.BOR_DIST,''],  [C.BOR_BRANCH,''],
-        [C.BOR_DATE,''], [C.EXP_RETURN,''], [C.BOR_REMARKS,'']
+        [C.LIFECYCLE,    restoredLC],
+        [C.STATUS_LABEL, restoredLbl],
+        [C.ASSET_STATUS, restoredAS],
+        [C.ACT_RETURN,   retDate],
+        [C.BOR_NAME,     ''],
+        [C.BOR_EMPID,    ''],
+        [C.BOR_DESIG,    ''],
+        [C.BOR_DIV,      ''],
+        [C.BOR_DIST,     ''],
+        [C.BOR_BRANCH,   ''],
+        [C.BOR_DATE,     ''],
+        [C.EXP_RETURN,   ''],
+        [C.BOR_REMARKS,  '']
       ]);
     }
     _log('RETURN', barcode, retDate, '');
@@ -1070,6 +1111,12 @@ function returnAsset(barcode, returnDate) {
 
 // ─── DISPOSALS ───────────────────────────────────────────────────────────────
 function saveDisposal(d) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+  } catch(e) {
+    return 'Error: System is busy. Please try again in a few seconds.';
+  }
   try {
     const sh     = _entrySheet();
     const dSh    = _disposeSheet();
@@ -1091,7 +1138,9 @@ function saveDisposal(d) {
     }
     _log('DISPOSE', d.barcode, _sanitize(d.reason, 200) + ' | ' + _sanitize(d.disposedBy, 100), d.disposedBy || '');
     return 'Disposal recorded';
-  } catch (e) { return 'Error: ' + e.message; }
+  } catch (e) { return 'Error: ' + e.message; } finally {
+    lock.releaseLock();
+  }
 }
 
 function getDisposalData() {
@@ -1532,5 +1581,47 @@ if (unitType === 'district') {
     return updated > 0
       ? `${unitType.charAt(0).toUpperCase() + unitType.slice(1)} moved. ${updated} asset(s) updated.`
       : 'Move recorded — no matching assets found (check filters or scope).';
+  } catch(e) { return 'Error: ' + e.message; }
+}
+
+// ─── UPDATE ASSET DETAILS ─────────────────────────────────────────────────────
+function updateAssetDetails(barcode, updates) {
+  try {
+    const sh = _entrySheet();
+    const rowIdx = _findRow(sh, barcode);
+    if (rowIdx < 1) return 'Error: Asset not found: ' + barcode;
+
+    const fields = [];
+    if (updates.brand     !== undefined) fields.push([C.BRAND,     updates.brand]);
+    if (updates.condition !== undefined) fields.push([C.CONDITION, updates.condition]);
+    if (updates.purchDate !== undefined) fields.push([C.PURCH_DATE,updates.purchDate]);
+    if (updates.specs     !== undefined) fields.push([C.SPECS,     updates.specs]);
+    if (updates.remarks   !== undefined) fields.push([C.REMARKS,   updates.remarks]);
+
+    // Serial needs duplicate check
+    if (updates.serial !== undefined) {
+      const currentSerial = String(
+        sh.getRange(rowIdx, C.SERIAL).getValue() || ''
+      ).trim();
+      if (updates.serial !== currentSerial && updates.serial) {
+        const last = sh.getLastRow();
+        if (last >= AE_DATA_START) {
+          const serials = sh.getRange(
+            AE_DATA_START, C.SERIAL,
+            last - AE_DATA_START + 1, 1
+          ).getValues();
+          const dupIdx = serials.findIndex(
+            (r, i) => String(r[0]).trim() === updates.serial 
+              && (i + AE_DATA_START) !== rowIdx
+          );
+          if (dupIdx >= 0) return 'Error: Serial No. already used by another asset.';
+        }
+      }
+      fields.push([C.SERIAL, updates.serial]);
+    }
+
+    _setRow(sh, rowIdx, fields);
+    _log('EDIT', barcode, 'Updated: ' + Object.keys(updates).join(', '), '');
+    return 'Asset details updated.';
   } catch(e) { return 'Error: ' + e.message; }
 }

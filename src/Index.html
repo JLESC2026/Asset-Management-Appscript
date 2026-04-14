@@ -16,6 +16,8 @@
 <!-- ══ MAIN APP ══ -->
 <div id="app">
 
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileSidebar()"></div>
+
   <!-- TOPBAR -->
   <div class="topbar">
     <div class="topbar-logo">
@@ -23,6 +25,17 @@
            style="height:38px;object-fit:contain;mix-blend-mode:multiply"
            alt="LifeBank Foundation"/>
     </div>
+    <!-- Add hamburger button as first child -->
+    <button class="hamburger-btn" id="sidebarToggle" onclick="toggleMobileSidebar()" 
+      style="display:none;background:var(--bg3);border:1px solid var(--border);
+      color:var(--text2);padding:7px 10px;border-radius:var(--radius2);cursor:pointer">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" 
+        stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
     <div class="topbar-search">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input type="text" id="globalSearch" placeholder="Search assets, staff, barcode…" oninput="globalFilter(this.value)"/>
@@ -90,6 +103,22 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
         Borrow
         <span class="nav-badge" id="nbBorrowed" style="background:var(--yellow)">0</span>
+      </div>
+      <!-- Add sub-items (shown when borrow page is active) -->
+      <div id="borrowSubNav" style="display:none">
+        <div class="nav-sub-item" onclick="switchPage('borrow');switchBorrowTab('active')">
+          &nbsp;&nbsp;Active
+          <span style="margin-left:auto;font-size:.68rem;color:var(--yellow)" 
+            id="nbBorrowActiveSub">0</span>
+        </div>
+        <div class="nav-sub-item" onclick="switchPage('borrow');switchBorrowTab('pool')">
+          &nbsp;&nbsp;Pool
+          <span style="margin-left:auto;font-size:.68rem;color:var(--orange)" 
+            id="nbBorrowPoolSub">0</span>
+        </div>
+        <div class="nav-sub-item" onclick="switchPage('borrow');switchBorrowTab('history')">
+          &nbsp;&nbsp;History
+        </div>
       </div>
       <div class="nav-item" data-page="disposal" onclick="switchPage('disposal')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>

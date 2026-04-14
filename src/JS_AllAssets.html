@@ -94,7 +94,8 @@ function checkSelTable(key){
   var b=document.getElementById(c.btn); if(b) b.style.display=any?'':'none';
 }
 
-function bulkDeleteTable(key){
+function bulkDeleteTable(key, callerEmpId){
+  callerEmpId = callerEmpId || SESSION.username;
   var c=_TBL_SEL[key]; if(!c) return;
   var bcs=[...document.querySelectorAll('.'+c.cls+':checked')].map(function(x){return x.value;});
   if(!bcs.length) return;
@@ -102,6 +103,6 @@ function bulkDeleteTable(key){
   google.script.run
     .withSuccessHandler(function(r){ toast(r,r.startsWith('Error')?'err':'ok'); loadData(); })
     .withFailureHandler(function(err){toast(err.message,'err');})
-    .deleteAssets(bcs);
+    .deleteAssets(bcs, callerEmpId);
 }
 </script>

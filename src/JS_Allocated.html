@@ -92,6 +92,9 @@ function onAllocDistrictChange() {
 }
 
 function renderAllocated() {
+  // Skip if page is not currently visible
+  if (document.getElementById('page-allocated').style.display === 'none' 
+    && currentPage !== 'allocated') return;
   _resetTblSel('allocated');
   let data = _filterByScope(ASSETS.filter(a => ['allocated', 'transfer'].includes(a.status)));
 

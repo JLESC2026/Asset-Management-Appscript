@@ -75,10 +75,16 @@ function viewAsset(barcode) {
   } else if (a.status === 'borrowed') {
     actions = `<button class="btn btn-success btn-sm" onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}','${esc(a.BorName||'')}')">Return Asset</button>`;
   } else if (a.status === 'borrow-item') {
-    const isBorrowed = (a.Lifecycle||'').toLowerCase() === 'borrow';
+    const isBorrowed = (a.Lifecycle || '').toLowerCase() === 'borrow';
     actions = isBorrowed
-      ? `<button class="btn btn-success btn-sm" onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}','${esc(a.BorName||'')}')">Return Asset</button>`
-      : `<button class="btn btn-borrow btn-sm" onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>`;
+      ? `<button class="btn btn-success btn-sm" 
+        onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}',
+        '${esc(a.BorName||'')}')">Return Asset</button>`
+      : `<button class="btn btn-borrow btn-sm" 
+        onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">
+        Borrow</button>
+       <span style="color:var(--text3);font-size:.76rem;align-self:center">
+        Pool asset — cannot allocate</span>`;
   }
 
   footer.innerHTML = `
@@ -93,6 +99,84 @@ function viewAsset(barcode) {
     <button class="btn btn-secondary" onclick="closeModal('viewModal')">Close</button>`;
 
   openModal('viewModal');
+}
+
+function openEditAssetModal(barcode) {
+  const a = ASSETS.find(x => x.Barcode === barcode);
+  if (!a) { toast('Asset not found', 'err'); return; }
+
+  document.getElementById('viewModalBody').innerHTML = `
+    <div style="padding:10px 14px;background:rgba(59,130,246,.06);
+      border:1px solid rgba(59,130,246,.2);border-radius:8px;
+      font-size:.8rem;color:#60a5fa;margin-bottom:16px">
+      ✏ Editing: <strong>${esc(a.Barcode)}</strong> — 
+      only basic details can be changed here. 
+      Lifecycle changes use the action buttons.
+    </div>
+    <div class="form-grid" style="gap:12px">
+      <div class="field">
+        <label>Brand</label>
+        <input type="text" id="editBrand" value="${esc(a.Brand || '')}"/>
+      </div>
+      <div class="field">
+        <label>Serial No.</label>
+        <input type="text" id="editSerial" value="${esc(a.Serial || '')}"/>
+      </div>
+      <div class="field">
+        <label>Condition</label>
+        <select id="editCondition">
+          ${['New','Good','Damage','Repair'].map(c =>
+            `<option value="${c}"${a.Condition===c?' selected':''}>${c}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Purchase Date</label>
+        <input type="date" id="editPurchDate" value="${a.PurchDate || ''}"/>
+      </div>
+      <div class="field form-span2">
+        <label>Specifications / Model</label>
+        <input type="text" id="editSpecs" value="${esc(a.Specs || '')}"/>
+      </div>
+      <div class="field form-span2">
+        <label>Remarks</label>
+        <textarea id="editRemarks" style="min-height:60px">${esc(a.Remarks || '')}</textarea>
+      </div>
+    </div>`;
+
+  document.getElementById('viewModalFooter').innerHTML = `
+    <button class="btn btn-secondary" 
+      onclick="viewAsset('${esc(barcode)}')">← Cancel Edit</button>
+    <div style="flex:1"></div>
+    <button class="btn btn-primary" onclick="submitEditAsset('${esc(barcode)}')">
+      Save Changes
+    </button>`;
+}
+
+function submitEditAsset(barcode) {
+  const btn = document.querySelector('#viewModalFooter .btn-primary');
+  _lockBtn(btn);
+  google.script.run
+    .withSuccessHandler(function(r) {
+      _unlockBtn(btn);
+      toast(r, r.startsWith('Error') ? 'err' : 'ok');
+      if (!r.startsWith('Error')) {
+        loadData();
+        setTimeout(() => viewAsset(barcode), 800);
+      }
+    })
+    .withFailureHandler(function(err) {
+      _unlockBtn(btn);
+      toast(err.message, 'err');
+    })
+    .updateAssetDetails(barcode, {
+      brand:     document.getElementById('editBrand').value.trim(),
+      serial:    document.getElementById('editSerial').value.trim(),
+      condition: document.getElementById('editCondition').value,
+      purchDate: document.getElementById('editPurchDate').value,
+      specs:     document.getElementById('editSpecs').value.trim(),
+      remarks:   document.getElementById('editRemarks').value.trim()
+    });
 }
 
 function _vf(label, value, fullWidth) {
@@ -229,7 +313,19 @@ function enrollBack() {
 function enrollNext() {
   if (enrollStep === 1) {
     if (!document.getElementById('fCategory').value) { toast('Category is required', 'warn'); return; }
-    if (!document.getElementById('fBarcode').value.trim()) { toast('Barcode is required — click Auto to generate', 'warn'); return; }
+    const bcVal = document.getElementById('fBarcode').value.trim();
+    if (!bcVal || bcVal === 'Generating…') { 
+      toast('Please wait — barcode is being generated, or click Auto to retry', 'warn'); 
+      return; 
+    }
+    // Also check it matches expected format
+    if (!/^[A-Z]{2,4}-\d{4}-\d{3,4}$/.test(bcVal)) {
+      const proceed = confirm(
+        'The barcode "' + bcVal + '" does not match the standard format (e.g. LTP-2025-001).\n\n'
+        + 'Proceed anyway? (Only do this if you are entering a custom barcode.)'
+      );
+      if (!proceed) return;
+    }
     enrollStep = 2; _syncEnrollStepper();
   } else if (enrollStep === 2) {
     const fieldType = document.getElementById('fFieldType').value;

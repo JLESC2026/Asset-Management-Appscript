@@ -46,7 +46,7 @@ function renderTransferTable() {
 }
 
 // ── Activity Log Table ────────────────────────────────────────────────────────
-function renderActivityTable() {
+function _renderActivityTableRows() {
   const tbody = document.getElementById('tblActivity');
   if (!tbody) return;
 
@@ -58,6 +58,12 @@ function renderActivityTable() {
     return;
   }
 
+  // Paginate the activity log
+  if (!pages.activity) pages.activity = 1;
+  const totalPages = Math.ceil(logs.length / PAGE_SIZE) || 1;
+  if (pages.activity > totalPages) pages.activity = totalPages;
+  const slice = logs.slice((pages.activity - 1) * PAGE_SIZE, pages.activity * PAGE_SIZE);
+
   const colors = {
     CREATE:     'var(--green)',  ALLOCATE:   'var(--blue)',
     ASSIGN:     'var(--blue)',   TRANSFER:   'var(--cyan)',
@@ -66,12 +72,14 @@ function renderActivityTable() {
     DEALLOCATE: 'var(--orange)'
   };
 
-  tbody.innerHTML = logs.map(l => `<tr>
+  tbody.innerHTML = slice.map(l => `<tr>
     <td class="nowrap-sm" style="color:var(--text3)">${esc(l.timestamp)}</td>
     <td><span class="badge" style="background:${colors[l.action] || 'var(--accent)'}22;color:${colors[l.action] || 'var(--accent)'}">${esc(l.action)}</span></td>
     <td><span class="mono-bc">${esc(l.barcode)}</span></td>
     <td style="color:var(--text2)">${esc(l.details)}</td>
     <td style="font-size:.76rem;color:var(--text3);font-family:'JetBrains Mono',monospace">${esc(l.performer || '—')}</td>
   </tr>`).join('');
+
+  renderPager('pagerActivity', 'activity', totalPages, pages.activity);
 }
 </script>

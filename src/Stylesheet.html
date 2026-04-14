@@ -115,6 +115,79 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .nav-item svg{width:16px;height:16px;flex-shrink:0}
 .nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:.68rem;padding:2px 7px;border-radius:10px;font-weight:700;min-width:28px;text-align:center;transition:all .3s}
 
+/* ── SIDEBAR OVERLAY & MOBILE ── */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 200;
+}
+.sidebar-overlay.open { display: block; }
+
+@media (max-width: 900px) {
+  .hamburger-btn { display: flex !important; align-items: center; }
+  .sidebar {
+    position: fixed;
+    left: -240px;
+    top: 56px;
+    bottom: 0;
+    z-index: 201;
+    transition: left .25s ease;
+    width: 230px !important;
+    min-width: 230px !important;
+    overflow-y: auto;
+  }
+  .sidebar.mobile-open { left: 0; }
+  /* Show all nav labels again on mobile overlay */
+  .sidebar.mobile-open .nav-item > *:not(svg):not(.nav-badge) { display: block; }
+  .sidebar.mobile-open .nav-section { display: block; }
+  .sidebar.mobile-open .nav-item { justify-content: flex-start; padding: 9px 16px; }
+  .sidebar.mobile-open .nav-badge { position: static; min-width: 28px; }
+}
+
+/* ── TRANSFER MODAL PANELS ── */
+.transfer-from-panel {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  position: relative;
+}
+.transfer-to-panel {
+  background: rgba(59,130,246,.05);
+  border: 1px solid rgba(59,130,246,.2);
+  border-radius: 8px;
+  padding: 14px;
+  position: relative;
+}
+.transfer-panel-label {
+  position: absolute;
+  top: -10px;
+  left: 12px;
+  background: var(--card);
+  padding: 0 6px;
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text3);
+}
+.transfer-to-panel .transfer-panel-label { color: #60a5fa; }
+
+@media (max-width: 900px) {
+  /* Stack transfer panels vertically */
+  #transferModal .modal-body > div[style*="grid-template-columns"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  /* Hide the arrow in stacked mode, show a horizontal divider instead */
+  #transferModal .modal-body > div > div:nth-child(2) {
+    display: none !important;
+  }
+}
+
 /* ── NAV SUB-ITEMS (UX-6) ── */
 .nav-sub-item{
   font-size:.76rem;
@@ -142,7 +215,11 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 }
 .content{flex:1;overflow-y:auto;overflow-x:hidden;padding:24px;background:var(--bg);min-width:0}
 .page{display:none}
-.page.active{display:block}
+.page.active{display:block;animation:pageFadeIn .18s ease}
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
 
 /* ── SIDEBAR BADGE LOADING SHIMMER ── */
 .nb-loading{
@@ -278,7 +355,7 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .pool-pill-blue{background:rgba(37,99,235,.08);border-color:rgba(37,99,235,.2);color:#2563eb;font-weight:600}
 
 /* ── TABLES ── */
-.tbl-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 280px);box-shadow:var(--shadow);position:relative}
+.tbl-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 280px);box-shadow:var(--shadow);position:relative;min-height:200px}
 #floating-tip{position:fixed;background:#1b2d4f;color:#fff;padding:4px 9px;border-radius:5px;font-size:.7rem;white-space:nowrap;pointer-events:none;z-index:var(--z-tooltip);display:none}
 .tbl-wrap table{width:100%;border-collapse:collapse;font-size:.82rem;table-layout:fixed}
 .tbl-wrap thead tr{background:var(--bg3)}
@@ -294,6 +371,19 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .tbl-empty{padding:40px;text-align:center;color:var(--text3);font-size:.88rem}
 .loading-row td{text-align:center;padding:32px;color:var(--text3)}
 .cb{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+
+/* ── TABLE RESPONSIVE — ACTION BUTTON WRAPPING (UX-7) ── */
+@media (max-width: 1024px), (pointer: coarse) {
+  td > div[style*="display:flex"] {
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+}
+
+/* ── TABLE RESPONSIVE — SHORT SCREENS (ST-2) ── */
+@media (max-height: 600px) {
+  .tbl-wrap { max-height: calc(100vh - 180px); }
+}
 
 /* ── CONDITIONS ── */
 .cond-good,.cond-new{color:var(--green)}
