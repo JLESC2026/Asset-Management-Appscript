@@ -492,6 +492,7 @@ function _renderEmpNode(div, dist, area, branch, empId) {
 
 // ── Staff Asset Modal (handles both HO and field) ─────────────────────────────
 function openStaffAssetModal(empId, div, dist, area, branch, mode) {
+  _samCurrentEmpId = empId;
   var emp, assets;
   if (mode === 'ho') {
     var dept = div;

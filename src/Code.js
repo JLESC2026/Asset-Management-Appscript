@@ -1639,3 +1639,48 @@ function getInitialData() {
     logs:      getActivityLogs(1, 200).rows || []
   };
 }
+function getEngineersByLocation(district, branch) {
+  try {
+    var ss     = _ss();
+    var engSh  = ss.getSheetByName('Eng. List') || ss.getSheetByName('Eng List');
+    var result = { fe: '', senior: '' };
+
+    if (!engSh || engSh.getLastRow() < 2) return result;
+
+    var last = engSh.getLastRow();
+    var data = engSh.getRange(2, 1, last - 1, 10).getValues();
+
+    var normDist   = String(district || '').trim().toLowerCase();
+    var normBranch = String(branch   || '').trim().toLowerCase();
+
+    // Find engineers matching the district
+    var matches = data.filter(function(r) {
+      var rowDist = String(r[8] || '').trim().toLowerCase();
+      return normDist && rowDist === normDist;
+    });
+
+    // Try to narrow by branch if provided
+    if (normBranch && matches.length > 1) {
+      var branchMatches = matches.filter(function(r) {
+        var rowBranch = String(r[9] || '').trim().toLowerCase();
+        return rowBranch === normBranch;
+      });
+      if (branchMatches.length) matches = branchMatches;
+    }
+
+    matches.forEach(function(r) {
+      var role = String(r[3] || '').trim().toLowerCase(); // supervisor/role column
+      var name = String(r[2] || '').trim();               // name column
+      if (!name) return;
+      if (role.includes('senior') || role.includes('supervisor')) {
+        if (!result.senior) result.senior = name;
+      } else {
+        if (!result.fe) result.fe = name;
+      }
+    });
+
+    return result;
+  } catch(e) {
+    return { fe: '', senior: '' };
+  }
+}

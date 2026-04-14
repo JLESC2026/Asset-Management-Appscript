@@ -1,0 +1,304 @@
+<script>
+// ═══════════════════════════════════════════════════════════
+//  JS_AccountabilityForm.html
+//  Equipment Accountability Form — HTML/Print Generator
+// ═══════════════════════════════════════════════════════════
+
+// ─── ENTRY POINTS ────────────────────────────────────────────────────────────
+
+function openAccountabilityForm(barcode) {
+  var asset = ASSETS.find(function(a){ return a.Barcode === barcode; });
+  if (!asset) { toast('Asset not found: ' + barcode, 'err'); return; }
+  _loadEngineersAndRender({
+    name:           asset.Staff       || '',
+    id_no:          asset.EmpID       || '',
+    designation:    asset.Designation || '',
+    department:     asset.Department  || asset.Division || '',
+    effective_date: asset.EffDate     || '',
+    district:       asset.District    || '',
+    branch:         asset.Branch      || '',
+    items:          [_assetToFormItem(asset)]
+  });
+}
+
+function openAccountabilityFormByEmp(empId) {
+  window.openAccountabilityFormByEmp = openAccountabilityFormByEmp;
+  var empAssets = _filterByScope(ASSETS).filter(function(a){
+    return (a.EmpID || '').trim().toLowerCase() === String(empId).trim().toLowerCase()
+      && ['allocated', 'transfer'].indexOf(a.status) >= 0;
+  });
+  if (!empAssets.length) { toast('No allocated assets found for: ' + empId, 'warn'); return; }
+  var ref = empAssets[0];
+  _loadEngineersAndRender({
+    name:           ref.Staff       || '',
+    id_no:          empId,
+    designation:    ref.Designation || '',
+    department:     ref.Department  || ref.Division || '',
+    effective_date: ref.EffDate     || '',
+    district:       ref.District    || '',
+    branch:         ref.Branch      || '',
+    items:          empAssets.map(_assetToFormItem)
+  });
+}
+
+function openAccountabilityFormFromBranch(idx) {
+  var rec = _eqBranchReg[idx];
+  if (!rec || !rec.assets || !rec.assets.length) { toast('No assets to print.', 'warn'); return; }
+  var assets   = rec.assets;
+  var staffSet = new Set(assets.map(function(a){ return (a.EmpID || '').trim(); }).filter(Boolean));
+  var ref      = assets.find(function(a){ return a.Staff && a.Staff !== 'Unassigned'; }) || assets[0];
+  _loadEngineersAndRender({
+    name:           staffSet.size === 1 ? (ref.Staff || '') : '',
+    id_no:          staffSet.size === 1 ? (ref.EmpID || '') : '',
+    designation:    staffSet.size === 1 ? (ref.Designation || '') : '',
+    department:     ref.Department || ref.Division || '',
+    effective_date: ref.EffDate    || '',
+    district:       rec.hoMode ? '' : (ref.District || rec.dist || ''),
+    branch:         rec.hoMode ? (ref.BaseOffice || rec.bo || '') : (ref.Branch || rec.branch || ''),
+    items:          assets.map(_assetToFormItem)
+  });
+}
+
+// ─── FETCH ENGINEERS THEN RENDER ─────────────────────────────────────────────
+function _toTitleCase(str) {
+  if (!str) return '';
+  return str.replace(/\w\S*/g, function(txt) {
+    return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
+  });
+}
+
+function _loadEngineersAndRender(data) {
+  // Try backend lookup; fall back gracefully if function not available
+  try {
+    google.script.run
+      .withSuccessHandler(function(eng) {
+        data.fe_name     = _toTitleCase((eng && eng.fe)     || '');
+        data.senior_name = _toTitleCase((eng && eng.senior) || '');
+        _renderAccountabilityForm(data);
+      })
+      .withFailureHandler(function() {
+        data.fe_name     = '';
+        data.senior_name = '';
+        _renderAccountabilityForm(data);
+      })
+      .getEngineersByLocation(data.district, data.branch);
+  } catch(e) {
+    data.fe_name     = '';
+    data.senior_name = '';
+    _renderAccountabilityForm(data);
+  }
+}
+
+// ─── INTERNAL HELPERS ────────────────────────────────────────────────────────
+
+function _assetToFormItem(asset) {
+  var desc = [asset.Brand, asset.Specs].filter(Boolean).join(' — ');
+  if (!desc) desc = asset.Type || '';
+  return {
+    component:   asset.Type      || '',
+    description: desc,
+    hardware_id: asset.Barcode   || '',
+    serial:      asset.Serial    || '',
+    remarks:     asset.Condition || ''
+  };
+}
+
+function _getLogoSrc() {
+  // Try to grab the logo from the already-loaded DOM
+  var imgEl = document.querySelector('.topbar-logo img') || document.querySelector('.auth-logo img');
+  if (imgEl && imgEl.src) return imgEl.src;
+  return '';
+}
+
+function _renderAccountabilityForm(data) {
+  var MIN_ROWS = 25;
+  var items    = data.items || [];
+  var rows     = items.slice();
+  while (rows.length < MIN_ROWS) rows.push({});
+
+  var tbodyHtml = rows.map(function(item, i) {
+    return '<tr class="' + (i % 2 === 0 ? '' : 'alt') + '">'
+      + '<td>' + esc(item.component   || '') + '</td>'
+      + '<td>' + esc(item.description || '') + '</td>'
+      + '<td>' + esc(item.hardware_id || '') + '</td>'
+      + '<td>' + esc(item.serial      || '') + '</td>'
+      + '<td class="remarks-cell" contenteditable="true" spellcheck="false">' + esc(item.remarks || '') + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var feName     = (data.fe_name     || '').toUpperCase();
+  var seniorName = (data.senior_name || '').toUpperCase();
+  var logoSrc    = _getLogoSrc();
+
+  var logoHtml = logoSrc
+    ? '<img src="' + logoSrc + '" style="height:58px;width:auto;object-fit:contain;display:block;margin:0 auto 2px;" alt="LifeBank Foundation"/>'
+    : '<div style="font-family:Arial Black,Arial;font-size:20pt;font-weight:900;color:#e85118;text-align:center;letter-spacing:.02em;">LifeBank<span style="color:#2563eb">.</span></div>';
+
+  var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
+    + '<meta charset="UTF-8"/>\n'
+    + '<title>Equipment Accountability Form</title>\n'
+    + '<style>\n'
+    + '* { margin:0; padding:0; box-sizing:border-box; }\n'
+    + 'html, body { height: 100%; }\n'
+    + 'body { font-family: Arial, sans-serif; font-size: 7.5pt; color: #1b2d4f; background: #fff; padding: 2mm 10mm 4mm 10mm; display: flex; flex-direction: column; min-height: 100vh; }\n'
+    + '.print-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 999; background: #1b2d4f; padding: 7px 14px; display: flex; align-items: center; gap: 10px; font-family: Arial; color: #fff; font-size: 12px; }\n'
+    + '.print-bar button { background: #e85118; color: #fff; border: none; padding: 6px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: bold; font-family: Arial; }\n'
+    + '.print-bar button.close-btn { background: #4a6380; }\n'
+    + '.print-bar button:hover { opacity: .85; }\n'
+    + 'body.has-bar { padding-top: 40px; }\n'
+    + '.edit-hint { background: rgba(232,81,24,.08); border: 1px solid rgba(232,81,24,.25); border-radius: 5px; padding: 4px 12px; font-size: 7pt; color: #e85118; margin-bottom: 5px; }\n'
+    + '.hdr { display: flex; flex-direction: column; align-items: center; margin-bottom: 1px; }\n'
+    + '.hdr-org { font-size: 6pt; font-weight: bold; color: #e85118; letter-spacing: .05em; text-transform: uppercase; text-align: center; margin-bottom: 1px; }\n'
+    + '.hdr-dept { font-size: 6pt; font-weight: bold; color: #e85118; letter-spacing: .04em; text-transform: uppercase; text-align: center; margin-bottom: 1px; }\n'
+    + '.form-title { font-size: 9.5pt; font-weight: bold; text-decoration: underline; text-align: center; margin: 3px 0 5px; letter-spacing: .04em; }\n'
+    + '.info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px 8px; margin-bottom: 5px; }\n'
+    + '.info-cell { display: flex; align-items: baseline; gap: 3px; font-size: 7pt; justify-content: center; }\n'
+    + '.info-cell .lbl { font-weight: bold; white-space: nowrap; }\n'
+    + '.info-cell .colon { flex-shrink: 0; }\n'
+    + '.info-cell .val { flex: 1; border-bottom: 0.5px solid #000; padding-bottom: 1px; min-width: 50px; font-size: 7pt; text-align: center; white-space: normal; word-break: break-word; line-height: 1.2; }\n'
+    + '.eff-date-input { flex: 1; border: none; border-bottom: 0.5px solid #000; outline: none; font-family: Arial, sans-serif; font-size: 7pt; color: #000; background: transparent; padding: 0 2px 1px; min-width: 70px; cursor: text; }\n'
+    + '.eff-date-input:focus { background: rgba(232,81,24,.07); border-radius: 3px; border-bottom-color: #e85118; }\n'
+    + 'table { width: 100%; border-collapse: collapse; font-size: 6.5pt; margin-bottom: 5px; table-layout: fixed; }\n'
+  + 'thead tr th { background: #edf1f7; border: 0.6px solid #000; padding: 3px 4px; font-weight: bold; text-align: center; font-size: 7pt; }\n'
+    + 'tbody tr td { border: 0.4px solid #000; padding: 0px 1px; min-height: 5px; line-height: 0.9; vertical-align: middle; white-space: normal; word-break: break-word; overflow: visible; text-overflow: clip; font-size: 6.5pt; font-weight: bold; text-align: center; }\n'
+    + 'tbody tr td:nth-child(2) { font-size: 6pt; }\n'
+    + 'tbody tr td:nth-child(5) { font-size: 6pt; }\n'
+    + 'col.col-comp { width:12%; } col.col-desc { width:22%; } col.col-hwid { width:16%; } col.col-ser { width:22%; } col.col-rem { width:28%; }\n'
+    + 'tbody tr.alt td { background: #fafbfc; }\n'
+    + 'td.remarks-cell { cursor: text; outline: none; min-width: 60px; }\n'
+    + 'td.remarks-cell:hover { background: rgba(232,81,24,.05) !important; }\n'
+    + 'td.remarks-cell:focus { background: rgba(232,81,24,.1) !important; outline: 1px solid #e85118; }\n'
+    + '.ack { font-size: 5.5pt; line-height: 1.25; text-align: justify; color: #1b2d4f; margin-bottom: 5px; }\n'
+    + '.ack b { font-size: 5.8pt; }\n'
+    + '.page-wrap { display: flex; flex-direction: column; flex: 1; }\n'
+    + '.tbl-section { flex: 1; display: flex; flex-direction: column; }\n'
+    + '.tbl-section table { flex: 1; }\n'
+    + '.sig-footer { margin-top: auto; padding-top: 6px; }\n'
+    + '.sig-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 6px; margin-bottom: 5px; }\n'
+    + '.sig-block { display:flex; flex-direction:column; gap:1px; font-size:6.5pt; }\n'
+    + '.sig-block .sig-lbl { font-weight:bold; margin-bottom:8px; }\n'
+    + '.sig-block .sig-line { border-bottom: 0.5px solid #1b2d4f; height: 14px; margin: 0 4px; text-align: center; font-weight:bold; font-size: 7pt; line-height:14px; color:#1b2d4f; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }\n'
+    + '.sig-block .sig-title { text-align:center; font-size:6pt; color:#4a6380; border-top:0.5px solid #4a6380; padding-top:2px; margin:0 4px; }\n'
+    + '.sig-block .sig-date-label { text-align:center; font-size:6pt; color:#4a6380; margin-top:4px; }\n'
+    + '.sig-block .sig-date-line { border-bottom:0.5px solid #1b2d4f; height:12px; margin:0 10px; }\n'
+    + '.noted-wrap { display:flex; justify-content:flex-end; }\n'
+    + '.noted-block { width:33%; font-size:6.5pt; display:flex; flex-direction:column; gap:1px; }\n'
+    + '.noted-label { font-weight:bold; text-align:left; margin-bottom:2px; }\n'
+    + '.noted-name { font-weight:bold; font-size:7pt; text-align:center; color:#1b2d4f; }\n'
+    + '.noted-title { font-size:6pt; color:#4a6380; border-top:0.5px solid #4a6380; padding-top:2px; margin:0 4px; text-align:center; }\n'
+    + '.noted-date-line { border-bottom:0.5px solid #1b2d4f; height:12px; margin:4px 10px 0; }\n'
+    + '.noted-date-label { font-size:6pt; color:#4a6380; text-align:center; margin-top:2px; }\n'
+    + '@media print {\n'
+    + '  body { padding: 1mm 8mm 2mm 8mm; min-height: 0; height: 100%; }\n'
+    + '  .page-wrap { height: 100%; }\n'
+    + '  .no-print { display: none !important; }\n'
+    + '  .edit-hint { display: none !important; }\n'
+    + '  td.remarks-cell { cursor: default; }\n'
+    + '  td.remarks-cell:hover, td.remarks-cell:focus { background: inherit !important; outline: none !important; }\n'
+    + '  .eff-date-input { border: none; border-bottom: 0.5px solid #1b2d4f; background: transparent !important; -webkit-appearance: none; appearance: none; }\n'
+    + '  @page { size: letter; margin: 4mm; }\n'
+    + '}\n'
+    + '</style>\n'
+    + '</head>\n'
+    + '<body class="has-bar">\n'
+
+    // Print bar
+    + '<div class="print-bar no-print">'
+    + '<span>Equipment Accountability Form — ' + esc(data.name || 'Blank Form') + '</span>'
+    + '<button onclick="window.print()">Print / Save PDF</button>'
+    + '<button class="close-btn" onclick="window.close()">Close</button>'
+    + '</div>\n'
+
+    // Edit hint
+    + '<div class="edit-hint no-print">'
+    + 'Editable fields: Click the <strong>Effective Date</strong> field or any cell in the <strong>Remarks</strong> column to edit before printing.'
+    + '</div>\n'
+
+    // Header
+    + '<div class="page-wrap">\n'
+    + '<div class="hdr">\n'
+    + logoHtml + '\n'
+    + '<div class="hdr-dept">Infrastructure &amp; Information &amp; Communications Technology Department</div>\n'
+    + '</div>\n'
+
+    + '<div class="form-title">EQUIPMENT ACCOUNTABILITY FORM</div>\n'
+
+    // Info grid
+    + '<div class="info-grid">\n'
+    + '<div class="info-cell"><span class="lbl">Name</span><span class="colon">:</span><span class="val">' + esc(data.name || '') + '</span></div>\n'
+    + '<div class="info-cell"><span class="lbl">ID No.</span><span class="colon">:</span><span class="val">' + esc(data.id_no || '') + '</span></div>\n'
+    + '<div class="info-cell"><span class="lbl">Signature</span><span class="colon">:</span><span class="val"></span></div>\n'
+    + '<div class="info-cell"><span class="lbl">Designation</span><span class="colon">:</span><span class="val">' + esc(data.designation || '') + '</span></div>\n'
+    + '<div class="info-cell"><span class="lbl">Department</span><span class="colon">:</span><span class="val">' + esc(data.department || '') + '</span></div>\n'
+    + '<div class="info-cell"><span class="lbl">Effective Date</span><span class="colon">:</span>'
+    + '<input class="eff-date-input" type="text" value="' + esc(data.effective_date || '') + '" placeholder="MM/DD/YYYY" title="Click to edit effective date"/>'
+    + '</div>\n'
+    + '</div>\n'
+
+    // Items table
+    + '<div class="tbl-section">\n'
+    + '<table>\n'
+    + '<colgroup><col class="col-comp"/><col class="col-desc"/><col class="col-hwid"/><col class="col-ser"/><col class="col-rem"/></colgroup>\n'
+    + '<thead><tr><th>Components</th><th>Description</th><th>Hardware ID</th><th>Serial</th><th>Remarks</th></tr></thead>\n'
+    + '<tbody>' + tbodyHtml + '</tbody>\n'
+    + '</table>\n'
+
+    // Acknowledgement
+    + '<div class="ack">'
+    + '<b>ACKNOWLEDGEMENT</b><br/>'
+    + 'This is to acknowledge that I am accountable for the listed above. I understand that I will pay or replace the same unit in case of loss or damage due to my fault or negligence. '
+    + 'In case of resignation or separation, I will turnover these items before issuance of my clearance. In case of transfer, I will turnover these items to the newly assigned staff with '
+    + 'attached accountability form. For any additional software protected with license installed that do not appear on the list above, or do not have any supporting document(s) coming '
+    + 'from the IICTD Office, it is my responsibility to face any charges or liability coming from any software authority or organization. Also, I will follow the rules and regulations '
+    + 'imposed by the Lifebank Foundation Inc. and I will be liable for any consequences that may arise for not complying with the set of rules and regulations.'
+    + '</div>\n'
+
+    + '</div>\n'
+
+    // Signatories
+    + '<div class="sig-footer">\n'
+    + '<div class="sig-grid">\n'
+    + '<div class="sig-block">'
+    + '<span class="sig-lbl">Processed by:</span>'
+    + '<div class="sig-line">' + esc(feName) + '</div>'
+    + '<div class="sig-title">Field Engineer</div>'
+    + '<div class="sig-date-line"></div>'
+    + '<div class="sig-date-label">Date</div>'
+    + '</div>\n'
+    + '<div class="sig-block">'
+    + '<span class="sig-lbl">Checked by:</span>'
+    + '<div class="sig-line">' + esc(seniorName) + '</div>'
+    + '<div class="sig-title">Senior Field Engineer</div>'
+    + '<div class="sig-date-line"></div>'
+    + '<div class="sig-date-label">Date</div>'
+    + '</div>\n'
+    + '<div class="sig-block">'
+    + '<span class="sig-lbl">Verified by:</span>'
+    + '<div class="sig-line">MARICON B. JAROPILLO</div>'
+    + '<div class="sig-title">System Administrator</div>'
+    + '<div class="sig-date-line"></div>'
+    + '<div class="sig-date-label">Date</div>'
+    + '</div>\n'
+    + '</div>\n'
+
+    // Noted by
+    + '<div class="noted-wrap">'
+    + '<div class="noted-block">'
+    + '<div class="noted-label">Noted by:</div>'
+    + '<div class="noted-name">PATRICK GERARD G. REYES</div>'
+    + '<div class="noted-title">Department Head</div>'
+    + '<div class="noted-date-line"></div>'
+    + '<div class="noted-date-label">Date</div>'
+    + '</div>'
+    + '</div>\n'  // noted-wrap
+    + '</div>\n'  // sig-footer
+    + '</div>\n'  // page-wrap
+
+    + '</body>\n</html>';
+
+  var w = window.open('', '_blank', 'width=900,height=1100');
+  if (!w) { toast('Please allow pop-ups to open the form.', 'warn'); return; }
+  w.document.write(html);
+  w.document.close();
+}
+</script>
