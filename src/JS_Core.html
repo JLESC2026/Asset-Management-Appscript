@@ -223,36 +223,52 @@ function _getScopeDistricts(){
   return arr.map(function(d){return d.toLowerCase();});
 }
 
-// ─── FIX: HO users see ALL assets — they have full system visibility ──────────
+// ─── SCOPE FILTER: based on Assignment column (col 12) ───────────────────────
 function _filterByScope(assets) {
-  // Only cache the full ASSETS array result, not partial arrays
   if (assets === ASSETS && _scopeCache) return _scopeCache;
-  
+
+  var result;
+
   if (isHO()) {
-    if (assets === ASSETS) _scopeCache = assets;
-    return assets;
+    // Central Office / HO users: only see Central Office assets.
+    // Blank-assignment assets with NO location data are also shown (unclassified HO items).
+    result = assets.filter(function(a) {
+      var assign = (a.Assignment || '').trim().toLowerCase();
+      if (assign === 'central office') return true;
+      if (assign === 'field office')   return false;
+      // Blank assignment: show only if the asset has no location fields at all.
+      var hasLocation = !!(a.District || a.Division || a.Area || a.Branch);
+      return !hasLocation;
+    });
+  } else {
+    // Field users (FE / Senior field): only see Field Office assets.
+    // Blank-assignment assets that DO have location data are treated as field assets.
+    // Central Office assets are always hidden.
+    var dists = _getScopeDistricts();
+    if (dists.length === 0) {
+      result = [];
+    } else {
+      var userDivs = (SESSION.userDivisions || []).map(function(d) {
+        return d.toLowerCase();
+      });
+
+      result = assets.filter(function(a) {
+        var assign = (a.Assignment || '').trim().toLowerCase();
+        // Always hide Central Office assets from field users
+        if (assign === 'central office') return false;
+        // Blank with no location data → belongs to HO, hide from field
+        var hasLocation = !!(a.District || a.Division || a.Area || a.Branch);
+        if (assign === '' && !hasLocation) return false;
+        // Field Office (or blank with location) → apply district/division scope
+        var dist = (a.District || '').toLowerCase();
+        var div  = (a.Division  || '').toLowerCase();
+        if (dist) return dists.indexOf(dist) >= 0;
+        if (div && userDivs.length) return userDivs.indexOf(div) >= 0;
+        // Has location data but no district/division match → Senior can see, FE cannot
+        return isSenior();
+      });
+    }
   }
-
-  var dists = _getScopeDistricts();
-  if (dists.length === 0) return [];
-
-  var userDivs = (SESSION.userDivisions || []).map(function(d) {
-    return d.toLowerCase();
-  });
-
-  var result = assets.filter(function(a) {
-    var dist = (a.District || '').toLowerCase();
-    var div  = (a.Division  || '').toLowerCase();
-
-    // Asset has a district — scope by district
-    if (dist) return dists.indexOf(dist) >= 0;
-
-    // No district — scope by division if available
-    if (div && userDivs.length) return userDivs.indexOf(div) >= 0;
-
-    // Truly unlocated assets: Senior can see, FE cannot
-    return isSenior();
-  });
 
   if (assets === ASSETS) _scopeCache = result;
   return result;

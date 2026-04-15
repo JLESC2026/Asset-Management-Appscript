@@ -31,7 +31,7 @@ const C = {
   EMP_ID:3,        STAFF:4,          DESIGNATION:5,
   DEPARTMENT:6,    BASE_OFFICE:7,    // ← Added
   DIVISION:8,      DISTRICT:9,       AREA:10,        BRANCH:11,
-  // Col 12 = Assignment (not mapped)
+  ASSIGNMENT:12,
   EFF_DATE:13,
   BARCODE:14,      TYPE:15,          BRAND:16,       SERIAL:17,    SPECS:18,
   CONDITION:19,
@@ -469,6 +469,7 @@ function getAllAssets() {
           Designation: get(C.DESIGNATION),
           Department: get(C.DEPARTMENT),
           BaseOffice: get(C.BASE_OFFICE),
+          Assignment: get(C.ASSIGNMENT),
           Division: div,
           District: dist, Area: get(C.AREA), Branch: get(C.BRANCH),
           EffDate: get(C.EFF_DATE), 
