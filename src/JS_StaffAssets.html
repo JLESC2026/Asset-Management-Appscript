@@ -3,6 +3,11 @@
 //  STAFF ASSETS MODULE
 //  Field users: Division → District → Area → Branch → Staff
 //  HO users:    Head Office → Department → Staff
+//
+//  Location resolution:
+//   - Missing levels filled from BaseOffice (col G), then Asset Location
+//   - Assets with NO location data at all are SKIPPED in Staff Assets
+//     (they remain visible in Asset Pools and Equipment Record)
 // ═══════════════════════════════════════
 
 function renderStaffAssets() {
@@ -26,7 +31,7 @@ function _buildHOStaffTree() {
   );
   var data = _stSearchQ
     ? base.filter(function(a){
-        return [a.Staff,a.EmpID,a.Designation,a.Barcode,a.Type,a.Brand,a.Department,a.BaseOffice,a.Branch]
+        return [a.Staff,a.EmpID,a.Designation,a.Barcode,a.Type,a.Brand,a.Department,a.BaseOffice,a.Branch,a.Location]
           .some(function(v){ return (v||'').toLowerCase().includes(_stSearchQ); });
       })
     : base;
@@ -50,6 +55,9 @@ function _buildHOStaffTree() {
 }
 
 // ── Field tree builder: Division → District → Area → Branch → EmpID ──────────
+// Uses _resolveAssetLocation() so missing hierarchy levels are filled from
+// BaseOffice (col G) then Asset Location. Assets with truly no location are
+// skipped here (but remain visible in Asset Pools and Equipment Record).
 function _buildStaffTree() {
   if (isHO()) return _buildHOStaffTree();
 
@@ -58,17 +66,21 @@ function _buildStaffTree() {
   );
   var data = _stSearchQ
     ? base.filter(function(a){
-        return [a.Staff,a.EmpID,a.Designation,a.Barcode,a.Type,a.Brand,a.Serial,a.Division,a.District,a.Area,a.Branch]
+        return [a.Staff,a.EmpID,a.Designation,a.Barcode,a.Type,a.Brand,a.Serial,
+                a.Division,a.District,a.Area,a.Branch,a.BaseOffice,a.Location]
           .some(function(v){ return (v||'').toLowerCase().includes(_stSearchQ); });
       })
     : base;
 
   var tree = {};
   data.forEach(function(a) {
-    var div    = a.Division    || '(No Division)';
-    var dist   = a.District    || '(No District)';
-    var area   = a.Area        || '(No Area)';
-    var branch = a.Branch      || '(No Branch)';
+    var loc = _resolveAssetLocation(a);
+    if (!loc) return; // Skip assets with no location data in Staff Assets view
+
+    var div    = loc.div;
+    var dist   = loc.dist;
+    var area   = loc.area;
+    var branch = loc.branch;
     var empId  = a.EmpID       || 'UNKNOWN';
     var staff  = a.Staff       || 'Unassigned';
     var desig  = a.Designation || '';
@@ -190,7 +202,6 @@ function _renderHOStaffTree() {
     return;
   }
 
-  // Root: Head Office node (always expanded, static)
   var html = '<div class="st-tree">'
     +'<div class="st-node st-div" style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.03)">'
     +'<div class="st-row" style="cursor:default;background:rgba(8,145,178,.06)">'
@@ -241,7 +252,7 @@ function _renderHOEmpNode(dept, empId) {
   return '<div class="st-node st-emp st-emp-inline">'
     +'<div class="st-emp-row">'
     +'<div style="display:flex;gap:4px;flex-shrink:0">'
-+ '<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal(\''+esc(empId)+'\',\''+esc(dept)+'\',\'\',\'\',\'\',\'ho\')">'
+    +'<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal(\''+esc(empId)+'\',\''+esc(dept)+'\',\'\',\'\',\'\',\'ho\')">'
     +_ICO.view+'</button>'
     +'</div>'
     +'<span class="st-icon">👤</span>'
@@ -511,7 +522,6 @@ function openStaffAssetModal(empId, div, dist, area, branch, mode) {
   nameEl.title = fullName;
   nameEl.dataset.fullname = fullName;
 
-  // Add a subtle "show full" link for long names
   if (fullName.length > 32) {
     nameEl.style.cursor = 'pointer';
     nameEl.onclick = function() {

@@ -3,7 +3,14 @@
 //  EQUIPMENT RECORD MODULE
 //  Field users: Division → District → Area → Branch → Assets
 //  HO users:    Head Office → Department → Base Office → Assets
+//
+//  Location resolution:
+//   - Missing levels filled from BaseOffice (col G), then Asset Location
+//   - Assets with no location at all → grouped under (Unassigned) in Equip Record
+//   - Always visible in Asset Pools regardless of location data
 // ═══════════════════════════════════════
+
+var _currentEquipBranchIdx = -1; // Tracks the open branch modal index for print button
 
 function renderEquipmentRecord() {
   _eqSearchQ   = (document.getElementById('equipSearch')?.value || '').toLowerCase();
@@ -21,7 +28,7 @@ function _buildHOEquipTree() {
   var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
   var data = _eqSearchQ
     ? base.filter(function(a){
-        return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,a.Department,a.BaseOffice]
+        return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,a.Department,a.BaseOffice,a.Branch,a.Location]
           .some(function(v){ return (v||'').toLowerCase().includes(_eqSearchQ); });
       })
     : base;
@@ -30,7 +37,7 @@ function _buildHOEquipTree() {
   var tree = {};
   data.forEach(function(a) {
     var dept = a.Department || '(No Department)';
-    var bo   = a.BaseOffice || a.Branch || '(No Location)';
+    var bo   = a.BaseOffice || a.Branch || a.Location || '(No Location)';
     if (!tree[dept])     tree[dept]    = {};
     if (!tree[dept][bo]) tree[dept][bo]= [];
     tree[dept][bo].push(a);
@@ -69,7 +76,6 @@ function _renderHOEquipTree() {
     return;
   }
 
-  // Root: Head Office node
   var html = '<div class="st-tree">'
     +'<div class="st-node st-div" style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.03)">'
     +'<div class="st-row" style="cursor:default;background:rgba(8,145,178,.06)">'
@@ -172,22 +178,30 @@ function eqToggle(key) {
   _renderEquipTree(tree);
 }
 
-// ── Field Equipment Tree (unchanged logic) ────────────────────────────────────
+// ── Field Equipment Tree ──────────────────────────────────────────────────────
+// Uses _resolveAssetLocation() to fill missing hierarchy levels from
+// BaseOffice (col G) then Asset Location. Assets with no location at all
+// are grouped under (Unassigned) division so they remain visible.
 function _buildEquipTree() {
   var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
   var data = _eqSearchQ
     ? base.filter(function(a){
-        return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,a.Division,a.District,a.Area,a.Branch]
+        return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,
+                a.Division,a.District,a.Area,a.Branch,a.BaseOffice,a.Location]
           .some(function(v){ return (v||'').toLowerCase().includes(_eqSearchQ); });
       })
     : base;
 
   var tree = {};
   data.forEach(function(a) {
-    var div    = a.Division || '(No Division)';
-    var dist   = a.District || '(No District)';
-    var area   = a.Area     || '(No Area)';
-    var branch = a.Branch   || '(No Branch)';
+    var loc = _resolveAssetLocation(a);
+    var div, dist, area, branch;
+    if (!loc) {
+      // No location at all — still show in Equipment Record under (Unassigned)
+      div = '(Unassigned)'; dist = '(No District)'; area = '(No Area)'; branch = '(No Branch)';
+    } else {
+      div = loc.div; dist = loc.dist; area = loc.area; branch = loc.branch;
+    }
     if (!tree[div])                     tree[div]                    = {};
     if (!tree[div][dist])               tree[div][dist]              = {};
     if (!tree[div][dist][area])         tree[div][dist][area]        = {};
@@ -246,11 +260,18 @@ function _renderEquipDivNode(div, distTree) {
       Object.keys(distTree[dist][area]).forEach(function(b){ assetCount += distTree[dist][area][b].length; });
     });
   });
-  var html = '<div class="st-node st-div">'
+
+  // Visual hint for truly unlocated assets
+  var isUnassigned = div === '(Unassigned)';
+  var divLabel = isUnassigned
+    ? '<span style="color:var(--text3);font-style:italic">Unassigned Location</span>'
+    : esc(div);
+
+  var html = '<div class="st-node st-div"'+(isUnassigned?' style="opacity:.75"':' ')+'>'
     +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
     +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">🏢</span>'
-    +'<span class="st-label">'+esc(div)+'</span>'
+    +'<span class="st-icon">'+(isUnassigned?'📭':'🏢')+'</span>'
+    +'<span class="st-label">'+divLabel+'</span>'
     +'<span class="st-meta">'+distKeys.length+' district(s) · '+assetCount+' assets</span>'
     +'</div>';
   if (isOpen) {
@@ -357,6 +378,8 @@ function openEquipBranchModal(idx) {
   var rec = _eqBranchReg[idx];
   if (!rec) return;
 
+  _currentEquipBranchIdx = idx;
+
   var title, subtitle;
   if (rec.hoMode) {
     title    = rec.bo === '(No Location)' ? 'Unassigned Location' : rec.bo;
@@ -391,6 +414,21 @@ function openEquipBranchModal(idx) {
       +'<td><button class="btn btn-icon btn-secondary" data-tip="Details" onclick="closeModal(\'equipmentBranchModal\');viewAsset(\''+esc(a.Barcode)+'\')">'+_ICO.view+'</button></td>'
       +'</tr>';
   }).join('') || '<tr><td colspan="8" class="tbl-empty">No assets</td></tr>';
+
+  // Update footer — Print Accountability Form on left, Close on right
+  var footer = document.getElementById('eqModalFooter');
+  if (footer) {
+    footer.innerHTML =
+      '<button class="btn btn-secondary btn-sm" onclick="openAccountabilityFormFromBranch('+idx+')" '
+      +'style="gap:6px;color:var(--accent);border-color:rgba(232,81,24,.3)">'
+      +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+      +'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+      +'<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>'
+      +'<line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>'
+      +'</svg>Print Accountability Form</button>'
+      +'<div style="flex:1"></div>'
+      +'<button class="btn btn-secondary" onclick="closeModal(\'equipmentBranchModal\')">Close</button>';
+  }
 
   openModal('equipmentBranchModal');
 }

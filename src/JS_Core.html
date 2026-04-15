@@ -58,6 +58,43 @@ var _ICO = {
   return: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>'
 };
 
+// ─── LOCATION RESOLUTION HELPER ──────────────────────────────────────────────
+// Uses Base Office (col G / a.BaseOffice) then Asset Location (a.Location)
+// as fallback for missing hierarchy levels.
+// Returns null if absolutely no location data exists:
+//   - Staff Assets → skip (hide)
+//   - Equipment Record → show under (Unassigned)
+//   - Asset Pools → always visible (tables don't filter by location)
+function _resolveAssetLocation(a) {
+  var div      = (a.Division   || '').trim();
+  var dist     = (a.District   || '').trim();
+  var area     = (a.Area       || '').trim();
+  var branch   = (a.Branch     || '').trim();
+  var fallback = (a.BaseOffice || a.Location || '').trim();
+
+  // No location data at all
+  if (!div && !dist && !area && !branch) {
+    if (!fallback) return null; // Truly unlocatable — caller decides
+    // Use fallback as top-level grouping label
+    return { div: fallback, dist: '(No District)', area: '(No Area)', branch: '(No Branch)' };
+  }
+
+  // Has at least one location field — normalize upward
+  if (!div) div = '(No Division)';
+
+  // Fill only the FIRST missing level with fallback; use (No X) for deeper missing levels
+  if (!dist) {
+    return { div: div, dist: fallback || '(No District)', area: '(No Area)', branch: '(No Branch)' };
+  }
+  if (!area) {
+    return { div: div, dist: dist, area: fallback || '(No Area)', branch: '(No Branch)' };
+  }
+  if (!branch) {
+    return { div: div, dist: dist, area: area, branch: fallback || '(No Branch)' };
+  }
+  return { div: div, dist: dist, area: area, branch: branch };
+}
+
 // ── Floating tooltip init ─────────────────────────────────────────────────────
 (function(){
   function _initTip(){
@@ -99,7 +136,6 @@ function esc(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-  // Only cache short strings to avoid unbounded memory growth
   if (str.length < 100) _escCache[str] = result;
   return result;
 }
@@ -223,27 +259,20 @@ function _getScopeDistricts(){
   return arr.map(function(d){return d.toLowerCase();});
 }
 
-// ─── SCOPE FILTER: based on Assignment column (col 12) ───────────────────────
 function _filterByScope(assets) {
   if (assets === ASSETS && _scopeCache) return _scopeCache;
 
   var result;
 
   if (isHO()) {
-    // Central Office / HO users: only see Central Office assets.
-    // Blank-assignment assets with NO location data are also shown (unclassified HO items).
     result = assets.filter(function(a) {
       var assign = (a.Assignment || '').trim().toLowerCase();
       if (assign === 'central office') return true;
       if (assign === 'field office')   return false;
-      // Blank assignment: show only if the asset has no location fields at all.
       var hasLocation = !!(a.District || a.Division || a.Area || a.Branch);
       return !hasLocation;
     });
   } else {
-    // Field users (FE / Senior field): only see Field Office assets.
-    // Blank-assignment assets that DO have location data are treated as field assets.
-    // Central Office assets are always hidden.
     var dists = _getScopeDistricts();
     if (dists.length === 0) {
       result = [];
@@ -254,17 +283,13 @@ function _filterByScope(assets) {
 
       result = assets.filter(function(a) {
         var assign = (a.Assignment || '').trim().toLowerCase();
-        // Always hide Central Office assets from field users
         if (assign === 'central office') return false;
-        // Blank with no location data → belongs to HO, hide from field
         var hasLocation = !!(a.District || a.Division || a.Area || a.Branch);
         if (assign === '' && !hasLocation) return false;
-        // Field Office (or blank with location) → apply district/division scope
         var dist = (a.District || '').toLowerCase();
         var div  = (a.Division  || '').toLowerCase();
         if (dist) return dists.indexOf(dist) >= 0;
         if (div && userDivs.length) return userDivs.indexOf(div) >= 0;
-        // Has location data but no district/division match → Senior can see, FE cannot
         return isSenior();
       });
     }
@@ -283,7 +308,6 @@ function _filterByFEDistricts(assets){ return _filterByScope(assets); }
 function openModal(id){
   document.getElementById(id).classList.add('open');
   
-  // Add scroll-shadow to modal header
   setTimeout(function() {
     var modal  = document.getElementById(id);
     if (!modal) return;
@@ -294,7 +318,6 @@ function openModal(id){
         header.classList.toggle('scrolled', body.scrollTop > 4);
       }, { passive: true });
     }
-    // Focus first input
     var first = modal.querySelector(
       'input:not([readonly]):not([disabled]),' +
       'select:not([disabled]),' +
@@ -304,10 +327,6 @@ function openModal(id){
   }, 100);
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  ESCAPE KEY & KEYBOARD SHORTCUTS
-// ═══════════════════════════════════════════════════════════════════════
-// Modal close on Escape (UX-8) & Focus Trap
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     var openModals = document.querySelectorAll('.modal-backdrop.open');
@@ -317,7 +336,6 @@ document.addEventListener('keydown', function(e) {
     }
   }
   
-  // Focus trap for modals
   if (e.key === 'Tab') {
     var openModal = document.querySelector('.modal-backdrop.open .modal');
     if (!openModal) return;
@@ -340,7 +358,6 @@ document.addEventListener('keydown', function(e) {
     }
   }
   
-  // Ctrl+Enter to submit active modal
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     var openModals = document.querySelectorAll('.modal-backdrop.open');
     if (openModals.length > 0) {
@@ -370,7 +387,7 @@ function closeMobileSidebar() {
 //  AUTH
 // ═══════════════════════════════════════
 function doLogin(){
-  if(document.getElementById('loginBtn').disabled) return; // prevent double-submit
+  if(document.getElementById('loginBtn').disabled) return;
   
   var u=document.getElementById('authUser').value.trim();
   var p=document.getElementById('authPass').value;
@@ -386,7 +403,6 @@ function doLogin(){
   e.style.display='none';
   _lockBtn(btn);
 
-  // Progressive status messages so user knows something is happening
   var msgTimer;
   if(sts){
     sts.style.opacity='1';
@@ -400,7 +416,6 @@ function doLogin(){
     },1800);
   }
 
-  // Add a client-side timeout — GAS calls can hang silently
   var timedOut=false;
   var timeoutId=setTimeout(function(){
     timedOut=true;
@@ -409,13 +424,13 @@ function doLogin(){
     e.textContent='Connection timed out. Check your network and try again.';
     e.style.display='block';
     clearInterval(msgTimer);
-  },30000); // 30 second timeout
+  },30000);
 
   google.script.run
     .withSuccessHandler(function(r){
       clearTimeout(timeoutId);
       clearInterval(msgTimer);
-      if(timedOut) return; // ignore late response after timeout
+      if(timedOut) return;
       _unlockBtn(btn);
       if(sts) sts.style.opacity='0';
       if(!r.ok){
@@ -532,7 +547,6 @@ function loadData(){
     .getInitialData();
 }
 
-// ─── Comprehensive loading state for all modules ─────────────────────────────
 function showLoading(){
   var loadRow = '<tr><td colspan="20"><div class="tbl-loading-row">'
     +'<div class="spinner"></div>Loading data…</div></td></tr>';
@@ -540,14 +554,12 @@ function showLoading(){
     +'<div class="spinner" style="width:24px;height:24px;border-width:3px"></div>'
     +'<span>Loading…</span></div>';
 
-  // Sidebar badge counters — shimmer animation
   ['nbAll','nbSpare','nbAllocated','nbBorrowed','nbDisposal',
    'nbBorrowActive','nbBorrowPool','nbStaffAssets','nbEquipment'].forEach(function(id){
     var el=document.getElementById(id);
     if(el){ el.textContent=''; el.classList.add('nb-loading'); }
   });
 
-  // All table bodies
   ['tblAll','tblSpare','tblAllocated','tblActiveBorrow',
    'tblBorrowPool','tblBorrowHistory','tblDisposal',
    'tblTransfers','tblActivity'].forEach(function(id){
@@ -555,20 +567,17 @@ function showLoading(){
     if(el) el.innerHTML=loadRow;
   });
 
-  // Pagers
   ['pagerAll','pagerSpare','pagerAllocated','pagerActiveBorrow',
    'pagerBorrowPool','pagerBorrowHistory','pagerDisposal','pagerTransfers'].forEach(function(id){
     var el=document.getElementById(id);
     if(el) el.innerHTML='';
   });
 
-  // Tree views
   var st=document.getElementById('staffAssetsTree');
   if(st) st.innerHTML=treeLoad;
   var eq=document.getElementById('equipTree');
   if(eq) eq.innerHTML=treeLoad;
 
-  // Dashboard stats skeleton
   var ds=document.getElementById('dashStats');
   if(ds){
     ds.innerHTML=[1,2,3,4,5,6].map(function(){
@@ -580,7 +589,6 @@ function showLoading(){
     }).join('');
   }
 
-  // Dashboard activity
   var da=document.getElementById('dashActivity');
   if(da){
     da.innerHTML=[1,2,3].map(function(){
@@ -592,7 +600,6 @@ function showLoading(){
     }).join('');
   }
 
-  // Summary pills
   ['spareSummary','allocSummary','poolSummary','equipSummary','staffAssetsSummary'].forEach(function(id){
     var el=document.getElementById(id);
     if(el) el.innerHTML='<div class="skeleton-pill"></div><div class="skeleton-pill"></div>';
@@ -642,7 +649,6 @@ function globalFilter(q){
 }
 
 function updateBadges(){
-  // Remove shimmer loading states from badges
   ['nbAll','nbSpare','nbAllocated','nbBorrowed','nbDisposal',
    'nbBorrowActive','nbBorrowPool','nbStaffAssets','nbEquipment'].forEach(function(id){
     var el=document.getElementById(id);
@@ -663,7 +669,6 @@ function updateBadges(){
   document.getElementById('nbBorrowActive').textContent = borr;
   document.getElementById('nbBorrowPool').textContent   = pool;
   
-  // Update sub-badges (UX-6)
   var nbBA = document.getElementById('nbBorrowActiveSub');
   if (nbBA) nbBA.textContent = borr;
   var nbBP = document.getElementById('nbBorrowPoolSub');
@@ -719,7 +724,6 @@ function renderActivityTable() {
       .withSuccessHandler(function(r) {
         LOGS = (r && r.rows) ? r.rows : [];
         LOGS_FULL_LOADED = true;
-        // Call the renderer defined in JS_Records.html
         if (typeof _renderActivityTableRows === 'function') _renderActivityTableRows();
       })
       .withFailureHandler(function(err) { toast('Failed to load log: ' + err.message, 'err'); })
@@ -733,7 +737,6 @@ function renderActivityTable() {
 //  PAGE NAVIGATION
 // ═══════════════════════════════════════
 function switchPage(p){
-  // Close mobile sidebar when navigating
   closeMobileSidebar();
 
   currentPage = p;
@@ -754,7 +757,6 @@ function switchPage(p){
   if(nav) nav.classList.add('active');
   if(p==='borrow') switchBorrowTab(borrowTab);
 
-  // Show/hide borrow sub-nav based on current page (UX-6)
   var borrowSubNav = document.getElementById('borrowSubNav');
   if (borrowSubNav) {
     borrowSubNav.style.display = (p === 'borrow') ? 'block' : 'none';
@@ -766,7 +768,6 @@ function switchPage(p){
 
   var isDirty = _dirtyPages.indexOf(p) >= 0;
   if (isDirty) {
-    // Show skeleton while re-rendering
     var pageEl = document.getElementById('page-' + p);
     if (pageEl) {
       var tbodies = pageEl.querySelectorAll('tbody');
@@ -775,7 +776,6 @@ function switchPage(p){
           + '<div class="spinner"></div>Refreshing…</div></td></tr>';
       });
     }
-    // ... existing renderer call
     _dirtyPages = _dirtyPages.filter(function(d){ return d !== p; });
     var pageRenderMap = {
       'all-assets':       renderAllTable,
