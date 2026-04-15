@@ -35,7 +35,7 @@ const C = {
   EFF_DATE:13,
   BARCODE:14,      TYPE:15,          BRAND:16,       SERIAL:17,    SPECS:18,
   CONDITION:19,
-  // Col 20 = Asset Location (not mapped)
+  ASSET_LOCATION:20,  // Column T — Physical Asset Location (ABSOLUTE TRUTH)
   LIFECYCLE:21,    STATUS_LABEL:22,  ASSET_STATUS:23,
   PURCH_DATE:24,   WARRANTY_TERM:25, WARRANTY_VAL:26, REMARKS:27,
   // Col 28 = Notes (not mapped)
@@ -460,7 +460,9 @@ function getAllAssets() {
         return {
           Barcode: get(C.BARCODE), Type: get(C.TYPE), Brand: get(C.BRAND),
           Serial: get(C.SERIAL), Specs: get(C.SPECS),
-          Condition: get(C.CONDITION) || 'Good', Lifecycle: displayLC,
+          Condition: get(C.CONDITION) || 'Good',
+          AssetLocation: get(C.ASSET_LOCATION),  // Column T
+          Lifecycle: displayLC,
           AssetStatus: get(C.ASSET_STATUS) || 'Active',
           StatusLabel: get(C.STATUS_LABEL) || 'Unassigned',
           PurchDate: get(C.PURCH_DATE), WarrantyTerm: get(C.WARRANTY_TERM),

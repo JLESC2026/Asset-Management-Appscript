@@ -75,24 +75,31 @@ function _buildStaffTree() {
   var tree = {};
   data.forEach(function(a) {
     var loc = _resolveAssetLocation(a);
-    if (!loc) return; // Skip assets with no location data in Staff Assets view
+    if (!loc) return; // Skip unlocated assets in Staff Assets view
 
     var div    = loc.div;
-    var dist   = loc.dist;
-    var area   = loc.area;
-    var branch = loc.branch;
-    var empId  = a.EmpID       || 'UNKNOWN';
-    var staff  = a.Staff       || 'Unassigned';
-    var desig  = a.Designation || '';
+    var dist   = loc.dist   || _LOC_NODIST;
+    var area   = loc.area   || _LOC_NOAREA;
+    var branch = loc.branch || _LOC_NOBRANCH;
+
+    var empId = a.EmpID       || 'UNKNOWN';
+    var staff = a.Staff       || 'Unassigned';
+    var desig = a.Designation || '';
+
     if (!tree[div])                             tree[div]                            = {};
     if (!tree[div][dist])                       tree[div][dist]                      = {};
     if (!tree[div][dist][area])                 tree[div][dist][area]                = {};
     if (!tree[div][dist][area][branch])         tree[div][dist][area][branch]        = {};
     if (!tree[div][dist][area][branch][empId]) {
       tree[div][dist][area][branch][empId] = {
-        name: staff, empId: empId, designation: desig,
-        division: div, district: dist, area: area, branch: branch,
-        assets: []
+        name:      staff,
+        empId:     empId,
+        designation: desig,
+        division:  div,
+        district:  _isSentinel(dist)   ? '' : dist,
+        area:      _isSentinel(area)   ? '' : area,
+        branch:    _isSentinel(branch) ? '' : branch,
+        assets:    []
       };
     }
     tree[div][dist][area][branch][empId].assets.push(a);
@@ -376,6 +383,19 @@ function _renderStaffDivNode(div) {
 }
 
 function _renderStaffDistNode(div, dist) {
+  // "Assigned To Division" — no district info: render emp nodes flat
+  if (_isSentinel(dist)) {
+    var html = '';
+    Object.keys(_stTree[div][dist] || {}).forEach(function(area) {
+      Object.keys(_stTree[div][dist][area] || {}).forEach(function(branch) {
+        Object.keys(_stTree[div][dist][area][branch] || {}).sort().forEach(function(empId) {
+          html += _renderEmpNode(div, dist, area, branch, empId);
+        });
+      });
+    });
+    return html;
+  }
+
   var key = div+'::'+dist;
   var isOpen = !!_stExpanded[key];
   var areaKeys = Object.keys(_stTree[div][dist]).sort();
@@ -397,7 +417,7 @@ function _renderStaffDistNode(div, dist) {
   if (isOpen) {
     html += '<div class="st-children">';
     areaKeys.forEach(function(area) {
-      if (area === '(No Area)') {
+      if (_isSentinel(area)) {
         Object.keys(_stTree[div][dist][area]).sort().forEach(function(branch) {
           html += _renderStaffBranchNode(div, dist, area, branch);
         });
@@ -439,6 +459,14 @@ function _renderStaffAreaNode(div, dist, area) {
 }
 
 function _renderStaffBranchNode(div, dist, area, branch) {
+  // No-branch sentinel: show emp nodes directly without a branch container
+  if (_isSentinel(branch)) {
+    var html = '';
+    var empIds = Object.keys(_stTree[div][dist][area][branch] || {}).sort();
+    empIds.forEach(function(empId) { html += _renderEmpNode(div, dist, area, branch, empId); });
+    return html;
+  }
+
   var empIds = Object.keys(_stTree[div][dist][area][branch]).sort(function(a,b){
     var na = _stTree[div][dist][area][branch][a].name;
     var nb = _stTree[div][dist][area][branch][b].name;

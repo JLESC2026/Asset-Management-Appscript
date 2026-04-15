@@ -58,6 +58,13 @@ var _ICO = {
   return: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>'
 };
 
+// ── Location sentinels ────────────────────────────────────────────────────────
+// Used as tree-grouping keys when sub-level location data is absent.
+// The \x02 prefix guarantees no real data ever matches these keys.
+var _LOC_NODIST   = '\x02NODIST';    // Asset at division level only
+var _LOC_NOAREA   = '\x02NOAREA';    // Asset at district level only
+var _LOC_NOBRANCH = '\x02NOBRANCH';  // Asset at area/district level, no branch
+
 // ─── LOCATION RESOLUTION HELPER ──────────────────────────────────────────────
 // Uses Base Office (col G / a.BaseOffice) then Asset Location (a.Location)
 // as fallback for missing hierarchy levels.
@@ -65,34 +72,89 @@ var _ICO = {
 //   - Staff Assets → skip (hide)
 //   - Equipment Record → show under (Unassigned)
 //   - Asset Pools → always visible (tables don't filter by location)
+// Returns true when a tree-key is one of the internal sentinels, not real data.
+function _isSentinel(key) {
+  return typeof key === 'string' && key.charCodeAt(0) === 2; // \x02 prefix
+}
+
+// ─── LOCATION RESOLUTION ─────────────────────────────────────────────────────
+//  COLUMN T (a.AssetLocation, col 20) = Physical Asset Location = ABSOLUTE TRUTH
+//  Cols 8–11 (Division / District / Area / Branch)  = Accountable Staff Location
+//
+//  Rules:
+//   1. If Column T is set → it determines which Division folder the asset goes in.
+//      Staff sub-levels (cols 9–11) are only used when staff Division matches Column T.
+//   2. If Column T is empty → fall back to cols 8–11 as before.
+//   3. Head Office staff assets: if Column T points to a field division, they go
+//      into that field division. The staff's "Head Office" division is ignored.
+//   4. Missing sub-levels → return empty strings (renderers apply "Assigned To" label).
+//   5. Returns null only when no location data exists at all.
+// ─────────────────────────────────────────────────────────────────────────────
 function _resolveAssetLocation(a) {
-  var div      = (a.Division   || '').trim();
-  var dist     = (a.District   || '').trim();
-  var area     = (a.Area       || '').trim();
-  var branch   = (a.Branch     || '').trim();
-  var fallback = (a.BaseOffice || a.Location || '').trim();
+  var assetLoc = (a.AssetLocation || '').trim();  // Column T — physical truth
 
-  // No location data at all
-  if (!div && !dist && !area && !branch) {
-    if (!fallback) return null; // Truly unlocatable — caller decides
-    // Use fallback as top-level grouping label
-    return { div: fallback, dist: '(No District)', area: '(No Area)', branch: '(No Branch)' };
+  var staffDiv    = (a.Division || '').trim();    // Col 8  — staff's division
+  var staffDist   = (a.District || '').trim();    // Col 9
+  var staffArea   = (a.Area     || '').trim();    // Col 10
+  var staffBranch = (a.Branch   || '').trim();    // Col 11
+
+  // ── 1. Determine physical division from Column T ─────────────────────────
+  var physDiv = '';
+
+  if (assetLoc) {
+    var locLower  = assetLoc.toLowerCase();
+    var knownDivs = Object.keys(
+      (ENG_LOCATION_DATA && ENG_LOCATION_DATA.divDistrictMap) || {}
+    );
+    // Try to match against a known division name
+    for (var i = 0; i < knownDivs.length; i++) {
+      var dLower = knownDivs[i].toLowerCase();
+      if (locLower === dLower ||
+          locLower.indexOf(dLower) >= 0 ||
+          dLower.indexOf(locLower) >= 0) {
+        physDiv = knownDivs[i];
+        break;
+      }
+    }
+    // No known-division match — use Column T verbatim as the division label
+    if (!physDiv) physDiv = assetLoc;
   }
 
-  // Has at least one location field — normalize upward
-  if (!div) div = '(No Division)';
+  // ── 2. Fallback chain when Column T is empty ─────────────────────────────
+  if (!physDiv) physDiv = staffDiv;
+  if (!physDiv) {
+    var fb = (a.BaseOffice || a.Location || '').trim();
+    if (fb) physDiv = fb;
+  }
 
-  // Fill only the FIRST missing level with fallback; use (No X) for deeper missing levels
-  if (!dist) {
-    return { div: div, dist: fallback || '(No District)', area: '(No Area)', branch: '(No Branch)' };
-  }
-  if (!area) {
-    return { div: div, dist: dist, area: fallback || '(No Area)', branch: '(No Branch)' };
-  }
-  if (!branch) {
-    return { div: div, dist: dist, area: area, branch: fallback || '(No Branch)' };
-  }
-  return { div: div, dist: dist, area: area, branch: branch };
+  // ── 3. Truly no location data ─────────────────────────────────────────────
+  if (!physDiv) return null;
+
+  // ── 4. Decide whether to trust staff sub-levels ───────────────────────────
+  //  Only inherit staffDist / staffArea / staffBranch when:
+  //    (a) Staff division matches the physical division, AND
+  //    (b) Staff is NOT a Head Office / Central Office staff member
+  //  This prevents HO staff from leaking their district into field division trees.
+  var staffIsHO = !!(staffDiv && (
+    staffDiv.toLowerCase().indexOf('head office')    >= 0 ||
+    staffDiv.toLowerCase() === 'ho'                       ||
+    staffDiv.toLowerCase().indexOf('central office') >= 0
+  ));
+
+  var colTConflicts = !!(
+    assetLoc &&
+    staffDiv &&
+    physDiv.toLowerCase() !== staffDiv.toLowerCase()
+  );
+
+  var useStaffSub = !staffIsHO && !colTConflicts;
+
+  return {
+    div:    physDiv,
+    dist:   useStaffSub ? staffDist   : '',
+    area:   useStaffSub ? staffArea   : '',
+    branch: useStaffSub ? staffBranch : ''
+  };
 }
 
 // ── Floating tooltip init ─────────────────────────────────────────────────────
@@ -261,33 +323,71 @@ function _getScopeDistricts(){
 
 function _filterByScope(assets) {
   if (assets === ASSETS && _scopeCache) return _scopeCache;
-
   var result;
 
   if (isHO()) {
+    // HO users see ONLY assets physically at Head Office / Central Office.
+    // An asset allocated to a HO staff member but physically in Division 3
+    // (Column T = "Division 3") is NOT shown here — it belongs to Division 3.
     result = assets.filter(function(a) {
-      var assign = (a.Assignment || '').trim().toLowerCase();
+      var physLoc = (a.AssetLocation || '').trim().toLowerCase();
+      var assign  = (a.Assignment    || '').trim().toLowerCase();
+      var div     = (a.Division      || '').trim().toLowerCase();
+
       if (assign === 'central office') return true;
-      if (assign === 'field office')   return false;
-      var hasLocation = !!(a.District || a.Division || a.Area || a.Branch);
-      return !hasLocation;
+
+      if (physLoc) {
+        // Column T is set: only HO/Central assets
+        return physLoc.indexOf('head office')    >= 0 ||
+               physLoc.indexOf('central office') >= 0;
+      }
+
+      // Column T empty: fall back to staff Division
+      if (div.indexOf('head office') >= 0 ||
+          div.indexOf('central')     >= 0) return true;
+
+      // No location at all → show in HO as unassigned
+      var hasLoc = !!(a.District || a.Division || a.Area || a.Branch);
+      return !hasLoc;
     });
+
   } else {
-    var dists = _getScopeDistricts();
-    if (dists.length === 0) {
+    var dists    = _getScopeDistricts();
+    var userDivs = (SESSION.userDivisions || []).map(function(d) {
+      return d.toLowerCase();
+    });
+
+    if (dists.length === 0 && userDivs.length === 0) {
       result = [];
     } else {
-      var userDivs = (SESSION.userDivisions || []).map(function(d) {
-        return d.toLowerCase();
-      });
-
       result = assets.filter(function(a) {
-        var assign = (a.Assignment || '').trim().toLowerCase();
+        var assign  = (a.Assignment || '').trim().toLowerCase();
         if (assign === 'central office') return false;
-        var hasLocation = !!(a.District || a.Division || a.Area || a.Branch);
-        if (assign === '' && !hasLocation) return false;
-        var dist = (a.District || '').toLowerCase();
-        var div  = (a.Division  || '').toLowerCase();
+
+        var physLoc = (a.AssetLocation || '').trim().toLowerCase();
+        var dist    = (a.District       || '').toLowerCase();
+        var div     = (a.Division       || '').toLowerCase();
+
+        // ── Column T is present → it is the authoritative scope gate ─────
+        if (physLoc) {
+          // Exclude HO/Central assets from field-scoped views
+          if (physLoc.indexOf('head office')    >= 0 ||
+              physLoc.indexOf('central office') >= 0) return false;
+
+          // Include if Column T matches any of the user's divisions
+          for (var i = 0; i < userDivs.length; i++) {
+            if (physLoc.indexOf(userDivs[i]) >= 0 ||
+                userDivs[i].indexOf(physLoc)  >= 0) return true;
+          }
+          // Column T is set but not in user's division scope
+          return false;
+        }
+
+        // ── Column T empty → fall back to cols 8–11 ──────────────────────
+        // Exclude HO staff assets from field views when no Column T is set
+        if (div.indexOf('head office') >= 0 ||
+            div.indexOf('central')     >= 0) return false;
+
         if (dist) return dists.indexOf(dist) >= 0;
         if (div && userDivs.length) return userDivs.indexOf(div) >= 0;
         return isSenior();

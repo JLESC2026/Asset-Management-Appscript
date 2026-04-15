@@ -187,7 +187,8 @@ function _buildEquipTree() {
   var data = _eqSearchQ
     ? base.filter(function(a){
         return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,
-                a.Division,a.District,a.Area,a.Branch,a.BaseOffice,a.Location]
+                a.Division,a.District,a.Area,a.Branch,a.BaseOffice,
+                a.Location,a.AssetLocation]
           .some(function(v){ return (v||'').toLowerCase().includes(_eqSearchQ); });
       })
     : base;
@@ -195,18 +196,26 @@ function _buildEquipTree() {
   var tree = {};
   data.forEach(function(a) {
     var loc = _resolveAssetLocation(a);
-    var div, dist, area, branch;
+    var div, distKey, areaKey, branchKey;
+
     if (!loc) {
-      // No location at all — still show in Equipment Record under (Unassigned)
-      div = '(Unassigned)'; dist = '(No District)'; area = '(No Area)'; branch = '(No Branch)';
+      // Truly no location data — bucket under (Unassigned)
+      div       = '(Unassigned)';
+      distKey   = _LOC_NODIST;
+      areaKey   = _LOC_NOAREA;
+      branchKey = _LOC_NOBRANCH;
     } else {
-      div = loc.div; dist = loc.dist; area = loc.area; branch = loc.branch;
+      div       = loc.div;
+      distKey   = loc.dist   || _LOC_NODIST;
+      areaKey   = loc.area   || _LOC_NOAREA;
+      branchKey = loc.branch || _LOC_NOBRANCH;
     }
-    if (!tree[div])                     tree[div]                    = {};
-    if (!tree[div][dist])               tree[div][dist]              = {};
-    if (!tree[div][dist][area])         tree[div][dist][area]        = {};
-    if (!tree[div][dist][area][branch]) tree[div][dist][area][branch]= [];
-    tree[div][dist][area][branch].push(a);
+
+    if (!tree[div])                              tree[div]                              = {};
+    if (!tree[div][distKey])                     tree[div][distKey]                     = {};
+    if (!tree[div][distKey][areaKey])            tree[div][distKey][areaKey]            = {};
+    if (!tree[div][distKey][areaKey][branchKey]) tree[div][distKey][areaKey][branchKey] = [];
+    tree[div][distKey][areaKey][branchKey].push(a);
   });
   return tree;
 }
@@ -249,7 +258,64 @@ function _renderEquipTree(tree) {
   html += '</div>';
   container.innerHTML = html;
 }
+// Recursively collect all assets from any depth of tree subtree.
+function _collectTreeAssets(subtree) {
+  if (Array.isArray(subtree)) return subtree;
+  var all = [];
+  Object.keys(subtree).forEach(function(k) {
+    all = all.concat(_collectTreeAssets(subtree[k]));
+  });
+  return all;
+}
 
+// Render an "Assigned To [level]" leaf node for assets whose location
+// is only known up to a certain hierarchy level (division, district, or area).
+function _renderAssignedToLeaf(div, dist, area, assets) {
+  var idx = _eqBranchReg.length;
+  _eqBranchReg.push({
+    hoMode: false,
+    div:    div,
+    dist:   _isSentinel(dist)   ? '' : dist,
+    area:   _isSentinel(area)   ? '' : area,
+    branch: '',
+    assets: assets
+  });
+
+  // Determine label based on the highest known level
+  var parentLabel, icon;
+  if (_isSentinel(dist)) {
+    parentLabel = div;   icon = '🏢';
+  } else if (_isSentinel(area)) {
+    parentLabel = dist;  icon = '📍';
+  } else {
+    parentLabel = area;  icon = '📁';
+  }
+
+  var typeCounts = {};
+  assets.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  var chips = Object.entries(typeCounts)
+    .map(function(e){
+      return '<span class="st-type-chip">' + esc(e[0]) +
+             ' <strong>' + e[1] + '</strong></span>';
+    }).join('');
+
+  return '<div class="st-node st-emp" style="margin-left:28px;border-style:dashed;opacity:.88">'
+    + '<div class="st-row" style="cursor:default;gap:10px">'
+    + '<span class="st-icon">' + icon + '</span>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-weight:600;font-size:.82rem;color:var(--text2);font-style:italic">'
+    +   'Assigned To ' + esc(parentLabel)
+    + '</div>'
+    + '<div style="font-size:.72rem;color:var(--text3);margin-top:2px">'
+    +   'No specific sub-location recorded for these assets'
+    + '</div>'
+    + '</div>'
+    + '<div class="st-type-chips" style="flex:0 1 auto">' + chips + '</div>'
+    + '<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal(' + idx + ')"'
+    +   ' style="flex-shrink:0;gap:5px">' + _ICO.view + ' View ' + assets.length + '</button>'
+    + '</div>'
+    + '</div>';
+}
 function _renderEquipDivNode(div, distTree) {
   var key = 'eq-div::'+div;
   var isOpen = !!_eqExpanded[key];
@@ -284,93 +350,146 @@ function _renderEquipDivNode(div, distTree) {
 }
 
 function _renderEquipDistNode(div, dist, distTree) {
-  var key = 'eq-dist::'+div+'::'+dist;
+  // ── "Assigned To Division" node — no district info ───────────────────────
+  if (_isSentinel(dist)) {
+    var assets = _collectTreeAssets(distTree);
+    return assets.length ? _renderAssignedToLeaf(div, dist, _LOC_NOAREA, assets) : '';
+  }
+
+  var key    = 'eq-dist::' + div + '::' + dist;
   var isOpen = !!_eqExpanded[key];
   var areaKeys = Object.keys(distTree).sort();
-  var assetCount = 0;
+
+  var assetCount = 0, realAreaCount = 0;
   areaKeys.forEach(function(area) {
+    if (!_isSentinel(area)) realAreaCount++;
     Object.keys(distTree[area]).forEach(function(b){ assetCount += distTree[area][b].length; });
   });
+
   var html = '<div class="st-node st-dist">'
-    +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
-    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">📍</span>'
-    +'<span class="st-label">'+esc(dist)+'</span>'
-    +'<span class="st-meta">'+areaKeys.filter(function(a){return a!=='(No Area)';}).length+' area(s) · '+assetCount+' assets</span>'
-    +'<button class="btn btn-icon btn-secondary" data-tip="Move District to another Division" onclick="event.stopPropagation();openMoveOrgUnitModal(\'district\',\''+esc(div)+'\',\''+esc(dist)+'\',\'\',\'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">'+_ICO.transfer+'</button>'
-    +'</div>';
+    + '<div class="st-row" data-eqkey="' + esc(key) + '"'
+    +   ' onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
+    + '<span class="st-chevron ' + (isOpen ? 'open' : '') + '">›</span>'
+    + '<span class="st-icon">📍</span>'
+    + '<span class="st-label">' + esc(dist) + '</span>'
+    + '<span class="st-meta">' + realAreaCount + ' area(s) · ' + assetCount + ' assets</span>'
+    + '<button class="btn btn-icon btn-secondary"'
+    +   ' data-tip="Move District to another Division"'
+    +   ' onclick="event.stopPropagation();openMoveOrgUnitModal(\'district\','
+    +   '\'' + esc(div) + '\',\'' + esc(dist) + '\',\'\',\'\')"'
+    +   ' style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">'
+    + _ICO.transfer + '</button>'
+    + '</div>';
+
   if (isOpen) {
     html += '<div class="st-children">';
     areaKeys.forEach(function(area) {
-      if (area === '(No Area)') {
-        Object.keys(distTree[area]).sort().forEach(function(branch) {
-          html += _renderEquipBranchNode(div, dist, area, branch, distTree[area][branch]);
-        });
+      if (_isSentinel(area)) {
+        // District-level assets — "Assigned To [District]"
+        var assets = _collectTreeAssets(distTree[area]);
+        if (assets.length) html += _renderAssignedToLeaf(div, dist, area, assets);
       } else {
         html += _renderEquipAreaNode(div, dist, area, distTree[area]);
       }
     });
     html += '</div>';
   }
+
   html += '</div>';
   return html;
 }
 
 function _renderEquipAreaNode(div, dist, area, branchTree) {
-  var key = 'eq-area::'+div+'::'+dist+'::'+area;
-  var isOpen = !!_eqExpanded[key];
   var branchKeys = Object.keys(branchTree).sort();
-  var assetCount = 0;
-  branchKeys.forEach(function(b){ assetCount += branchTree[b].length; });
-  var areaLabel = area === '(No Area)' ? '<em style="opacity:.6">No Area</em>' : esc(area);
+
+  var assetCount = 0, realBranchCount = 0;
+  branchKeys.forEach(function(b) {
+    if (!_isSentinel(b)) realBranchCount++;
+    assetCount += branchTree[b].length;
+  });
+
+  var key    = 'eq-area::' + div + '::' + dist + '::' + area;
+  var isOpen = !!_eqExpanded[key];
+  var areaLabel = esc(area);
+
   var html = '<div class="st-node st-area">'
-    +'<div class="st-row" data-eqkey="'+esc(key)+'" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
-    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">📁</span>'
-    +'<span class="st-label">'+areaLabel+'</span>'
-    +'<span class="st-meta">'+branchKeys.length+' branch(es) · '+assetCount+' assets</span>'
-    +'<button class="btn btn-icon btn-secondary" data-tip="Move Area to another District" onclick="event.stopPropagation();openMoveOrgUnitModal(\'area\',\''+esc(div)+'\',\''+esc(dist)+'\',\''+esc(area)+'\',\'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">'+_ICO.transfer+'</button>'
-    +'</div>';
+    + '<div class="st-row" data-eqkey="' + esc(key) + '"'
+    +   ' onclick="eqToggle(this.getAttribute(\'data-eqkey\'))">'
+    + '<span class="st-chevron ' + (isOpen ? 'open' : '') + '">›</span>'
+    + '<span class="st-icon">📁</span>'
+    + '<span class="st-label">' + areaLabel + '</span>'
+    + '<span class="st-meta">' + realBranchCount + ' branch(es) · ' + assetCount + ' assets</span>'
+    + '<button class="btn btn-icon btn-secondary"'
+    +   ' data-tip="Move Area to another District"'
+    +   ' onclick="event.stopPropagation();openMoveOrgUnitModal(\'area\','
+    +   '\'' + esc(div) + '\',\'' + esc(dist) + '\',\'' + esc(area) + '\',\'\')"'
+    +   ' style="color:var(--cyan);border-color:rgba(8,145,178,.3);margin-left:6px;flex-shrink:0">'
+    + _ICO.transfer + '</button>'
+    + '</div>';
+
   if (isOpen) {
     html += '<div class="st-children">';
-    branchKeys.forEach(function(branch){ html += _renderEquipBranchNode(div, dist, area, branch, branchTree[branch]); });
+    branchKeys.forEach(function(branch) {
+      if (_isSentinel(branch)) {
+        // Area-level assets — "Assigned To [Area]"
+        var assets = branchTree[branch];
+        if (assets.length) html += _renderAssignedToLeaf(div, dist, area, assets);
+      } else {
+        html += _renderEquipBranchNode(div, dist, area, branch, branchTree[branch]);
+      }
+    });
     html += '</div>';
   }
+
   html += '</div>';
   return html;
 }
 
 function _renderEquipBranchNode(div, dist, area, branch, assets) {
   var idx = _eqBranchReg.length;
-  _eqBranchReg.push({ hoMode: false, div:div, dist:dist, area:area, branch:branch, assets:assets });
+  _eqBranchReg.push({
+    hoMode: false, div: div, dist: dist, area: area, branch: branch, assets: assets
+  });
+
   var typeCounts = {};
   assets.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
   var chips = Object.entries(typeCounts)
-    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
-    .join('');
+    .map(function(e){
+      return '<span class="st-type-chip">' + esc(e[0]) +
+             ' <strong>' + e[1] + '</strong></span>';
+    }).join('');
+
   var allocated = assets.filter(function(a){ return ['allocated','transfer'].indexOf(a.status)>=0; }).length;
-  var spare     = assets.filter(function(a){ return a.status==='spare'; }).length;
+  var spare     = assets.filter(function(a){ return a.status==='spare';    }).length;
   var borrowed  = assets.filter(function(a){ return a.status==='borrowed'; }).length;
-  var branchLabel = branch === '(No Branch)'
-    ? '<span style="color:var(--text3);font-size:.8rem;font-style:italic">Unassigned Location</span>'
-    : esc(branch);
+
+  var branchLabel = esc(branch);
   var showMoveBtn = branch !== '(No Branch)';
+
   return '<div class="st-node st-emp" style="margin-left:28px">'
-    +'<div class="st-row" style="cursor:default;gap:10px">'
-    +'<span class="st-icon">🏬</span>'
-    +'<div style="flex:1;min-width:0">'
-    +'<div style="font-weight:700;font-size:.88rem;color:var(--text)">'+branchLabel+'</div>'
-    +'<div style="display:flex;gap:5px;margin-top:4px;flex-wrap:wrap;align-items:center">'
-    +(allocated?'<span class="badge badge-allocated" style="font-size:.65rem;padding:1px 6px">'+allocated+' allocated</span>':'')
-    +(spare    ?'<span class="badge badge-spare"     style="font-size:.65rem;padding:1px 6px">'+spare+' spare</span>':'')
-    +(borrowed ?'<span class="badge badge-borrowed"  style="font-size:.65rem;padding:1px 6px">'+borrowed+' on borrow</span>':'')
-    +'</div>'
-    +'</div>'
-    +'<div class="st-type-chips" style="flex:0 1 auto">'+chips+'</div>'
-    +(showMoveBtn ? '<button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area" onclick="openMoveOrgUnitModal(\'branch\',\''+esc(div)+'\',\''+esc(dist)+'\',\''+esc(area)+'\',\''+esc(branch)+'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">'+_ICO.transfer+'</button>' : '')
-    +'<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal('+idx+')" style="flex-shrink:0;gap:5px">'+_ICO.view+' View '+assets.length+'</button>'
-    +'</div>'
-    +'</div>';
+    + '<div class="st-row" style="cursor:default;gap:10px">'
+    + '<span class="st-icon">🏬</span>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-weight:700;font-size:.88rem;color:var(--text)">' + branchLabel + '</div>'
+    + '<div style="display:flex;gap:5px;margin-top:4px;flex-wrap:wrap;align-items:center">'
+    + (allocated ? '<span class="badge badge-allocated" style="font-size:.65rem;padding:1px 6px">'+allocated+' allocated</span>' : '')
+    + (spare     ? '<span class="badge badge-spare"     style="font-size:.65rem;padding:1px 6px">'+spare+' spare</span>'         : '')
+    + (borrowed  ? '<span class="badge badge-borrowed"  style="font-size:.65rem;padding:1px 6px">'+borrowed+' on borrow</span>'  : '')
+    + '</div>'
+    + '</div>'
+    + '<div class="st-type-chips" style="flex:0 1 auto">' + chips + '</div>'
+    + (showMoveBtn
+        ? '<button class="btn btn-icon btn-secondary" data-tip="Move Branch to another Area"'
+          + ' onclick="openMoveOrgUnitModal(\'branch\','
+          + '\'' + esc(div) + '\',\'' + esc(dist) + '\','
+          + '\'' + esc(area) + '\',\'' + esc(branch) + '\')"'
+          + ' style="color:var(--cyan);border-color:rgba(8,145,178,.3);flex-shrink:0">'
+          + _ICO.transfer + '</button>'
+        : '')
+    + '<button class="btn btn-sm btn-secondary" onclick="openEquipBranchModal(' + idx + ')"'
+    +   ' style="flex-shrink:0;gap:5px">' + _ICO.view + ' View ' + assets.length + '</button>'
+    + '</div>'
+    + '</div>';
 }
 
 // ── Branch / Location detail modal ────────────────────────────────────────────
