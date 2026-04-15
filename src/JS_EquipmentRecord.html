@@ -178,10 +178,7 @@ function eqToggle(key) {
   _renderEquipTree(tree);
 }
 
-// ── Field Equipment Tree ──────────────────────────────────────────────────────
-// Uses _resolveAssetLocation() to fill missing hierarchy levels from
-// BaseOffice (col G) then Asset Location. Assets with no location at all
-// are grouped under (Unassigned) division so they remain visible.
+
 function _buildEquipTree() {
   var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
   var data = _eqSearchQ
@@ -196,10 +193,11 @@ function _buildEquipTree() {
   var tree = {};
   data.forEach(function(a) {
     var loc = _resolveAssetLocation(a);
+
     var div, distKey, areaKey, branchKey;
 
     if (!loc) {
-      // Truly no location data — bucket under (Unassigned)
+      // No location at all — bucket under (Unassigned)
       div       = '(Unassigned)';
       distKey   = _LOC_NODIST;
       areaKey   = _LOC_NOAREA;

@@ -72,10 +72,10 @@ function _buildStaffTree() {
       })
     : base;
 
-  var tree = {};
+var tree = {};
   data.forEach(function(a) {
     var loc = _resolveAssetLocation(a);
-    if (!loc) return; // Skip unlocated assets in Staff Assets view
+    if (!loc) return; // No location at all → skip in Staff Assets view
 
     var div    = loc.div;
     var dist   = loc.dist   || _LOC_NODIST;
@@ -86,20 +86,21 @@ function _buildStaffTree() {
     var staff = a.Staff       || 'Unassigned';
     var desig = a.Designation || '';
 
-    if (!tree[div])                             tree[div]                            = {};
-    if (!tree[div][dist])                       tree[div][dist]                      = {};
-    if (!tree[div][dist][area])                 tree[div][dist][area]                = {};
-    if (!tree[div][dist][area][branch])         tree[div][dist][area][branch]        = {};
+    if (!tree[div])                         tree[div]                        = {};
+    if (!tree[div][dist])                   tree[div][dist]                  = {};
+    if (!tree[div][dist][area])             tree[div][dist][area]            = {};
+    if (!tree[div][dist][area][branch])     tree[div][dist][area][branch]    = {};
+
     if (!tree[div][dist][area][branch][empId]) {
       tree[div][dist][area][branch][empId] = {
-        name:      staff,
-        empId:     empId,
+        name:        staff,
+        empId:       empId,
         designation: desig,
-        division:  div,
-        district:  _isSentinel(dist)   ? '' : dist,
-        area:      _isSentinel(area)   ? '' : area,
-        branch:    _isSentinel(branch) ? '' : branch,
-        assets:    []
+        division:    div,
+        district:    _isSentinel(dist)   ? '' : dist,
+        area:        _isSentinel(area)   ? '' : area,
+        branch:      _isSentinel(branch) ? '' : branch,
+        assets:      []
       };
     }
     tree[div][dist][area][branch][empId].assets.push(a);
