@@ -46,6 +46,61 @@ var _stEmpRegistry = [];
 var _dirtyPages    = [];
 var _scopeCache    = null;
 var ORG_LOOKUP = {};
+// ═══════════════════════════════════════
+//  LOCATION RESOLUTION HELPERS
+//  Used by JS_StaffAssets and JS_EquipmentRecord
+// ═══════════════════════════════════════
+
+var _LOC_NODIST   = '(No District)';
+var _LOC_NOAREA   = '(No Area)';
+var _LOC_NOBRANCH = '(No Branch)';
+
+function _isSentinel(val) {
+  return !val
+    || val === _LOC_NODIST
+    || val === _LOC_NOAREA
+    || val === _LOC_NOBRANCH
+    || val === '(No Division)';
+}
+
+/**
+ * Resolves the full location of an asset, filling in missing levels.
+ * Priority:
+ *   1. Direct Division + District columns on the asset
+ *   2. ORG_LOOKUP via AssetLocation (col T) or Branch
+ *   3. BaseOffice / Branch / Location string as last resort
+ * Returns { div, dist, area, branch } or null if truly no location.
+ */
+function _resolveAssetLocation(asset) {
+  var div    = (asset.Division || '').trim();
+  var dist   = (asset.District || '').trim();
+  var area   = (asset.Area     || '').trim();
+  var branch = (asset.Branch   || '').trim();
+
+  // 1. Have Division → enough to place the asset
+  if (div) {
+    return { div: div, dist: dist, area: area, branch: branch };
+  }
+
+  // 2. Try ORG_LOOKUP via AssetLocation (col T) or Branch
+  var resolved = _resolveByOrgLookup(asset);
+  if (resolved && (resolved.division || resolved.district)) {
+    return {
+      div:    resolved.division || div,
+      dist:   resolved.district || dist,
+      area:   resolved.area     || area,
+      branch: resolved.branch   || branch || asset.Branch || ''
+    };
+  }
+
+  // 3. Last resort: BaseOffice / Branch / Location as a label
+  var fallback = (asset.BaseOffice || asset.Branch || asset.Location || '').trim();
+  if (fallback) {
+    return { div: fallback, dist: '', area: '', branch: '' };
+  }
+
+  return null; // truly unlocated — skipped in Staff Assets, bucketed as Unassigned in Equip Record
+}
 
 var _ICO = {
   allocate:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
