@@ -303,6 +303,7 @@ function loginUser(empId, password) {
           (locData.userDivisions.length > 0 && locData.userDivisions[0] === 'Head Office');
 
         if (isHO) {
+          // HO users: scope is their department list
           const allDepts = locData.headOfficeDepts || getHeadOfficeDepts();
           seniorDistrictScope = allDepts.length > 0
             ? allDepts
@@ -310,10 +311,11 @@ function loginUser(empId, password) {
                 ? locData.userDistricts
                 : (mlDistrict ? [mlDistrict] : []));
         } else {
-          const supervisedDistricts = getDistrictsBySupervisor(id);
-          if (supervisedDistricts.length > 0) {
-            seniorDistrictScope = supervisedDistricts;
+          // -- V2 DATA FIRST: use the districts built directly from Eng. List V2 --
+          if (locData.seniorDistrictScope && locData.seniorDistrictScope.length > 0) {
+            seniorDistrictScope = locData.seniorDistrictScope;
           } else {
+            // Fallback 1: derive from divDistrictMap using the senior's divisions
             const userDivs = locData.userDivisions.length > 0
               ? locData.userDivisions
               : (mlDivision ? [mlDivision] : []);
@@ -323,6 +325,7 @@ function loginUser(empId, password) {
                 if (!seniorDistrictScope.includes(d)) seniorDistrictScope.push(d);
               });
             });
+            // Fallback 2: use userDistricts directly
             if (seniorDistrictScope.length === 0) {
               seniorDistrictScope = locData.userDistricts.length > 0
                 ? locData.userDistricts
@@ -1321,6 +1324,205 @@ function getHeadOfficeDepts() {
   } catch (e) { return []; }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  NEW FUNCTION 1: Parse Eng. List V2
+//
+//  Reads the V2 sheet which uses a carry-forward horizontal layout:
+//    Col A = Group/Region
+//    Col B = SFE Employee ID  (carries forward when blank)
+//    Col C = SFE Name
+//    Col D = Division Office  (carries forward when blank)
+//    Col E = District Office
+//    Col F = FE Employee ID
+//    Col G = FE Name
+//
+//  Returns { userDivisions, userDistricts, seniorDistrictScope, isSFE, found }
+// ─────────────────────────────────────────────────────────────────────────────
+function _parseEngListV2(empId) {
+  const DEFAULT = {
+    userDivisions: [], userDistricts: [],
+    seniorDistrictScope: [], isSFE: false, found: false
+  };
+
+  try {
+    const sh = _ss().getSheetByName('Eng. List V2');
+    if (!sh || sh.getLastRow() < 2) return DEFAULT;
+
+    const lastRow = sh.getLastRow();
+    // Read at least 7 cols to cover the layout; grab more if the sheet is wider
+    const colCount = Math.max(sh.getLastColumn(), 7);
+    // Row 1 = header; data starts at row 2
+    const data = sh.getRange(2, 1, lastRow - 1, colCount).getValues();
+
+    const id = String(empId || '').trim().toLowerCase();
+    if (!id) return DEFAULT;
+
+    // Carry-forward tracking
+    let currentSfeId = '';
+    let currentDiv   = '';
+
+    // Accumulation maps
+    // sfeMap[sfeId] = { divSet: Set<string>, distSet: Set<string> }
+    // feMap[feId]   = { divSet: Set<string>, distSet: Set<string> }
+    const sfeMap = {};
+    const feMap  = {};
+
+    data.forEach(row => {
+      const rawSfe  = String(row[1] || '').trim(); // Col B — SFE EmpID
+      const rawDiv  = String(row[3] || '').trim(); // Col D — Division
+      const rawDist = String(row[4] || '').trim(); // Col E — District
+      const rawFe   = String(row[5] || '').trim(); // Col F — FE EmpID
+
+      // Carry forward non-blank values
+      if (rawSfe) currentSfeId = rawSfe;
+      if (rawDiv) currentDiv   = rawDiv;
+
+      if (!currentSfeId) return; // skip rows before the first SFE entry
+      if (!rawDist)      return; // skip rows with no district
+
+      const normDiv  = currentDiv  ? _normDiv(currentDiv)    : '';
+      const normDist = rawDist     ? _normDist(rawDist)      : '';
+
+      // ── Build SFE scope ────────────────────────────────────────────────
+      if (!sfeMap[currentSfeId]) {
+        sfeMap[currentSfeId] = { divSet: new Set(), distSet: new Set() };
+      }
+      if (normDiv)  sfeMap[currentSfeId].divSet.add(normDiv);
+      if (normDist) sfeMap[currentSfeId].distSet.add(normDist);
+
+      // ── Build FE scope ─────────────────────────────────────────────────
+      if (rawFe) {
+        if (!feMap[rawFe]) {
+          feMap[rawFe] = { divSet: new Set(), distSet: new Set() };
+        }
+        if (normDiv)  feMap[rawFe].divSet.add(normDiv);
+        if (normDist) feMap[rawFe].distSet.add(normDist);
+      }
+    });
+
+    const numSort = (a, b) => {
+      const na = parseInt(a.replace(/\D+/g, ''), 10) || 0;
+      const nb = parseInt(b.replace(/\D+/g, ''), 10) || 0;
+      return na !== nb ? na - nb : a.localeCompare(b);
+    };
+
+    // Check if user is an FE
+    const feKey = Object.keys(feMap).find(k => k.toLowerCase() === id);
+    if (feKey) {
+      const fe = feMap[feKey];
+      return {
+        userDivisions:       [...fe.divSet].sort(numSort),
+        userDistricts:       [...fe.distSet].sort(numSort),
+        seniorDistrictScope: [],
+        isSFE:               false,
+        found:               true
+      };
+    }
+
+    // Check if user is an SFE
+    const sfeKey = Object.keys(sfeMap).find(k => k.toLowerCase() === id);
+    if (sfeKey) {
+      const sfe   = sfeMap[sfeKey];
+      const dists = [...sfe.distSet].sort(numSort);
+      return {
+        userDivisions:       [...sfe.divSet].sort(numSort),
+        userDistricts:       dists,
+        seniorDistrictScope: dists, // SFE sees all districts their FEs serve
+        isSFE:               true,
+        found:               true
+      };
+    }
+
+    return DEFAULT;
+  } catch(e) {
+    Logger.log('_parseEngListV2 error: ' + e.message);
+    return DEFAULT;
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  NEW FUNCTION 2: Build Org Structure Lookup
+//
+//  Reads "Org Structure-FO" (headers at row 3, data from row 4).
+//  Builds a map: lowercase(branchOrDistrictOrDivision) →
+//    { division, district, area, branch }
+//
+//  This lets the frontend resolve col T (Asset Location) values like
+//  "421 - Roxas" or "District 18" back to their parent Division/District.
+// ─────────────────────────────────────────────────────────────────────────────
+function _buildOrgLookup() {
+  const lookup = {};
+
+  try {
+    const sh = _ss().getSheetByName('Org Structure-FO');
+    if (!sh || sh.getLastRow() < 4) return lookup;
+
+    const lastRow = sh.getLastRow();
+    const lastCol = Math.max(sh.getLastColumn(), 6);
+
+    // Row 3 (1-indexed) = header row
+    const headerRow = sh.getRange(3, 1, 1, lastCol).getValues()[0];
+
+    // Discover columns by header name (case-insensitive)
+    let divCol = -1, distCol = -1, areaCol = -1, branchCol = -1;
+    headerRow.forEach((h, i) => {
+      const hUp = String(h || '').trim().toUpperCase();
+      if (hUp.includes('DIVISION') && divCol    < 0) divCol    = i;
+      if (hUp.includes('DISTRICT') && distCol   < 0) distCol   = i;
+      if (hUp.includes('AREA')     && areaCol   < 0) areaCol   = i;
+      if (hUp.includes('BRANCH')   && branchCol < 0) branchCol = i;
+    });
+
+    // Need at least division + district to be useful
+    if (divCol < 0 || distCol < 0) {
+      Logger.log('_buildOrgLookup: could not find Division/District columns in Org Structure-FO');
+      return lookup;
+    }
+
+    // Data rows start at row 4 (1-indexed) → range offset = lastRow - 3 rows
+    const data = sh.getRange(4, 1, lastRow - 3, lastCol).getValues();
+
+    let curDiv = '', curDist = '', curArea = '';
+
+    data.forEach(r => {
+      const rawDiv    = divCol    >= 0 ? String(r[divCol]    || '').trim() : '';
+      const rawDist   = distCol   >= 0 ? String(r[distCol]   || '').trim() : '';
+      const rawArea   = areaCol   >= 0 ? String(r[areaCol]   || '').trim() : '';
+      const rawBranch = branchCol >= 0 ? String(r[branchCol] || '').trim() : '';
+
+      // Carry forward non-blank hierarchy values
+      if (rawDiv)  curDiv  = _normDiv(rawDiv);
+      if (rawDist) curDist = _normDist(rawDist);
+      if (rawArea) curArea = rawArea;
+
+      const loc = { division: curDiv, district: curDist, area: curArea, branch: rawBranch };
+
+      // Branch-level: full detail
+      if (rawBranch) {
+        lookup[rawBranch.toLowerCase()] = loc;
+      }
+
+      // District-level: first occurrence wins (for "District 18" → Division X lookups)
+      if (curDist && !lookup[curDist.toLowerCase()]) {
+        lookup[curDist.toLowerCase()] = { division: curDiv, district: curDist, area: '', branch: '' };
+      }
+
+      // Division-level: first occurrence wins
+      if (curDiv && !lookup[curDiv.toLowerCase()]) {
+        lookup[curDiv.toLowerCase()] = { division: curDiv, district: '', area: '', branch: '' };
+      }
+    });
+
+    Logger.log('_buildOrgLookup: built ' + Object.keys(lookup).length + ' entries');
+    return lookup;
+  } catch(e) {
+    Logger.log('_buildOrgLookup error: ' + e.message);
+    return lookup;
+  }
+}
+
+
 // ─── ENGINEER LOCATION DATA ───────────────────────────────────────────────────
 function getEngineerLocationData() {
   return getLocationData(null);
@@ -1333,9 +1535,12 @@ function getLocationData(empId) {
       divDistrictMap:        {},
       userDivisions:         [],
       userDistricts:         [],
-      userDivisionDistricts: {}
+      userDivisionDistricts: {},
+      seniorDistrictScope:   [],
+      headOfficeDepts:       []
     };
 
+    // ── 1. Build divDistrictMap from Drop down sheet (UNCHANGED) ──────────
     const ddSh = ss.getSheetByName(SH_DROPDOWN);
     if (ddSh && ddSh.getLastRow() >= 2) {
       const lastCol = ddSh.getLastColumn();
@@ -1372,60 +1577,81 @@ function getLocationData(empId) {
       }
     }
 
-    const engSh = ss.getSheetByName('Eng. List') || ss.getSheetByName('Eng List');
-    if (engSh && engSh.getLastRow() > 1) {
-      const lastRow = engSh.getLastRow();
-      const data = engSh.getRange(2, 1, lastRow - 1, 10).getValues();
-      const divSet = new Set(), distSet = new Set();
+    // ── 2. Get user scope from Eng. List V2 (REPLACES old Eng. List block) ─
+    const numSort = (a, b) => {
+      const na = parseInt(a.replace(/\D+/g, ''), 10) || 0;
+      const nb = parseInt(b.replace(/\D+/g, ''), 10) || 0;
+      return na !== nb ? na - nb : a.localeCompare(b);
+    };
 
-if (empId) {
-  // Look up this specific user
-  data.forEach(r => {
-    const rowEmpId = String(r[0] || '').trim();
-    if (rowEmpId.toLowerCase() === String(empId).trim().toLowerCase()) {
-      const div  = String(r[7] || '').trim();
-      const dist = String(r[8] || '').trim();
-      if (div)  divSet.add(div);
-      if (dist) distSet.add(dist);
-    }
-  });
-  // If still empty after targeted search, 
-  // fall back to Masterlist data (already in SESSION), not all engineers
-  // Just return empty sets — let the caller handle it
-} else {
-  // No empId — load all (used for dropdown population, not scoping)
-  data.forEach(r => {
-    const div  = String(r[7] || '').trim();
-    const dist = String(r[8] || '').trim();
-    if (div)  divSet.add(div);
-    if (dist) distSet.add(dist);
-  });
-}
+    if (empId) {
+      const v2 = _parseEngListV2(empId);
+      result.userDivisions       = v2.userDivisions;
+      result.userDistricts       = v2.userDistricts;
+      result.seniorDistrictScope = v2.seniorDistrictScope;
 
-      const numSort = (a, b) => {
-        const na = parseInt(a.replace(/\D+/g, '')) || 0;
-        const nb = parseInt(b.replace(/\D+/g, '')) || 0;
-        return na !== nb ? na - nb : a.localeCompare(b);
-      };
-      result.userDivisions = [...divSet].sort(numSort);
-      result.userDistricts = [...distSet].sort(numSort);
+      // If V2 found nothing, try Masterlist fallback (for HO users not in V2)
+      // This is intentionally minimal — just preserving the district so loginUser
+      // can fall back to mlDistrict from the Masterlist row.
 
-      result.userDivisions.forEach(div => {
-        const mapped = result.divDistrictMap[div] || [];
-        result.userDivisionDistricts[div] = mapped.length > 0 ? mapped : result.userDistricts;
-      });
-
-      const _hoDepts = getHeadOfficeDepts();
-      result.headOfficeDepts = _hoDepts;
-      if (_hoDepts.length > 0) {
-        result.divDistrictMap['Head Office'] = _hoDepts;
-        result.userDivisionDistricts['Head Office'] = _hoDepts;
+    } else {
+      // No empId → load all divisions/districts for global dropdown population
+      const engV2Sh = ss.getSheetByName('Eng. List V2');
+      if (engV2Sh && engV2Sh.getLastRow() > 1) {
+        const lastRow = engV2Sh.getLastRow();
+        const colCount = Math.max(engV2Sh.getLastColumn(), 7);
+        const data = engV2Sh.getRange(2, 1, lastRow - 1, colCount).getValues();
+        const divSet = new Set(), distSet = new Set();
+        let curDiv = '';
+        data.forEach(r => {
+          const rawDiv  = String(r[3] || '').trim();
+          const rawDist = String(r[4] || '').trim();
+          if (rawDiv)  curDiv = rawDiv;
+          if (curDiv)  divSet.add(_normDiv(curDiv));
+          if (rawDist) distSet.add(_normDist(rawDist));
+        });
+        result.userDivisions = [...divSet].sort(numSort);
+        result.userDistricts = [...distSet].sort(numSort);
+      } else {
+        // Fallback to old sheet if V2 not present
+        const engSh = ss.getSheetByName('Eng. List') || ss.getSheetByName('Eng List');
+        if (engSh && engSh.getLastRow() > 1) {
+          const lastRow = engSh.getLastRow();
+          const data = engSh.getRange(2, 1, lastRow - 1, 10).getValues();
+          const divSet = new Set(), distSet = new Set();
+          data.forEach(r => {
+            const div  = String(r[7] || '').trim();
+            const dist = String(r[8] || '').trim();
+            if (div)  divSet.add(div);
+            if (dist) distSet.add(dist);
+          });
+          result.userDivisions = [...divSet].sort(numSort);
+          result.userDistricts = [...distSet].sort(numSort);
+        }
       }
     }
 
+    // ── 3. Build userDivisionDistricts cross-reference ────────────────────
+    result.userDivisions.forEach(div => {
+      const mapped = result.divDistrictMap[div] || [];
+      result.userDivisionDistricts[div] = mapped.length > 0 ? mapped : result.userDistricts;
+    });
+
+    // ── 4. Head Office departments (UNCHANGED) ────────────────────────────
+    const _hoDepts = getHeadOfficeDepts();
+    result.headOfficeDepts = _hoDepts;
+    if (_hoDepts.length > 0) {
+      result.divDistrictMap['Head Office'] = _hoDepts;
+      result.userDivisionDistricts['Head Office'] = _hoDepts;
+    }
+
     return result;
-  } catch (e) {
-    return { divDistrictMap: {}, userDivisions: [], userDistricts: [], userDivisionDistricts: {}, headOfficeDepts: [], error: e.message };
+  } catch(e) {
+    return {
+      divDistrictMap: {}, userDivisions: [], userDistricts: [],
+      userDivisionDistricts: {}, headOfficeDepts: [], seniorDistrictScope: [],
+      error: e.message
+    };
   }
 }
 
@@ -1635,11 +1861,12 @@ function updateAssetDetails(barcode, updates) {
 // ─── BATCH DATA LOADING ───────────────────────────────────────────────────────
 function getInitialData() {
   return {
-    assets:    getAllAssets().data    || [],
-    borrows:   getBorrowData()        || [],
-    transfers: getTransferData()      || [],
-    disposals: getDisposalData()      || [],
-    logs:      getActivityLogs(1, 200).rows || []
+    assets:    getAllAssets().data         || [],
+    borrows:   getBorrowData()             || [],
+    transfers: getTransferData()           || [],
+    disposals: getDisposalData()           || [],
+    logs:      getActivityLogs(1, 200).rows|| [],
+    orgLookup: _buildOrgLookup()           || {}
   };
 }
 function getEngineersByLocation(district, branch) {

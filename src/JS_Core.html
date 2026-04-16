@@ -45,6 +45,7 @@ var _stBuilt       = false;
 var _stEmpRegistry = [];
 var _dirtyPages    = [];
 var _scopeCache    = null;
+var ORG_LOOKUP = {};
 
 var _ICO = {
   allocate:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
@@ -272,60 +273,104 @@ function _getScopeDistricts(){
 //  Blank Assignment is treated as "field office" for backward-compatibility
 //  with assets created before the Assignment column existed.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─── NEW HELPER — _resolveByOrgLookup(asset) ──────────────────────────────────
+// Given an asset whose Division/District columns are blank, tries to derive
+// the location from Asset Location (col T) and then Branch (col K) using the
+// ORG_LOOKUP map returned from _buildOrgLookup() on the server.
+//
+// Returns { division, district, area, branch } or null if unresolvable.
+function _resolveByOrgLookup(asset) {
+  if (!ORG_LOOKUP || typeof ORG_LOOKUP !== 'object') return null;
+
+  // Primary: try Asset Location (col T — the most reliable fallback)
+  var rawLoc = (asset.AssetLocation || '').trim();
+  if (rawLoc) {
+    var entry = ORG_LOOKUP[rawLoc.toLowerCase()];
+    if (entry && (entry.division || entry.district)) return entry;
+  }
+
+  // Secondary: try Branch (col K) — some older entries have only this
+  var rawBranch = (asset.Branch || '').trim();
+  if (rawBranch) {
+    var bEntry = ORG_LOOKUP[rawBranch.toLowerCase()];
+    if (bEntry && (bEntry.division || bEntry.district)) return bEntry;
+  }
+
+  return null;
+}
+
+
 function _filterByScope(assets) {
   if (assets === ASSETS && _scopeCache) return _scopeCache;
 
   var result;
 
-  // ── HEAD OFFICE ────────────────────────────────────────────────────────────
+  // ── HEAD OFFICE (UNCHANGED) ────────────────────────────────────────────────
   if (isHO()) {
     result = assets.filter(function(a) {
       var assign = (a.Assignment || '').trim().toLowerCase();
       if (assign === 'central office') return true;
       if (assign === 'field office')   return false;
-      // Blank assignment: only show when the asset has NO field-location data.
-      // Assets with Division/District/Area/Branch belong to the field.
+      // Blank assignment: only show when the asset has NO field-location data
       return !(a.District || a.Division || a.Area || a.Branch);
     });
 
-  // ── FIELD USERS (Senior FE and regular FE) ─────────────────────────────────
+  // ── FIELD USERS (Senior FE and regular FE) ────────────────────────────────
   } else {
     var userDivs = (SESSION.userDivisions || []).map(function(d){
-      return (d||'').toLowerCase();
+      return (d || '').toLowerCase();
     });
-    var userDists = _getScopeDistricts();   // already lowercase
+    var userDists = _getScopeDistricts(); // already lowercase
 
     if (userDivs.length === 0 && userDists.length === 0) {
       result = [];
     } else {
       result = assets.filter(function(a) {
-        var assign = (a.Assignment || '').trim().toLowerCase();
+        var assign   = (a.Assignment || '').trim().toLowerCase();
 
-        // Central Office assets are NEVER visible to field users.
+        // Central Office assets are never visible to field users
         if (assign === 'central office') return false;
 
         var assetDiv  = (a.Division  || '').toLowerCase().trim();
         var assetDist = (a.District  || '').toLowerCase().trim();
 
-        // ── SENIOR FE: scope is the whole Division ──────────────────────────
+        // ── SENIOR FE ───────────────────────────────────────────────────────
         if (isSenior()) {
-          // Primary check: Division match
+          // 1. Primary: Division match (covers all districts under that division)
           if (assetDiv && userDivs.length > 0 && userDivs.indexOf(assetDiv) >= 0) {
             return true;
           }
-          // Fallback: District match (for assets that have District but no Division,
-          // or when senior is scoped to specific districts)
+          // 2. Secondary: direct District match (for assets with district but no division)
           if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) {
             return true;
+          }
+          // 3. ← NEW FALLBACK: resolve col T / col K via ORG_LOOKUP
+          //    Only triggered when BOTH Division and District columns are blank
+          if (!assetDiv && !assetDist) {
+            var resolved = _resolveByOrgLookup(a);
+            if (resolved) {
+              var rDiv  = (resolved.division || '').toLowerCase();
+              var rDist = (resolved.district || '').toLowerCase();
+              if (rDiv  && userDivs.length  > 0 && userDivs.indexOf(rDiv)   >= 0) return true;
+              if (rDist && userDists.length > 0 && userDists.indexOf(rDist) >= 0) return true;
+            }
           }
           return false;
         }
 
-        // ── REGULAR FE: scope is their District(s) ──────────────────────────
+        // ── REGULAR FE ──────────────────────────────────────────────────────
+        // 1. Primary: District match
         if (assetDist && userDists.length > 0) {
           return userDists.indexOf(assetDist) >= 0;
         }
-        // Asset has no district → FE cannot determine ownership; hide it.
+        // 2. ← NEW FALLBACK: resolve col T / col K via ORG_LOOKUP
+        //    Only triggered when District column is blank
+        if (!assetDist && userDists.length > 0) {
+          var resolved = _resolveByOrgLookup(a);
+          if (resolved && resolved.district) {
+            return userDists.indexOf(resolved.district.toLowerCase()) >= 0;
+          }
+        }
         return false;
       });
     }
@@ -584,6 +629,10 @@ function loadData(){
       XFERS     = r.transfers;
       DISPOSALS = r.disposals;
       LOGS      = r.logs;
+      // ← NEW: cache the org structure lookup for col-T resolution
+      if (r.orgLookup && typeof r.orgLookup === 'object') {
+        ORG_LOOKUP = r.orgLookup;
+      }
       renderAll();
     })
     .withFailureHandler(function(err) { toast('Load error: ' + err.message, 'err'); })
