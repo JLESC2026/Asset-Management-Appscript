@@ -261,11 +261,6 @@ function isHO() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  _getScopeDistricts
-//  Returns lowercase array of districts the current user is allowed to see.
-//  • HO        → seniorDistrictScope (dept list used as district-equivalent)
-//  • Senior FE → seniorDistrictScope; if empty, derives from divDistrictMap
-//               using the user's own divisions; last fallback: userDistricts
-//  • Regular FE→ userDistricts; fallback to SESSION.district
 // ─────────────────────────────────────────────────────────────────────────────
 function _getScopeDistricts(){
   if(!SESSION) return [];
@@ -277,12 +272,10 @@ function _getScopeDistricts(){
   }
 
   if(isSenior()){
-    // Use explicitly-assigned district scope first
     var scope = SESSION.seniorDistrictScope || [];
     if(scope.length > 0){
       return scope.map(function(d){ return (d||'').toLowerCase(); });
     }
-    // Derive from the division→district map using the senior's own divisions
     var divMap  = SESSION.divDistrictMap  || {};
     var divList = SESSION.userDivisions   || [];
     var derived = [];
@@ -293,13 +286,11 @@ function _getScopeDistricts(){
       });
     });
     if(derived.length > 0) return derived;
-    // Last fallback: direct userDistricts
     return (SESSION.userDistricts || []).map(function(d){
       return (d||'').toLowerCase();
     });
   }
 
-  // Regular FE
   var arr = (SESSION.userDistricts && SESSION.userDistricts.length > 0)
     ? SESSION.userDistricts
     : (SESSION.district ? [SESSION.district] : []);
@@ -307,44 +298,17 @@ function _getScopeDistricts(){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  _filterByScope
-//
-//  Visibility rules:
-//
-//  HO users       → see only assets where Assignment === 'central office'
-//                   OR Assignment is blank AND asset has NO field location data.
-//                   (Assets that have Division/District/Area/Branch set are
-//                    treated as field assets even if Assignment is blank.)
-//
-//  Senior FE      → sees ALL assets whose Division matches one of their
-//                   assigned divisions.  Falls back to district matching when
-//                   the asset has no Division column filled in.
-//                   Central Office assets are always hidden.
-//
-//  Regular FE     → sees all assets whose District matches one of their
-//                   assigned districts.
-//                   Central Office assets are always hidden.
-//
-//  Blank Assignment is treated as "field office" for backward-compatibility
-//  with assets created before the Assignment column existed.
+//  _resolveByOrgLookup
 // ─────────────────────────────────────────────────────────────────────────────
-// ─── NEW HELPER — _resolveByOrgLookup(asset) ──────────────────────────────────
-// Given an asset whose Division/District columns are blank, tries to derive
-// the location from Asset Location (col T) and then Branch (col K) using the
-// ORG_LOOKUP map returned from _buildOrgLookup() on the server.
-//
-// Returns { division, district, area, branch } or null if unresolvable.
 function _resolveByOrgLookup(asset) {
   if (!ORG_LOOKUP || typeof ORG_LOOKUP !== 'object') return null;
 
-  // Primary: try Asset Location (col T — the most reliable fallback)
   var rawLoc = (asset.AssetLocation || '').trim();
   if (rawLoc) {
     var entry = ORG_LOOKUP[rawLoc.toLowerCase()];
     if (entry && (entry.division || entry.district)) return entry;
   }
 
-  // Secondary: try Branch (col K) — some older entries have only this
   var rawBranch = (asset.Branch || '').trim();
   if (rawBranch) {
     var bEntry = ORG_LOOKUP[rawBranch.toLowerCase()];
@@ -354,23 +318,33 @@ function _resolveByOrgLookup(asset) {
   return null;
 }
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  _filterByScope  — FIX v2
+//
+//  The Assignment column is the single source of truth:
+//    'Central Office' → HO users only
+//    'Field Office'   → Field users only (scoped by Division / District)
+//    blank            → shown to nobody (legacy / disposal rows)
+//
+//  This eliminates the previous bug where ~3,158 blank-Assignment rows were
+//  incorrectly surfaced to HO users via the fallback
+//    `return !(a.District || a.Division || a.Area || a.Branch)`.
+// ─────────────────────────────────────────────────────────────────────────────
 function _filterByScope(assets) {
   if (assets === ASSETS && _scopeCache) return _scopeCache;
 
   var result;
 
-  // ── HEAD OFFICE (UNCHANGED) ────────────────────────────────────────────────
+  // ── HEAD OFFICE ────────────────────────────────────────────────────────────
+  // HO users see ONLY assets explicitly marked 'Central Office'.
   if (isHO()) {
     result = assets.filter(function(a) {
-      var assign = (a.Assignment || '').trim().toLowerCase();
-      if (assign === 'central office') return true;
-      if (assign === 'field office')   return false;
-      // Blank assignment: only show when the asset has NO field-location data
-      return !(a.District || a.Division || a.Area || a.Branch);
+      return (a.Assignment || '').trim().toLowerCase() === 'central office';
     });
 
   // ── FIELD USERS (Senior FE and regular FE) ────────────────────────────────
+  // Field users see ONLY assets explicitly marked 'Field Office'.
+  // Blank-assignment assets (legacy / disposal rows) are shown to nobody.
   } else {
     var userDivs = (SESSION.userDivisions || []).map(function(d){
       return (d || '').toLowerCase();
@@ -381,50 +355,28 @@ function _filterByScope(assets) {
       result = [];
     } else {
       result = assets.filter(function(a) {
-        var assign   = (a.Assignment || '').trim().toLowerCase();
-
-        // Central Office assets are never visible to field users
-        if (assign === 'central office') return false;
+        // Strict gate: only Field Office assets are visible to field users
+        if ((a.Assignment || '').trim().toLowerCase() !== 'field office') return false;
 
         var assetDiv  = (a.Division  || '').toLowerCase().trim();
         var assetDist = (a.District  || '').toLowerCase().trim();
 
         // ── SENIOR FE ───────────────────────────────────────────────────────
         if (isSenior()) {
-          // 1. Primary: Division match (covers all districts under that division)
+          // 1. Primary: Division match
           if (assetDiv && userDivs.length > 0 && userDivs.indexOf(assetDiv) >= 0) {
             return true;
           }
-          // 2. Secondary: direct District match (for assets with district but no division)
+          // 2. Fallback: District match (assets enrolled with district but no division)
           if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) {
             return true;
-          }
-          // 3. ← NEW FALLBACK: resolve col T / col K via ORG_LOOKUP
-          //    Only triggered when BOTH Division and District columns are blank
-          if (!assetDiv && !assetDist) {
-            var resolved = _resolveByOrgLookup(a);
-            if (resolved) {
-              var rDiv  = (resolved.division || '').toLowerCase();
-              var rDist = (resolved.district || '').toLowerCase();
-              if (rDiv  && userDivs.length  > 0 && userDivs.indexOf(rDiv)   >= 0) return true;
-              if (rDist && userDists.length > 0 && userDists.indexOf(rDist) >= 0) return true;
-            }
           }
           return false;
         }
 
         // ── REGULAR FE ──────────────────────────────────────────────────────
-        // 1. Primary: District match
         if (assetDist && userDists.length > 0) {
           return userDists.indexOf(assetDist) >= 0;
-        }
-        // 2. ← NEW FALLBACK: resolve col T / col K via ORG_LOOKUP
-        //    Only triggered when District column is blank
-        if (!assetDist && userDists.length > 0) {
-          var resolved = _resolveByOrgLookup(a);
-          if (resolved && resolved.district) {
-            return userDists.indexOf(resolved.district.toLowerCase()) >= 0;
-          }
         }
         return false;
       });
@@ -444,7 +396,6 @@ function _filterByFEDistricts(assets){ return _filterByScope(assets); }
 function openModal(id){
   document.getElementById(id).classList.add('open');
   
-  // Add scroll-shadow to modal header
   setTimeout(function() {
     var modal  = document.getElementById(id);
     if (!modal) return;
@@ -455,7 +406,6 @@ function openModal(id){
         header.classList.toggle('scrolled', body.scrollTop > 4);
       }, { passive: true });
     }
-    // Focus first input
     var first = modal.querySelector(
       'input:not([readonly]):not([disabled]),' +
       'select:not([disabled]),' +
@@ -477,7 +427,6 @@ document.addEventListener('keydown', function(e) {
     }
   }
   
-  // Focus trap for modals
   if (e.key === 'Tab') {
     var openModal = document.querySelector('.modal-backdrop.open .modal');
     if (!openModal) return;
@@ -500,7 +449,6 @@ document.addEventListener('keydown', function(e) {
     }
   }
   
-  // Ctrl+Enter to submit active modal
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     var openModals = document.querySelectorAll('.modal-backdrop.open');
     if (openModals.length > 0) {
@@ -684,7 +632,6 @@ function loadData(){
       XFERS     = r.transfers;
       DISPOSALS = r.disposals;
       LOGS      = r.logs;
-      // ← NEW: cache the org structure lookup for col-T resolution
       if (r.orgLookup && typeof r.orgLookup === 'object') {
         ORG_LOOKUP = r.orgLookup;
       }
@@ -694,7 +641,6 @@ function loadData(){
     .getInitialData();
 }
 
-// ─── Comprehensive loading state for all modules ─────────────────────────────
 function showLoading(){
   var loadRow = '<tr><td colspan="20"><div class="tbl-loading-row">'
     +'<div class="spinner"></div>Loading data…</div></td></tr>';
