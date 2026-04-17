@@ -152,11 +152,11 @@ function renderAllocated() {
       <td><span class="cond-${(a.Condition || 'good').toLowerCase()}">${esc(a.Condition)}</span></td>
       <td>
         <div style="display:flex;gap:4px">
-          <button class="btn btn-icon btn-transfer"  data-tip="Transfer"  onclick="openTransferModal('${esc(a.Barcode)}')">${_ICO.transfer}</button>
-          <button class="btn btn-icon btn-borrow"    data-tip="Borrow"    onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>
-          <button class="btn btn-icon btn-spare"     data-tip="↩ Spare"   onclick="openDeallocModal('${esc(a.Barcode)}','${esc(a.Staff)}')">${_ICO.spare}</button>
-          <button class="btn btn-icon btn-danger"    data-tip="Dispose"   onclick="openDisposalModal('${esc(a.Barcode)}')">${_ICO.dispose}</button>
-          <button class="btn btn-icon btn-secondary" data-tip="View"      onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
+          ${canTransfer() ? `<button class="btn btn-icon btn-transfer"  data-tip="Transfer" onclick="openTransferModal('${esc(a.Barcode)}')">${_ICO.transfer}</button>` : ''}
+          ${canBorrow()   ? `<button class="btn btn-icon btn-borrow"    data-tip="Borrow"   onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>` : ''}
+          ${canDealloc()  ? `<button class="btn btn-icon btn-spare"     data-tip="↩ Spare"  onclick="openDeallocModal('${esc(a.Barcode)}','${esc(a.Staff)}')">${_ICO.spare}</button>` : ''}
+          ${canDispose()  ? `<button class="btn btn-icon btn-danger"    data-tip="Dispose"  onclick="openDisposalModal('${esc(a.Barcode)}')">${_ICO.dispose}</button>` : ''}
+          <button class="btn btn-icon btn-secondary" data-tip="View" onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
         </div>
       </td>
     </tr>`;

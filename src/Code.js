@@ -246,10 +246,59 @@ function _isHashed(str) { return /^[0-9a-f]{64}$/.test(String(str)); }
 // Users sheet roles: User | Supervisor | Super User | Admin | Super Admin
 function _mapRoleTier(role) {
   const r = String(role || '').trim().toLowerCase();
-  if (r === 'super admin' || r === 'superadmin' || r === 'admin') return 'ho';
-  if (r === 'super user'  || r === 'superuser')                    return 'ho';
-  if (r === 'supervisor')                                           return 'senior';
+  const HO_ROLES = [
+    'admin', 'super admin', 'superadmin', 'administrator',
+    'super user', 'superuser', 'it admin', 'it administrator',
+    'system admin', 'sysadmin', 'it head', 'department head',
+    'head', 'manager', 'it manager', 'iictd head', 'dept head'
+  ];
+  const SENIOR_ROLES = [
+    'supervisor', 'senior', 'senior fe', 'senior field engineer',
+    'senior engineer', 'sfe', 'sfr', 'field supervisor', 'area supervisor',
+    'district supervisor', 'division supervisor', 'team lead', 'team leader',
+    'lead engineer'
+  ];
+  if (HO_ROLES.includes(r))     return 'ho';
+  if (SENIOR_ROLES.includes(r)) return 'senior';
   return 'fe';
+}
+
+// Defaults: Admin = full access incl. delete. Supervisor & FE = full actions, NO delete.
+// Scope (_filterByScope) controls WHAT they see. Perms control WHAT they can do.
+// Remarks column (Col I of Users sheet) can override any default.
+function _parseRemarks(remarks, roleTier) {
+  const r = String(remarks || '').toLowerCase().trim();
+
+  const DEFAULTS = {
+    ho:     { canAdd:true,  canEdit:true, canDelete:true,  canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false },
+    senior: { canAdd:true,  canEdit:true, canDelete:false, canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false },
+    fe:     { canAdd:true,  canEdit:true, canDelete:false, canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false }
+  };
+  const perms = Object.assign({}, DEFAULTS[roleTier] || DEFAULTS.fe);
+  if (!r) return perms;
+
+  if (['view only','view-only','read only','read-only','view access only','can only view','view'].some(k => r.includes(k)))
+    return { canAdd:false, canEdit:false, canDelete:false, canAllocate:false, canDealloc:false, canDispose:false, canBorrow:false, canTransfer:false, viewOnly:true };
+
+  if (['full access','all access','full permission','all permissions','unrestricted','complete access'].some(k => r.includes(k)))
+    return { canAdd:true, canEdit:true, canDelete:true, canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false };
+
+  if (r.includes('can delete')   || r.includes('can remove'))                             perms.canDelete   = true;
+  if (r.includes('can add')      || r.includes('can enroll')  || r.includes('can create')) perms.canAdd     = true;
+  if (r.includes('can edit')     || r.includes('can update')  || r.includes('can modify')) perms.canEdit    = true;
+  if (r.includes('can allocate') || r.includes('can assign'))                             perms.canAllocate = true;
+  if (r.includes('can return to spare') || r.includes('can deallocate'))                  perms.canDealloc  = true;
+  if (r.includes('can dispose')  || r.includes('can decommission'))                       perms.canDispose  = true;
+  if (r.includes('can borrow')   || r.includes('can lend'))                               perms.canBorrow   = true;
+  if (r.includes('can transfer') || r.includes('can reassign'))                           perms.canTransfer = true;
+  if (r.includes('no add')       || r.includes('cannot add')      || r.includes('no enroll'))  perms.canAdd      = false;
+  if (r.includes('no edit')      || r.includes('cannot edit')     || r.includes('no modify'))  perms.canEdit     = false;
+  if (r.includes('no delete')    || r.includes('cannot delete')   || r.includes('no remove'))  perms.canDelete   = false;
+  if (r.includes('no allocate')  || r.includes('cannot allocate'))                             perms.canAllocate = false;
+  if (r.includes('no dispose')   || r.includes('cannot dispose'))                              perms.canDispose  = false;
+  if (r.includes('no borrow')    || r.includes('cannot borrow'))                               perms.canBorrow   = false;
+  if (r.includes('no transfer')  || r.includes('cannot transfer'))                             perms.canTransfer = false;
+  return perms;
 }
 
 // ─── MASTERLIST LOOKUP (autofill only) ───────────────────────────────────────
@@ -395,21 +444,29 @@ function _buildFullDivDistrictMap() {
 // Users sheet: row 1=headers, data row 2
 // ColA=Role | ColB=Password | ColC=EmpID | ColD=Name | ColE=Designation
 // ColF=SupID | ColG=SupName | ColH=SupDesig | ColI=Remarks
+// Col A=Role  B=Password  C=ID Number  D=Emp Name  E=Designation
+// Col F=Supervisor ID  G=Supervisor Name  H=Sup Desig  I=Remarks
 function loginUser(empId, password) {
   try {
     const sh = _ss().getSheetByName(SH_USERS);
     if (!sh) return { ok: false, error: 'Users sheet not found.' };
     const last = sh.getLastRow();
     if (last < 2) return { ok: false, error: 'No users registered.' };
-    const data = sh.getRange(2, 1, last - 1, 9).getValues();
 
+    const data = sh.getRange(2, 1, last - 1, 9).getValues();
     for (let ri = 0; ri < data.length; ri++) {
       const row   = data[ri];
-      const rowId = String(row[2] || '').trim(); // Col C = Employee ID
+      const rowId = String(row[2] || '').trim();
       if (rowId.toLowerCase() !== String(empId).trim().toLowerCase()) continue;
 
-      const role    = String(row[0] || 'User').trim(); // Col A
-      const pwd     = String(row[1] || '').trim();     // Col B
+      const role     = String(row[0] || 'User').trim();
+      const pwd      = String(row[1] || '').trim();
+      const empName  = String(row[3] || '').trim();
+      const desig    = String(row[4] || '').trim();
+      const supId    = String(row[5] || '').trim();
+      const supName  = String(row[6] || '').trim();
+      const supDesig = String(row[7] || '').trim();
+      const remarks  = String(row[8] || '').trim();
 
       const inputHash = _hashPwd(password);
       if (_isHashed(pwd)) {
@@ -421,36 +478,29 @@ function loginUser(empId, password) {
 
       const firstLogin  = (pwd === '1234' || pwd === _hashPwd('1234'));
       const roleTier    = _mapRoleTier(role);
-      const isHO        = roleTier === 'ho';
-
-      const mlData    = _getMasterlistEntry(rowId);
-      const scopeData = _parseOrgStructure(rowId, roleTier);
+      const perms       = _parseRemarks(remarks, roleTier);
+      const scopeData   = _parseOrgStructure(rowId, roleTier);
+      const mlData      = _getMasterlistEntry(rowId);
 
       return {
-        ok:                  true,
-        username:            rowId,
-        role,
-        roleTier,
-        isHeadOffice:        isHO,
-        name:                mlData.name || String(row[3] || rowId),
-        firstLogin,
+        ok: true, username: rowId, role, roleTier,
+        name:                empName || mlData.name || rowId,
+        designation:         desig   || mlData.position || '',
+        supervisorId:        supId,
+        supervisorName:      supName,
+        supervisorDesig:     supDesig,
+        remarks, perms, firstLogin,
         division:            scopeData.userDivisions[0]  || mlData.division || '',
         district:            scopeData.userDistricts[0]  || mlData.district || '',
         userDivisions:       scopeData.userDivisions,
-        userDistricts:       scopeData.userDistricts.length > 0
-                               ? scopeData.userDistricts
-                               : (mlData.district ? [mlData.district] : []),
+        userDistricts:       scopeData.userDistricts.length > 0 ? scopeData.userDistricts : (mlData.district ? [mlData.district] : []),
         seniorDistrictScope: scopeData.seniorDistrictScope,
         divDistrictMap:      scopeData.divDistrictMap,
-        headOfficeDepts:     [],
-        area:                mlData.area       || '',
-        branch:              mlData.baseOffice || '',
+        headOfficeDepts: [], area: mlData.area || '', branch: mlData.baseOffice || ''
       };
     }
     return { ok: false, error: 'Employee ID not found.' };
-  } catch(e) {
-    return { ok: false, error: e.message };
-  }
+  } catch(e) { return { ok: false, error: e.message }; }
 }
 
 function changePassword(empId, newPwd) {

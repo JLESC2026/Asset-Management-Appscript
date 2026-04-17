@@ -248,16 +248,21 @@ function _unlockBtn(el){
 // ═══════════════════════════════════════
 //  ACCESS CONTROL
 // ═══════════════════════════════════════
-function isAdmin(){ return false; }
-function isSenior(){
-  return SESSION && SESSION.roleTier === 'senior';
-}
-function isFE(){
-  return SESSION && !isSenior();
-}
-function isHO() {
-  return SESSION && SESSION.roleTier === 'ho';
-}
+function isAdmin()  { return !!(SESSION && SESSION.roleTier === 'ho'); }
+function isSenior() { return !!(SESSION && SESSION.roleTier === 'senior'); }
+function isFE()     { return !!(SESSION && SESSION.roleTier === 'fe'); }
+function isHO()     { return isAdmin(); }
+
+// ── Permission helpers — ADD these immediately after the 4 above ──
+function canAdd()      { return !!(SESSION && SESSION.perms && SESSION.perms.canAdd); }
+function canEdit()     { return !!(SESSION && SESSION.perms && SESSION.perms.canEdit); }
+function canDelete()   { return !!(SESSION && SESSION.perms && SESSION.perms.canDelete); }
+function canAllocate() { return !!(SESSION && SESSION.perms && SESSION.perms.canAllocate); }
+function canDealloc()  { return !!(SESSION && SESSION.perms && SESSION.perms.canDealloc); }
+function canDispose()  { return !!(SESSION && SESSION.perms && SESSION.perms.canDispose); }
+function canBorrow()   { return !!(SESSION && SESSION.perms && SESSION.perms.canBorrow); }
+function canTransfer() { return !!(SESSION && SESSION.perms && SESSION.perms.canTransfer); }
+function isViewOnly()  { return !!(SESSION && SESSION.perms && SESSION.perms.viewOnly); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  _getScopeDistricts
@@ -534,6 +539,7 @@ function doLogin(){
         role:                r.role,
         roleTier:            r.roleTier || 'fe',
         name:                r.name||r.username,
+        perms:               r.perms || {},
         division:            r.division||'',
         district:            r.district||'',
         userDivisions:       r.userDivisions||[],
@@ -610,6 +616,7 @@ function startApp(){
   loadData();
   loadDropdownData();
   loadLocationData();
+  _applyPermissions();
 }
 
 function logout(){
@@ -617,6 +624,70 @@ function logout(){
   document.getElementById('app').style.display='none';
   document.getElementById('authScreen').style.display='flex';
   document.getElementById('authPass').value='';
+}
+
+function _applyPermissions() {
+  if (!SESSION) return;
+
+  // ── Hide "Add Asset" buttons for users without canAdd ───────────────────
+  if (!canAdd()) {
+    document.querySelectorAll('button').forEach(function(btn) {
+      var oc = btn.getAttribute('onclick') || '';
+      if (oc.includes('openAddAssetModal')) btn.style.display = 'none';
+    });
+  }
+
+  // ── Hide standalone "New Borrow" button ─────────────────────────────────
+  if (!canBorrow()) {
+    document.querySelectorAll('button').forEach(function(btn) {
+      var oc = btn.getAttribute('onclick') || '';
+      if (oc.includes('openBorrowModal') && (btn.textContent.trim().includes('New Borrow') || btn.textContent.trim().includes('+ New')))
+        btn.style.display = 'none';
+    });
+  }
+
+  // ── Hide standalone "New Transfer" button ────────────────────────────────
+  if (!canTransfer()) {
+    document.querySelectorAll('button').forEach(function(btn) {
+      var oc = btn.getAttribute('onclick') || '';
+      if (oc.includes('openTransferModal') && btn.textContent.trim().includes('New Transfer'))
+        btn.style.display = 'none';
+    });
+  }
+
+  // ── Hide bulk delete controls for users without canDelete ────────────────
+  if (!canDelete()) {
+    ['btnBulkDelete','btnBulkDelSpare','btnBulkDelAllocated',
+     'btnBulkDelActiveBorrow','btnBulkDelDisposal'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    var cbAll = document.getElementById('cbAll');
+    if (cbAll) cbAll.closest('th').style.visibility = 'hidden';
+  }
+
+  // ── View-only banner ─────────────────────────────────────────────────────
+  if (isViewOnly()) {
+    var banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:56px;left:0;right:0;z-index:500;background:rgba(217,119,6,.12);border-bottom:1px solid rgba(217,119,6,.3);padding:6px 20px;font-size:.78rem;color:var(--yellow);font-weight:600;text-align:center;pointer-events:none';
+    banner.textContent = '👁 View-Only Mode — you can browse but cannot make changes';
+    document.body.insertBefore(banner, document.getElementById('app'));
+  }
+
+  // ── Role badge in topbar ─────────────────────────────────────────────────
+  var badge = document.getElementById('districtBadge');
+  if (!badge) return;
+  if (isAdmin()) {
+    badge.textContent = '🔑 Admin';
+    badge.style.cssText += ';background:rgba(232,81,24,.12);border-color:rgba(232,81,24,.3);color:var(--accent)';
+    badge.style.display = 'block';
+  } else if (isSenior()) {
+    var divLabel = (SESSION.userDivisions && SESSION.userDivisions.length > 0) ? SESSION.userDivisions.join(', ') : (SESSION.division || '');
+    if (divLabel) { badge.textContent = '🏢 ' + divLabel; badge.style.display = 'block'; }
+  } else {
+    var distList = (SESSION.userDistricts && SESSION.userDistricts.length > 0) ? SESSION.userDistricts : (SESSION.district ? [SESSION.district] : []);
+    if (distList.length) { badge.textContent = '📍 ' + distList.join(', '); badge.style.display = 'block'; }
+  }
 }
 
 // ═══════════════════════════════════════

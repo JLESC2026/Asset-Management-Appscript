@@ -62,38 +62,36 @@ function viewAsset(barcode) {
   const footer = document.getElementById('viewModalFooter');
   let actions = '';
   if (a.status === 'spare') {
-    actions = `
-      <button class="btn btn-allocate btn-sm" onclick="closeModal('viewModal');openAllocateModal('${esc(a.Barcode)}')">Allocate</button>
-      <button class="btn btn-borrow btn-sm"   onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>
-      <button class="btn btn-danger btn-sm"   onclick="closeModal('viewModal');openDisposalModal('${esc(a.Barcode)}')">Dispose</button>`;
+    const btns = [];
+    if (canAllocate()) btns.push(`<button class="btn btn-allocate btn-sm" onclick="closeModal('viewModal');openAllocateModal('${esc(a.Barcode)}')">Allocate</button>`);
+    if (canBorrow())   btns.push(`<button class="btn btn-borrow btn-sm"   onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>`);
+    if (canDispose())  btns.push(`<button class="btn btn-danger btn-sm"   onclick="closeModal('viewModal');openDisposalModal('${esc(a.Barcode)}')">Dispose</button>`);
+    actions = btns.join('');
   } else if (a.status === 'allocated' || a.status === 'transfer') {
-    actions = `
-      <button class="btn btn-transfer btn-sm" onclick="closeModal('viewModal');openTransferModal('${esc(a.Barcode)}')">Transfer</button>
-      <button class="btn btn-borrow btn-sm"   onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>
-      <button class="btn btn-spare btn-sm"    onclick="closeModal('viewModal');openDeallocModal('${esc(a.Barcode)}','${esc(a.Staff||'')}')">↩ Spare</button>
-      <button class="btn btn-danger btn-sm"   onclick="closeModal('viewModal');openDisposalModal('${esc(a.Barcode)}')">Dispose</button>`;
+    const btns = [];
+    if (canTransfer()) btns.push(`<button class="btn btn-transfer btn-sm" onclick="closeModal('viewModal');openTransferModal('${esc(a.Barcode)}')">Transfer</button>`);
+    if (canBorrow())   btns.push(`<button class="btn btn-borrow btn-sm"   onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button>`);
+    if (canDealloc())  btns.push(`<button class="btn btn-spare btn-sm"    onclick="closeModal('viewModal');openDeallocModal('${esc(a.Barcode)}','${esc(a.Staff||'')}')">↩ Spare</button>`);
+    if (canDispose())  btns.push(`<button class="btn btn-danger btn-sm"   onclick="closeModal('viewModal');openDisposalModal('${esc(a.Barcode)}')">Dispose</button>`);
+    actions = btns.join('');
   } else if (a.status === 'borrowed') {
-    actions = `<button class="btn btn-success btn-sm" onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}','${esc(a.BorName||'')}')">Return Asset</button>`;
+    if (canBorrow()) actions = `<button class="btn btn-success btn-sm" onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}','${esc(a.BorName||'')}')">Return Asset</button>`;
   } else if (a.status === 'borrow-item') {
     const isBorrowed = (a.Lifecycle || '').toLowerCase() === 'borrow';
-    actions = isBorrowed
-      ? `<button class="btn btn-success btn-sm" 
-        onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}',
-        '${esc(a.BorName||'')}')">Return Asset</button>`
-      : `<button class="btn btn-borrow btn-sm" 
-        onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">
-        Borrow</button>
-       <span style="color:var(--text3);font-size:.76rem;align-self:center">
-        Pool asset — cannot allocate</span>`;
+    if (isBorrowed) {
+      if (canBorrow()) actions = `<button class="btn btn-success btn-sm" onclick="closeModal('viewModal');openReturnModal('${esc(a.Barcode)}','${esc(a.BorName||'')}')">Return Asset</button>`;
+    } else {
+      if (canBorrow()) actions = `<button class="btn btn-borrow btn-sm" onclick="closeModal('viewModal');openBorrowModal('${esc(a.Barcode)}')">Borrow</button><span style="color:var(--text3);font-size:.76rem;align-self:center">Pool asset — cannot allocate</span>`;
+    }
   }
+
+  const editBtn = canEdit()
+    ? `<button class="btn btn-secondary btn-sm" onclick="openEditAssetModal('${esc(a.Barcode)}')" style="color:var(--blue);border-color:rgba(59,130,246,.3)">✏ Edit Details</button>`
+    : '';
 
   footer.innerHTML = `
     <button class="btn btn-secondary btn-sm" onclick="showBarcode('${esc(a.Barcode)}')">🔖 Barcode</button>
-    <button class="btn btn-secondary btn-sm" 
-      onclick="openEditAssetModal('${esc(a.Barcode)}')" 
-      style="color:var(--blue);border-color:rgba(59,130,246,.3)">
-      ✏ Edit Details
-    </button>
+    ${editBtn}
     <div style="flex:1"></div>
     ${actions}
     <button class="btn btn-secondary" onclick="closeModal('viewModal')">Close</button>`;

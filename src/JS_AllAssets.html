@@ -65,6 +65,7 @@ function checkSel(){
 }
 
 function bulkDelete(){
+  if (!canDelete()) { toast('You do not have permission to delete assets.', 'warn'); return; }
   var bcs=[...document.querySelectorAll('.row-cb:checked')].map(function(c){return c.value;});
   if(!bcs.length) return;
   if(!confirm('Delete '+bcs.length+' asset(s)? This cannot be undone.')) return;
@@ -95,6 +96,7 @@ function checkSelTable(key){
 }
 
 function bulkDeleteTable(key, callerEmpId){
+  if (!canDelete()) { toast('You do not have permission to delete assets.', 'warn'); return; }
   callerEmpId = callerEmpId || SESSION.username;
   var c=_TBL_SEL[key]; if(!c) return;
   var bcs=[...document.querySelectorAll('.'+c.cls+':checked')].map(function(x){return x.value;});
