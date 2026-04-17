@@ -1,83 +1,128 @@
 // ═══════════════════════════════════════════════════════════
-//  ASSET MANAGEMENT SYSTEM — Code.gs  (v5.6 — HO Department Support)
+//  ASSET MANAGEMENT SYSTEM — Code.gs  (v6.0 — Restructured)
 //
-//  Changes vs v5.5:
-//    DEPT-COL — Added DEPARTMENT (col 6) and BASE_OFFICE (col 7) to
-//               the column map. These were present in the sheet but
-//               not mapped, causing HO assets to be invisible in the
-//               Staff Assets and Equipment Record trees (they showed
-//               under "(No Division)/(No District)").
-//    DEPT-COL — getAllAssets() now returns Department and BaseOffice
-//               fields so the frontend can use them for HO tree views.
-//    DEPT-COL — processAsset() now writes Department and BaseOffice
-//               when supplied.
-//    DEPT-COL — allocateAsset() and deallocateAsset() preserve Dept/BO.
-//
+//  Key changes vs v5.x:
+//    • Auth reads from Users sheet (not Masterlist)
+//    • Scope reads from Org Structure sheet (not Eng. List V2)
+//    • Asset Entry is now the writable Copy (31 clean columns)
+//    • NO inline borrow/transfer fields in Asset Entry
+//    • Borrow details merged from Borrows sheet in getInitialData()
+//    • Disposal PRESERVES location data (user requirement)
+//    • Deallocate PRESERVES Division/District/Area/Branch
+//    • Event sheets (Borrows/Disposals/Transfers/Log): data at row 4
+//    • Spare sheet now writes pool entry log
 // ═══════════════════════════════════════════════════════════
 
 const SHEET_ID    = '18tuYQKH2OLLu1NqPJiA28n8n7GNN6XR_SSZXUO4XEe8';
-const SH_MASTER   = 'Masterlist';
-const SH_ENTRY    = 'Asset Entry';
-const SH_XFER     = 'Transfers';
-const SH_BORROW   = 'Borrows';
-const SH_DISPOSE  = 'Disposals';
-const SH_LOG      = 'ActivityLog';
+const SH_ENTRY    = 'Asset Entry';     // The writable master registry
+const SH_USERS    = 'Users';           // Auth source (row 1=headers, data row 2)
+const SH_ORG      = 'Org Structure';   // FE/SFE scope (row 1=headers, data row 2)
+const SH_MASTER   = 'Masterlist';      // Employee autofill only
+const SH_XFER     = 'Transfers';       // Event log (data row 4)
+const SH_BORROW   = 'Borrows';         // Event log (data row 4)
+const SH_DISPOSE  = 'Disposals';       // Event log (data row 4)
+const SH_LOG      = 'ActivityLog';     // Event log (data row 4)
 const SH_DROPDOWN = 'Drop down';
-const SH_ALLOC    = 'Allocated';
+const SH_ALLOC    = 'Allocated';       // Allocation log (data row 2)
+const SH_SPARE    = 'Spare';           // Spare pool log (data row 4)
 
-const AE_DATA_START = 4;
+// Asset Entry layout: Row 1=title, Row 2=blank, Row 3=headers, Data row 4
+const AE_DATA_START  = 4;
+// Event sheets layout: Rows 1-2=branding, Row 3=headers, Data row 4
+const EVT_DATA_START = 4;
+
+// ─── 31-COLUMN MAP (Asset Entry / Copy of Asset Entry) ──────────────────────
 const C = {
-  ENTRY_EMP_ID:1,  ENTRY_NAME:2,
-  EMP_ID:3,        STAFF:4,          DESIGNATION:5,
-  DEPARTMENT:6,    BASE_OFFICE:7,    // ← Added
-  DIVISION:8,      DISTRICT:9,       AREA:10,        BRANCH:11,
-  ASSIGNMENT:12,
-  EFF_DATE:13,
-  BARCODE:14,      TYPE:15,          BRAND:16,       SERIAL:17,    SPECS:18,
-  CONDITION:19,
-  ASSET_LOCATION:20,  // Column T — Physical Asset Location (ABSOLUTE TRUTH)
-  LIFECYCLE:21,    STATUS_LABEL:22,  ASSET_STATUS:23,
-  PURCH_DATE:24,   WARRANTY_TERM:25, WARRANTY_VAL:26, REMARKS:27,
-  // Col 28 = Notes (not mapped)
-  XFER_TYPE:29,    FR_STAFF:30,      FR_EMPID:31,    FR_DESIG:32,  FR_DIV:33,
-  FR_DIST:34,      FR_AREA:35,       FR_BRANCH:36,   FR_REMARKS:37,
-  TO_STAFF:38,     TO_EMPID:39,      TO_DESIG:40,    TO_DIV:41,    TO_DIST:42,
-  TO_AREA:43,      TO_BRANCH:44,     TO_REMARKS:45,  XFER_DATE:46,
-  BOR_NAME:47,     BOR_EMPID:48,     BOR_DESIG:49,   BOR_DIV:50,   BOR_BRANCH:51,
-  BOR_DATE:52,     EXP_RETURN:53,    ACT_RETURN:54,  BOR_REMARKS:55,
-  CREATED_AT:56,   LAST_UPDATED:57,  SUPPLIER:58,    LOCATION:59,  ENROLLED_BY:60,
-  BOR_DIST:61
+  ENTRY_EMP_ID:  1,   // A - Inputter ID
+  ENTRY_NAME:    2,   // B - Inputter Name
+  EMP_ID:        3,   // C - Accountable Employee ID
+  STAFF:         4,   // D - Accountable Staff
+  DESIGNATION:   5,   // E - Designation
+  DEPARTMENT:    6,   // F - Department
+  BASE_OFFICE:   7,   // G - Base Office
+  DIVISION:      8,   // H - Division
+  DISTRICT:      9,   // I - District
+  AREA:          10,  // J - Area
+  BRANCH:        11,  // K - Branch
+  ASSIGNMENT:    12,  // L - Assignment (Field Office / Central Office)
+  EFF_DATE:      13,  // M - Effectivity Date
+  BARCODE:       14,  // N - Barcode ← PRIMARY KEY
+  TYPE:          15,  // O - Category
+  BRAND:         16,  // P - Brand
+  SERIAL:        17,  // Q - Serial
+  SPECS:         18,  // R - Specification
+  SUPPLIER:      19,  // S - Supplier
+  CONDITION:     20,  // T - Condition
+  ASSET_LOCATION:21,  // U - Asset Location (col T in doc = physical location)
+  LIFECYCLE:     22,  // V - Lifecycle Status
+  STATUS_LABEL:  23,  // W - Status Label
+  ASSET_STATUS:  24,  // X - Assignment Status
+  PURCH_DATE:    25,  // Y - Date of Purchase
+  WARRANTY_TERM: 26,  // Z - Warranty Term
+  WARRANTY_VAL:  27,  // AA - Warranty Validity
+  REMARKS:       28,  // AB - Remarks
+  NOTES:         29,  // AC - Notes
+  CREATED_AT:    30,  // AD - Timestamp (created)
+  LAST_UPDATED:  31,  // AE - Last Updated
 };
-const TOTAL_COLS = Math.max(...Object.values(C)); // = 61
 
-// AE_HEADERS: 61 entries matching the actual sheet column layout.
+const TOTAL_COLS = 31;
+
 const AE_HEADERS = [
-  'Entry Employee ID','Entered By',
+  'Inputter ID','Inputter Name',
   'Accountable Employee ID','Accountable Staff','Designation',
   'Department','Base Office',
   'Division','District','Area','Branch',
-  'Assignment',
-  'Effectivity Date',
-  'Barcode','Category','Brand','Serial No.','Specifications',
-  'Condition',
-  'Asset Location',
+  'Assignment','Effectivity Date',
+  'Barcode','Category','Brand','Serial','Specification',
+  'Supplier','Condition','Asset Location',
   'Lifecycle Status','Status Label','Assignment Status',
   'Date of Purchase','Warranty Term','Warranty Validity','Remarks',
-  'Notes',
-  'Transfer Type','From Staff','From EmpID','From Designation','From Division',
-  'From District','From Area','From Branch','From Remarks',
-  'To Staff','To EmpID','To Designation','To Division','To District',
-  'To Area','To Branch','To Remarks','Transfer Date',
-  'Borrower Name','Borrower EmpID','Borrower Designation',
-  'Borrow Division','Borrow Branch','Borrow Date',
-  'Expected Return Date','Actual Return Date','Borrow Remarks',
-  'Created At','Last Updated','Supplier','Location','Enrolled By',
-  'Borrow District'   // ← col 61
+  'Notes','Timestamp','Last Updated'
 ];
 
+// ─── UTILITY ─────────────────────────────────────────────────────────────────
 function _sanitize(val, maxLen) {
   maxLen = maxLen || 500;
   return String(val || '').trim().substring(0, maxLen);
+}
+
+function _normDiv(raw) {
+  if (!raw) return '';
+  return String(raw).trim().replace(/^DIv/i, m => 'Div');
+}
+
+function _normDist(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  const m = s.match(/^district\s+0*(\d+)$/i);
+  if (m) return 'District ' + parseInt(m[1]);
+  return s;
+}
+
+function _numSort(a, b) {
+  const na = parseInt((a || '').replace(/\D+/g, ''), 10) || 0;
+  const nb = parseInt((b || '').replace(/\D+/g, ''), 10) || 0;
+  return na !== nb ? na - nb : a.localeCompare(b);
+}
+
+// ─── STATUS COMPUTATION ───────────────────────────────────────────────────────
+function _computeStatus(lifecycle, assetStatus, empId) {
+  const lc  = String(lifecycle    || '').trim().toLowerCase();
+  const as  = String(assetStatus  || '').trim().toLowerCase();
+  const hasEmp = empId && String(empId).trim()
+    && !['', 'n/a', 'none', '#n/a'].includes(String(empId).trim().toLowerCase());
+
+  if (as === 'borrowitem' || lc === 'borrowitem') return 'borrow-item';
+  if (lc === 'borrow')                            return 'borrowed';
+  if (lc === 'returned')                          return 'returned';
+  if (lc === 'dispose' || lc === 'disposal' || lc === 'disposed' || as === 'disposal')
+                                                  return 'disposal';
+  if (lc === 'transfer')                          return 'transfer';
+  if (lc === 'allocated' || as === 'assigned')    return 'allocated';
+  if (lc === 'spare')                             return 'spare';
+  // 'active' or empty — check whether an employee is assigned
+  return hasEmp ? 'allocated' : 'spare';
 }
 
 // ─── SHEET HELPERS ───────────────────────────────────────────────────────────
@@ -85,7 +130,7 @@ function _ss() { return SpreadsheetApp.openById(SHEET_ID); }
 
 function _getOrCreate(name, headers) {
   const ss = _ss();
-  let sh = ss.getSheetByName(name);
+  let sh   = ss.getSheetByName(name);
   if (!sh) {
     sh = ss.insertSheet(name);
     if (headers && headers.length) {
@@ -99,34 +144,70 @@ function _getOrCreate(name, headers) {
   return sh;
 }
 
-function _entrySheet()   { return _getOrCreate(SH_ENTRY,   AE_HEADERS); }
-function _xferSheet()    { return _getOrCreate(SH_XFER,    ['Barcode','Type','FromStaff','FromEmpID','FromDesig','FromDiv','FromDist','FromArea','FromBranch','FromRemarks','ToStaff','ToEmpID','ToDesig','ToDiv','ToDist','ToArea','ToBranch','ToRemarks','EffDate','Status','Timestamp']); }
-function _borrowSheet()  { return _getOrCreate(SH_BORROW,  ['Barcode','BorrowerName','EmpID','Designation','Division','District','Branch','BorrowDate','ExpectedReturn','ActualReturn','Status','Remarks','Timestamp']); }
-function _disposeSheet() { return _getOrCreate(SH_DISPOSE, ['Barcode','Reason','DisposedBy','DisposeDate','Remarks','Timestamp']); }
-function _logSheet()     { return _getOrCreate(SH_LOG,     ['Timestamp','Action','Barcode','Details','Performed By']); }
-function _allocLogSheet(){ return _getOrCreate(SH_ALLOC,   ['Barcode','Category','Brand','Serial No.','Employee ID','Accountable Staff','Designation','Department','Base Office','Division','District','Area','Branch','Effectivity Date','Condition','Remarks','Timestamp','Allocated By']); }
+function _entrySheet() {
+  return _getOrCreate(SH_ENTRY, AE_HEADERS);
+}
+function _xferSheet() {
+  return _getOrCreate(SH_XFER, [
+    'Barcode','TransferType','FromStaff','FromEmpID','FromDesig',
+    'FromDiv','FromDist','FromArea','FromBranch','FromRemarks',
+    'ToStaff','ToEmpID','ToDesig','ToDiv','ToDist',
+    'ToArea','ToBranch','ToRemarks','EffDate','Status','Timestamp'
+  ]);
+}
+function _borrowSheet() {
+  return _getOrCreate(SH_BORROW, [
+    'Barcode','BorrowerName','EmpID','Designation',
+    'Division','District','Branch',
+    'BorrowDate','ExpectedReturn','ActualReturn',
+    'Status','Remarks','Timestamp'
+  ]);
+}
+function _disposeSheet() {
+  return _getOrCreate(SH_DISPOSE, [
+    'Barcode','Reason','DisposedBy','DisposeDate','Remarks','Timestamp'
+  ]);
+}
+function _logSheet() {
+  return _getOrCreate(SH_LOG, [
+    'Timestamp','Action','Barcode','Details','Performed By'
+  ]);
+}
+function _allocLogSheet() {
+  return _getOrCreate(SH_ALLOC, [
+    'Barcode','Category','Brand','Serial No.','Employee ID',
+    'Accountable Staff','Designation','Department','Base Office',
+    'Division','District','Area','Branch','Effectivity Date',
+    'Condition','Remarks','Timestamp','Allocated By'
+  ]);
+}
+function _spareSheet() {
+  return _getOrCreate(SH_SPARE, [
+    'Barcode','Category','Brand','Serial No.','Condition',
+    'Purchase Date','Warranty Validity','Supplier',
+    'Division','District','Area','Branch','Asset Location',
+    'Enrolled By','Timestamp','Status'
+  ]);
+}
 
-// ─── ROW FINDERS / SETTERS ───────────────────────────────────────────────────
+// ─── ROW HELPERS ─────────────────────────────────────────────────────────────
 function _findRow(sheet, barcode) {
   if (!barcode) return -1;
   try {
     const finder = sheet.createTextFinder(String(barcode).trim())
-                        .matchEntireCell(true)
-                        .matchCase(false);
+      .matchEntireCell(true).matchCase(false);
     const range = finder.findNext();
     if (!range) return -1;
     const row = range.getRow();
-    // Verify it's in the data range and in the barcode column
     if (row < AE_DATA_START || range.getColumn() !== C.BARCODE) return -1;
     return row;
   } catch (e) {
-    // Fallback to linear scan if TextFinder fails
     const last = sheet.getLastRow();
     if (last < AE_DATA_START) return -1;
-    const vals = sheet.getRange(AE_DATA_START, C.BARCODE, 
-                   last - AE_DATA_START + 1, 1).getValues();
+    const vals = sheet.getRange(AE_DATA_START, C.BARCODE,
+      last - AE_DATA_START + 1, 1).getValues();
     for (let i = 0; i < vals.length; i++) {
-      if (String(vals[i][0]).trim() === String(barcode).trim()) 
+      if (String(vals[i][0]).trim() === String(barcode).trim())
         return i + AE_DATA_START;
     }
     return -1;
@@ -134,61 +215,11 @@ function _findRow(sheet, barcode) {
 }
 
 function _setRow(sheet, rowIdx, updates) {
-  // Read the entire row once
-  const totalCols = TOTAL_COLS;
-  const range = sheet.getRange(rowIdx, 1, 1, totalCols);
-  const rowValues = range.getValues()[0]; // single read
-
-  // Apply updates in memory
-  updates.forEach(u => {
-    const colIdx = u[0] - 1; // Convert 1-based to 0-based
-    rowValues[colIdx] = (u[1] != null ? u[1] : '');
-  });
-
-  // Apply last-updated timestamp
-  rowValues[C.LAST_UPDATED - 1] = new Date().toLocaleString('en-PH');
-
-  // Write entire row back in ONE API call
-  range.setValues([rowValues]);
-}
-
-// ─── LIFECYCLE HELPERS ───────────────────────────────────────────────────────
-function _computeStatus(lc, slb, actReturn, empId, borName, assetStatus) {
-  const l  = String(lc  || '').trim().toLowerCase();
-  const s  = String(slb || '').trim().toLowerCase();
-  const as = String(assetStatus || '').trim().toLowerCase();
-  const r  = String(actReturn || '').trim();
-  const hasEmp = empId  && String(empId).trim()  && String(empId).trim()  !== 'n/a';
-  const hasBor = borName && String(borName).trim();
-
-  if (l === 'borrowitem' || as === 'borrowitem')      return 'borrow-item';
-  if (l === 'borrow')                                  return r ? 'returned' : 'borrowed';
-  if (l === 'returned')                                return 'returned';
-  if (l === 'dispose'  || l === 'disposal'  ||
-      as === 'disposal' || as === 'dispose' || s === 'disposed')           return 'disposal';
-  if (l === 'transfer')                                return 'transfer';
-  if (l === 'allocated' || s === 'assigned')           return 'allocated';
-
-  if (!l || l === 'active') {
-    if (hasBor) return r ? 'returned' : 'borrowed';
-    if (hasEmp) return 'allocated';
-  }
-  return 'spare';
-}
-
-function _normDiv(raw) {
-  if (!raw) return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  return s.replace(/^DIv/i, m => 'Div');
-}
-function _normDist(raw) {
-  if (!raw) return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  const m = s.match(/^district\s+0*(\d+)$/i);
-  if (m) return 'District ' + parseInt(m[1]);
-  return s;
+  const range  = sheet.getRange(rowIdx, 1, 1, TOTAL_COLS);
+  const rowVals = range.getValues()[0];
+  updates.forEach(u => { rowVals[u[0] - 1] = (u[1] != null ? u[1] : ''); });
+  rowVals[C.LAST_UPDATED - 1] = new Date().toLocaleString('en-PH');
+  range.setValues([rowVals]);
 }
 
 // ─── WEB APP ─────────────────────────────────────────────────────────────────
@@ -203,230 +234,277 @@ function doGet() {
 function include(f) { return HtmlService.createHtmlOutputFromFile(f).getContent(); }
 function getScriptUrl() { return ScriptApp.getService().getUrl(); }
 
-// ─── PASSWORD HASHING ─────────────────────────────────────────────────────────
+// ─── PASSWORD ─────────────────────────────────────────────────────────────────
 function _hashPwd(pwd) {
   const bytes = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.SHA_256,
-    String(pwd)
-  );
+    Utilities.DigestAlgorithm.SHA_256, String(pwd));
   return bytes.map(b => (b < 0 ? b + 256 : b).toString(16).padStart(2, '0')).join('');
 }
-
-function _isHashed(str) {
-  return /^[0-9a-f]{64}$/.test(String(str));
-}
+function _isHashed(str) { return /^[0-9a-f]{64}$/.test(String(str)); }
 
 // ─── ROLE CLASSIFICATION ──────────────────────────────────────────────────────
-function _classifyRole(roleStr) {
-  const r = String(roleStr || '').trim().toLowerCase();
-  if (r.includes('senior')) return 'senior';
+// Users sheet roles: User | Supervisor | Super User | Admin | Super Admin
+function _mapRoleTier(role) {
+  const r = String(role || '').trim().toLowerCase();
+  if (r === 'super admin' || r === 'superadmin' || r === 'admin') return 'ho';
+  if (r === 'super user'  || r === 'superuser')                    return 'ho';
+  if (r === 'supervisor')                                           return 'senior';
   return 'fe';
 }
 
-// ─── SUPERVISOR DISTRICT LOOKUP ────────────────────────────────
-function getDistrictsBySupervisor(empId) {
+// ─── MASTERLIST LOOKUP (autofill only) ───────────────────────────────────────
+// Masterlist: row 1=headers, data row 2
+// Col 0=EmpID, Col 2=Name, Col 4=Division, Col 5=District,
+// Col 6=Area, Col 7=BaseOffice, Col 11=Position
+function _getMasterlistEntry(empId) {
   try {
-    const ss = _ss();
-    const engSh = ss.getSheetByName('Eng. List') || ss.getSheetByName('Eng List');
-    if (!engSh || engSh.getLastRow() < 2) return [];
+    const sh   = _ss().getSheetByName(SH_MASTER);
+    if (!sh) return {};
+    const last = sh.getLastRow();
+    if (last < 2) return {};
+    const id   = String(empId).trim().toLowerCase();
+    const ids  = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || '').trim().toLowerCase() !== id) continue;
+      const row = sh.getRange(i + 2, 1, 1, 15).getValues()[0];
+      return {
+        name:       String(row[2]  || '').trim(),
+        division:   _normDiv(String(row[4]  || '').trim()),
+        district:   _normDist(String(row[5] || '').trim()),
+        area:       String(row[6]  || '').trim(),
+        baseOffice: String(row[7]  || '').trim(),
+        position:   String(row[11] || '').trim()
+      };
+    }
+  } catch(e) {}
+  return {};
+}
 
-    const lastRow = engSh.getLastRow();
-    const data = engSh.getRange(2, 1, lastRow - 1, 10).getValues();
-    const distSet = new Set();
-    const id = String(empId).trim().toLowerCase();
+// ─── ORG STRUCTURE SCOPE ──────────────────────────────────────────────────────
+// Org Structure: row 1=headers, data row 2
+// Col D(3)=FE_ID | Col E(4)=FE_Name | Col F(5)=FE_Desig
+// Col G(6)=Sup_ID | Col H(7)=Sup_Name | Col I(8)=Sup_Desig
+// Col K(10)=Division | Col L(11)=District
+function _parseOrgStructure(empId, roleTier) {
+  const DEFAULT = {
+    userDivisions: [], userDistricts: [],
+    seniorDistrictScope: [], divDistrictMap: {}
+  };
+  try {
+    const sh   = _ss().getSheetByName(SH_ORG);
+    if (!sh || sh.getLastRow() < 2) return DEFAULT;
+    const last = sh.getLastRow();
+    const data = sh.getRange(2, 1, last - 1, 12).getValues();
+    const id   = String(empId || '').trim().toLowerCase();
 
-    data.forEach(r => {
-      const supId = String(r[3] || '').trim().toLowerCase();
-      if (supId === id) {
-        const dist = String(r[8] || '').trim();
+    // HO (admin/superuser): scope = everything in Org Structure
+    if (roleTier === 'ho') {
+      const divSet = new Set(), distSet = new Set(), divMap = {};
+      data.forEach(r => {
+        const div  = _normDiv(String(r[10] || '').trim());
+        const dist = _normDist(String(r[11] || '').trim());
+        if (div)  divSet.add(div);
         if (dist) distSet.add(dist);
+        if (div && dist) {
+          if (!divMap[div]) divMap[div] = [];
+          if (!divMap[div].includes(dist)) divMap[div].push(dist);
+        }
+      });
+      const allDists = [...distSet].sort(_numSort);
+      return {
+        userDivisions:       [...divSet].sort(),
+        userDistricts:       allDists,
+        seniorDistrictScope: allDists,
+        divDistrictMap:      divMap
+      };
+    }
+
+    // Supervisor (Senior FE): rows where Sup_ID (col G, index 6) matches
+    if (roleTier === 'senior') {
+      const divSet = new Set(), distSet = new Set(), divMap = {};
+      data.forEach(r => {
+        const supId = String(r[6] || '').trim().toLowerCase();
+        if (!id || supId !== id) return;
+        const div  = _normDiv(String(r[10] || '').trim());
+        const dist = _normDist(String(r[11] || '').trim());
+        if (div)  divSet.add(div);
+        if (dist) distSet.add(dist);
+        if (div && dist) {
+          if (!divMap[div]) divMap[div] = [];
+          if (!divMap[div].includes(dist)) divMap[div].push(dist);
+        }
+      });
+      const dists = [...distSet].sort(_numSort);
+      return {
+        userDivisions:       [...divSet].sort(),
+        userDistricts:       dists,
+        seniorDistrictScope: dists,
+        divDistrictMap:      divMap
+      };
+    }
+
+    // FE (User): rows where FE_ID (col D, index 3) matches
+    const divSet = new Set(), distSet = new Set(), divMap = {};
+    data.forEach(r => {
+      const feId = String(r[3] || '').trim().toLowerCase();
+      if (!id || feId !== id) return;
+      const div  = _normDiv(String(r[10] || '').trim());
+      const dist = _normDist(String(r[11] || '').trim());
+      if (div)  divSet.add(div);
+      if (dist) distSet.add(dist);
+      if (div && dist) {
+        if (!divMap[div]) divMap[div] = [];
+        if (!divMap[div].includes(dist)) divMap[div].push(dist);
       }
     });
-
-    const numSort = (a, b) => {
-      const na = parseInt(a.replace(/\D+/g, '')) || 0;
-      const nb = parseInt(b.replace(/\D+/g, '')) || 0;
-      return na !== nb ? na - nb : a.localeCompare(b);
+    return {
+      userDivisions:       [...divSet].sort(),
+      userDistricts:       [...distSet].sort(_numSort),
+      seniorDistrictScope: [],
+      divDistrictMap:      divMap
     };
-    return [...distSet].sort(numSort);
-  } catch (e) {
-    return [];
+  } catch(e) {
+    Logger.log('_parseOrgStructure error: ' + e.message);
+    return DEFAULT;
+  }
+}
+
+function _buildFullDivDistrictMap() {
+  try {
+    const sh   = _ss().getSheetByName(SH_ORG);
+    if (!sh || sh.getLastRow() < 2) return { divDistrictMap: {}, userDivisions: [], userDistricts: [] };
+    const last = sh.getLastRow();
+    const data = sh.getRange(2, 1, last - 1, 12).getValues();
+    const divMap = {};
+    data.forEach(r => {
+      const div  = _normDiv(String(r[10] || '').trim());
+      const dist = _normDist(String(r[11] || '').trim());
+      if (!div || !dist) return;
+      if (!divMap[div]) divMap[div] = [];
+      if (!divMap[div].includes(dist)) divMap[div].push(dist);
+    });
+    const allDivs  = Object.keys(divMap).sort();
+    const allDists = [...new Set(Object.values(divMap).flat())].sort(_numSort);
+    return { divDistrictMap: divMap, userDivisions: allDivs, userDistricts: allDists };
+  } catch(e) {
+    return { divDistrictMap: {}, userDivisions: [], userDistricts: [] };
   }
 }
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
+// Users sheet: row 1=headers, data row 2
+// ColA=Role | ColB=Password | ColC=EmpID | ColD=Name | ColE=Designation
+// ColF=SupID | ColG=SupName | ColH=SupDesig | ColI=Remarks
 function loginUser(empId, password) {
   try {
-    const sh = _ss().getSheetByName(SH_MASTER);
-    if (!sh) return { ok: false, error: 'Masterlist not found.' };
+    const sh = _ss().getSheetByName(SH_USERS);
+    if (!sh) return { ok: false, error: 'Users sheet not found.' };
     const last = sh.getLastRow();
-    if (last < 5) return { ok: false, error: 'No users registered.' };
-    const data = sh.getRange(5, 1, last - 4, Math.min(sh.getLastColumn(), 15)).getValues();
+    if (last < 2) return { ok: false, error: 'No users registered.' };
+    const data = sh.getRange(2, 1, last - 1, 9).getValues();
 
     for (let ri = 0; ri < data.length; ri++) {
-      const row  = data[ri];
-      const id   = String(row[0] || '').trim();
-      const pwd  = String(row[1] || '').trim();
-      const name = String(row[2] || '').trim();
-      const role = String(row[11] || 'User').trim();
-      if (id.toLowerCase() !== String(empId).trim().toLowerCase()) continue;
+      const row   = data[ri];
+      const rowId = String(row[2] || '').trim(); // Col C = Employee ID
+      if (rowId.toLowerCase() !== String(empId).trim().toLowerCase()) continue;
+
+      const role    = String(row[0] || 'User').trim(); // Col A
+      const pwd     = String(row[1] || '').trim();     // Col B
 
       const inputHash = _hashPwd(password);
       if (_isHashed(pwd)) {
         if (inputHash !== pwd) return { ok: false, error: 'Incorrect password.' };
       } else {
         if (String(password) !== pwd) return { ok: false, error: 'Incorrect password.' };
-        sh.getRange(ri + 5, 2).setValue(inputHash);
+        sh.getRange(ri + 2, 2).setValue(inputHash);
       }
 
-      const firstLogin = (pwd === '1234' || pwd === _hashPwd('1234'));
+      const firstLogin  = (pwd === '1234' || pwd === _hashPwd('1234'));
+      const roleTier    = _mapRoleTier(role);
+      const isHO        = roleTier === 'ho';
 
-      const mlDivision   = String(row[4] || '').trim();
-      const mlDistrict   = String(row[5] || '').trim();
-      const mlBaseOffice = String(row[7] || '').trim();
-      const isHeadOffice = mlBaseOffice === 'Head Office';
-
-      const roleTier = _classifyRole(role);
-      const locData  = getLocationData(id);
-
-      const division = locData.userDivisions.length > 0
-        ? locData.userDivisions[0]
-        : mlDivision;
-      const district = locData.userDistricts.length > 0
-        ? locData.userDistricts[0]
-        : mlDistrict;
-
-      let seniorDistrictScope = [];
-      if (isHeadOffice || roleTier === 'senior') {
-        const isHO = isHeadOffice ||
-          division === 'Head Office' ||
-          (locData.userDivisions.length > 0 && locData.userDivisions[0] === 'Head Office');
-
-        if (isHO) {
-          // HO users: scope is their department list
-          const allDepts = locData.headOfficeDepts || getHeadOfficeDepts();
-          seniorDistrictScope = allDepts.length > 0
-            ? allDepts
-            : (locData.userDistricts.length > 0
-                ? locData.userDistricts
-                : (mlDistrict ? [mlDistrict] : []));
-        } else {
-          // -- V2 DATA FIRST: use the districts built directly from Eng. List V2 --
-          if (locData.seniorDistrictScope && locData.seniorDistrictScope.length > 0) {
-            seniorDistrictScope = locData.seniorDistrictScope;
-          } else {
-            // Fallback 1: derive from divDistrictMap using the senior's divisions
-            const userDivs = locData.userDivisions.length > 0
-              ? locData.userDivisions
-              : (mlDivision ? [mlDivision] : []);
-            const ddMap = locData.divDistrictMap || {};
-            userDivs.forEach(div => {
-              (ddMap[div] || []).forEach(d => {
-                if (!seniorDistrictScope.includes(d)) seniorDistrictScope.push(d);
-              });
-            });
-            // Fallback 2: use userDistricts directly
-            if (seniorDistrictScope.length === 0) {
-              seniorDistrictScope = locData.userDistricts.length > 0
-                ? locData.userDistricts
-                : (mlDistrict ? [mlDistrict] : []);
-            }
-          }
-        }
-      }
+      const mlData    = _getMasterlistEntry(rowId);
+      const scopeData = _parseOrgStructure(rowId, roleTier);
 
       return {
-        ok: true, username: id, role,
-        roleTier: isHeadOffice ? 'ho' : roleTier,
-        isHeadOffice,
-        name, firstLogin,
-        division: isHeadOffice ? 'Head Office' : division,
-        district,
-        userDivisions:  locData.userDivisions,
-        userDistricts:  locData.userDistricts.length > 0
-                          ? locData.userDistricts
-                          : (mlDistrict ? [mlDistrict] : []),
-        seniorDistrictScope,
-        headOfficeDepts: locData.headOfficeDepts || [],
-        divDistrictMap: locData.divDistrictMap || {},
-        area:   String(row[6] || '').trim(),
-        branch: mlBaseOffice
+        ok:                  true,
+        username:            rowId,
+        role,
+        roleTier,
+        isHeadOffice:        isHO,
+        name:                mlData.name || String(row[3] || rowId),
+        firstLogin,
+        division:            scopeData.userDivisions[0]  || mlData.division || '',
+        district:            scopeData.userDistricts[0]  || mlData.district || '',
+        userDivisions:       scopeData.userDivisions,
+        userDistricts:       scopeData.userDistricts.length > 0
+                               ? scopeData.userDistricts
+                               : (mlData.district ? [mlData.district] : []),
+        seniorDistrictScope: scopeData.seniorDistrictScope,
+        divDistrictMap:      scopeData.divDistrictMap,
+        headOfficeDepts:     [],
+        area:                mlData.area       || '',
+        branch:              mlData.baseOffice || '',
       };
     }
     return { ok: false, error: 'Employee ID not found.' };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 function changePassword(empId, newPwd) {
   try {
     if (!newPwd || newPwd.length < 4) return { ok: false, error: 'Minimum 4 characters.' };
-    const sh = _ss().getSheetByName(SH_MASTER);
-    if (!sh) return { ok: false, error: 'Masterlist not found.' };
+    const sh   = _ss().getSheetByName(SH_USERS);
+    if (!sh) return { ok: false, error: 'Users sheet not found.' };
     const last = sh.getLastRow();
-    const ids = sh.getRange(5, 1, last - 4, 1).getValues();
+    if (last < 2) return { ok: false, error: 'No users found.' };
+    const ids = sh.getRange(2, 1, last - 1, 3).getValues();
     for (let i = 0; i < ids.length; i++) {
-      if (String(ids[i][0] || '').trim().toLowerCase() === String(empId).trim().toLowerCase()) {
-        sh.getRange(i + 5, 2).setValue(_hashPwd(newPwd));
+      if (String(ids[i][2] || '').trim().toLowerCase() === String(empId).trim().toLowerCase()) {
+        sh.getRange(i + 2, 2).setValue(_hashPwd(newPwd));
         return { ok: true };
       }
     }
     return { ok: false, error: 'Employee ID not found.' };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch(e) { return { ok: false, error: e.message }; }
 }
 
 // ─── BARCODE GENERATION ───────────────────────────────────────────────────────
 function generateNextBarcode(type) {
   const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(8000);
-  } catch(e) {
-    return 'Error: Could not generate barcode, system busy. Try again.';
-  }
-
+  try { lock.waitLock(8000); }
+  catch(e) { return 'Error: System busy — try again.'; }
   try {
     const PFX = {
-      'Laptop': 'LTP', 'Laptop Adaptor': 'LAD', 'CPU': 'CPU',
-      'Monitor': 'MTR', 'Printer': 'PTR', 'Scanner': 'SCN',
-      'Scansnap': 'SCN', 'Keyboard': 'KBD', 'Mouse': 'MSE',
-      'UPS': 'UPS', 'Camera': 'CAM', 'Speaker': 'SPR',
-      'External Drive': 'EXD'
+      'Laptop':'LTP','Laptop Adaptor':'LAD','CPU':'CPU',
+      'Monitor':'MTR','Printer':'PTR','Scanner':'SCN',
+      'Scansnap':'SCN','Keyboard':'KBD','Mouse':'MSE',
+      'UPS':'UPS','Camera':'CAM','Speaker':'SPR','External Drive':'EXD'
     };
-    const pre  = PFX[type] || 'AST';
-    const yr   = new Date().getFullYear();
-    const sh   = _entrySheet();
-    const last = sh.getLastRow();
-    let max = 0;
+    const pre     = PFX[type] || 'AST';
+    const yr      = new Date().getFullYear();
+    const sh      = _entrySheet();
+    const last    = sh.getLastRow();
+    let   max     = 0;
 
     if (last >= AE_DATA_START) {
       const barcodes = sh.getRange(
-        AE_DATA_START, C.BARCODE,
-        last - AE_DATA_START + 1, 1
-      ).getValues();
-
-      // FIX: filter strictly by prefix AND year before extracting sequence
-      const pattern = new RegExp('^' + pre + '-' + yr + '-(\\d+)$');
+        AE_DATA_START, C.BARCODE, last - AE_DATA_START + 1, 1).getValues();
+      const pattern  = new RegExp('^' + pre + '-' + yr + '-(\\d+)$');
       barcodes.forEach(r => {
         const bc = String(r[0] || '').trim();
-        const match = bc.match(pattern);
-        if (match) {
-          const n = parseInt(match[1], 10);
-          if (!isNaN(n) && n > max) max = n;
-        }
+        const m  = bc.match(pattern);
+        if (m) { const n = parseInt(m[1], 10); if (!isNaN(n) && n > max) max = n; }
       });
     }
 
     let seq = max + 1;
-    let candidate = pre + '-' + yr + '-' + String(seq).padStart(3, '0');
-    
-    // Collision guard
-    while (_findRow(sh, candidate) > 0) {
-      seq++;
-      candidate = pre + '-' + yr + '-' + String(seq).padStart(3, '0');
-    }
-    return candidate;
-  } finally {
-    lock.releaseLock();
-  }
+    let cand = pre + '-' + yr + '-' + String(seq).padStart(3, '0');
+    while (_findRow(sh, cand) > 0) { seq++; cand = pre + '-' + yr + '-' + String(seq).padStart(3, '0'); }
+    return cand;
+  } finally { lock.releaseLock(); }
 }
 
 // ─── ASSETS: READ ─────────────────────────────────────────────────────────────
@@ -435,637 +513,592 @@ function getAllAssets() {
     const sh   = _entrySheet();
     const last = sh.getLastRow();
     if (last < AE_DATA_START) return { success: true, data: [] };
-    const colCount = sh.getLastColumn();
-    const data = sh.getRange(AE_DATA_START, 1, last - AE_DATA_START + 1, colCount).getValues();
+
+    const data   = sh.getRange(AE_DATA_START, 1, last - AE_DATA_START + 1, TOTAL_COLS).getValues();
     const result = data
-      .filter(row => row[C.BARCODE - 1])
+      .filter(row => {
+        const bc = String(row[C.BARCODE - 1] || '').trim();
+        return bc && bc !== '-' && bc !== 'N/A' && bc !== 'None' && bc !== '#N/A';
+      })
       .map(row => {
-        const get = (col) => String(row[col - 1] || '');
-        const status = _computeStatus(
-          get(C.LIFECYCLE), get(C.STATUS_LABEL), get(C.ACT_RETURN),
-          get(C.EMP_ID), get(C.BOR_NAME), get(C.ASSET_STATUS)
-        );
-        const rawLC = get(C.LIFECYCLE);
+        const get    = col => String(row[col - 1] || '');
+        const status = _computeStatus(get(C.LIFECYCLE), get(C.ASSET_STATUS), get(C.EMP_ID));
+
+        const rawLC    = get(C.LIFECYCLE);
         const displayLC = rawLC || {
-          'allocated':  'Allocated',
-          'spare':      'Active',
-          'borrowed':   'Borrow',
-          'returned':   'Returned',
-          'disposal':   'Dispose',
-          'transfer':   'Transfer',
+          'allocated':'Allocated','spare':'Active','borrowed':'Borrow',
+          'returned':'Returned','disposal':'Dispose','transfer':'Transfer',
           'borrow-item':'BorrowItem'
         }[status] || 'Active';
 
-        const div  = _normDiv(get(C.DIVISION));
-        const dist = _normDist(get(C.DISTRICT));
-
-        const hasXfer = displayLC === 'Transfer';
         return {
-          Barcode: get(C.BARCODE), Type: get(C.TYPE), Brand: get(C.BRAND),
-          Serial: get(C.SERIAL), Specs: get(C.SPECS),
-          Condition: get(C.CONDITION) || 'Good',
-          AssetLocation: get(C.ASSET_LOCATION),  // Column T
-          Lifecycle: displayLC,
-          AssetStatus: get(C.ASSET_STATUS) || 'Active',
-          StatusLabel: get(C.STATUS_LABEL) || 'Unassigned',
-          PurchDate: get(C.PURCH_DATE), WarrantyTerm: get(C.WARRANTY_TERM),
-          WarrantyVal: get(C.WARRANTY_VAL), Remarks: get(C.REMARKS),
-          EmpID: get(C.EMP_ID) || 'N/A', Staff: get(C.STAFF) || 'Unassigned',
-          Designation: get(C.DESIGNATION),
-          Department: get(C.DEPARTMENT),
-          BaseOffice: get(C.BASE_OFFICE),
-          Assignment: get(C.ASSIGNMENT),
-          Division: div,
-          District: dist, Area: get(C.AREA), Branch: get(C.BRANCH),
-          EffDate: get(C.EFF_DATE), 
-          XferType:  hasXfer ? get(C.XFER_TYPE)  : '',
-          ToStaff:   hasXfer ? get(C.TO_STAFF)   : '',
-          ToEmpID:   hasXfer ? get(C.TO_EMPID)   : '',
-          ToDiv:     hasXfer ? get(C.TO_DIV)     : '',
-          ToBranch:  hasXfer ? get(C.TO_BRANCH)  : '',
-          XferDate:  hasXfer ? get(C.XFER_DATE)  : '',
-          BorName: get(C.BOR_NAME), BorEmpID: get(C.BOR_EMPID),
-          BorDate: get(C.BOR_DATE), ExpReturn: get(C.EXP_RETURN),
-          ActReturn: get(C.ACT_RETURN), BorRemarks: get(C.BOR_REMARKS),
-          BorDesig: get(C.BOR_DESIG), BorDiv: get(C.BOR_DIV), BorBranch: get(C.BOR_BRANCH),
-          BorDist: colCount >= 61 ? get(C.BOR_DIST) : '',
-          CreatedAt: get(C.CREATED_AT), LastUpdated: get(C.LAST_UPDATED),
-          Supplier: get(C.SUPPLIER), Location: get(C.LOCATION),
-          EntryEmpId: get(C.ENTRY_EMP_ID), EntryName: get(C.ENTRY_NAME),
-          EnrolledBy: get(C.ENROLLED_BY), status
+          Barcode:      get(C.BARCODE),
+          Type:         get(C.TYPE),
+          Brand:        get(C.BRAND),
+          Serial:       get(C.SERIAL),
+          Specs:        get(C.SPECS),
+          Supplier:     get(C.SUPPLIER),
+          Condition:    get(C.CONDITION) || 'Good',
+          AssetLocation:get(C.ASSET_LOCATION),
+          Lifecycle:    displayLC,
+          AssetStatus:  get(C.ASSET_STATUS) || 'Active',
+          StatusLabel:  get(C.STATUS_LABEL) || 'Unassigned',
+          PurchDate:    get(C.PURCH_DATE),
+          WarrantyTerm: get(C.WARRANTY_TERM),
+          WarrantyVal:  get(C.WARRANTY_VAL),
+          Remarks:      get(C.REMARKS),
+          Notes:        get(C.NOTES),
+          EmpID:        get(C.EMP_ID) || 'N/A',
+          Staff:        get(C.STAFF)  || 'Unassigned',
+          Designation:  get(C.DESIGNATION),
+          Department:   get(C.DEPARTMENT),
+          BaseOffice:   get(C.BASE_OFFICE),
+          Assignment:   get(C.ASSIGNMENT),
+          Division:     _normDiv(get(C.DIVISION)),
+          District:     _normDist(get(C.DISTRICT)),
+          Area:         get(C.AREA),
+          Branch:       get(C.BRANCH),
+          EffDate:      get(C.EFF_DATE),
+          CreatedAt:    get(C.CREATED_AT),
+          LastUpdated:  get(C.LAST_UPDATED),
+          EntryEmpId:   get(C.ENTRY_EMP_ID),
+          EntryName:    get(C.ENTRY_NAME),
+          // Borrow fields populated by getInitialData() merge
+          BorName:'', BorEmpID:'', BorDesig:'', BorDiv:'', BorDist:'',
+          BorBranch:'', BorDate:'', ExpReturn:'', ActReturn:'', BorRemarks:'',
+          // Transfer display fields populated by getInitialData() merge
+          XferType:'', ToStaff:'', ToEmpID:'', ToDiv:'', ToBranch:'', XferDate:'',
+          status
         };
       });
+
     return { success: true, data: result };
-  } catch (e) { return { success: false, error: e.message }; }
+  } catch(e) { return { success: false, error: e.message }; }
 }
 
 function getAssetByBarcode(barcode) {
   try {
-    const sh  = _entrySheet();
-    const idx = _findRow(sh, barcode);
-    if (idx < 1) return null;
-    const row = sh.getRange(idx, 1, 1, sh.getLastColumn()).getValues()[0];
-    const get = (col) => String(row[col - 1] || '');
+    const sh     = _entrySheet();
+    const rowIdx = _findRow(sh, barcode);
+    if (rowIdx < 1) return null;
+    const row    = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const get    = col => String(row[col - 1] || '');
     return {
-      barcode: get(C.BARCODE), type: get(C.TYPE), brand: get(C.BRAND),
-      serial: get(C.SERIAL), specs: get(C.SPECS),
-      condition: get(C.CONDITION) || 'Good', lifecycle: get(C.LIFECYCLE) || 'Active',
-      statusLabel: get(C.STATUS_LABEL) || 'Unassigned',
-      purchaseDate: get(C.PURCH_DATE), warrantyTerm: get(C.WARRANTY_TERM),
-      warrantyValidity: get(C.WARRANTY_VAL), remarks: get(C.REMARKS),
-      employeeId: get(C.EMP_ID) || 'N/A', staff: get(C.STAFF) || 'Unassigned',
-      designation: get(C.DESIGNATION), department: get(C.DEPARTMENT),
-      baseOffice: get(C.BASE_OFFICE), division: _normDiv(get(C.DIVISION)),
-      district: _normDist(get(C.DISTRICT)), area: get(C.AREA), branch: get(C.BRANCH),
-      effDate: get(C.EFF_DATE), supplier: get(C.SUPPLIER),
-      borrowDate: get(C.BOR_DATE), returnDate: get(C.EXP_RETURN),
-      status: _computeStatus(get(C.LIFECYCLE), get(C.STATUS_LABEL), get(C.ACT_RETURN),
-                             get(C.EMP_ID), get(C.BOR_NAME), get(C.ASSET_STATUS))
+      barcode:          get(C.BARCODE), type:        get(C.TYPE),
+      brand:            get(C.BRAND),   serial:      get(C.SERIAL),
+      specs:            get(C.SPECS),   supplier:    get(C.SUPPLIER),
+      condition:        get(C.CONDITION) || 'Good',
+      lifecycle:        get(C.LIFECYCLE) || 'Active',
+      statusLabel:      get(C.STATUS_LABEL) || 'Unassigned',
+      purchaseDate:     get(C.PURCH_DATE),
+      warrantyTerm:     get(C.WARRANTY_TERM),
+      warrantyValidity: get(C.WARRANTY_VAL),
+      remarks:          get(C.REMARKS),
+      employeeId:       get(C.EMP_ID) || 'N/A',
+      staff:            get(C.STAFF)  || 'Unassigned',
+      designation:      get(C.DESIGNATION),
+      department:       get(C.DEPARTMENT),
+      baseOffice:       get(C.BASE_OFFICE),
+      division:         _normDiv(get(C.DIVISION)),
+      district:         _normDist(get(C.DISTRICT)),
+      area:             get(C.AREA),
+      branch:           get(C.BRANCH),
+      effDate:          get(C.EFF_DATE),
+      assetLocation:    get(C.ASSET_LOCATION),
+      status:           _computeStatus(get(C.LIFECYCLE), get(C.ASSET_STATUS), get(C.EMP_ID))
     };
-  } catch (e) { return null; }
+  } catch(e) { return null; }
 }
 
-// ─── ASSETS: CREATE ──────────────────────────────────────────────────────────
+// ─── ASSETS: CREATE ───────────────────────────────────────────────────────────
 function processAsset(obj, isAssign) {
-  // 1. Get the script lock to prevent race conditions
   const lock = LockService.getScriptLock();
-  try {
-    // Wait up to 10 seconds for other processes to finish
-    lock.waitLock(10000); 
-  } catch (e) {
-    return 'Error: System is busy. Please try again in a few seconds.';
-  }
+  try { lock.waitLock(10000); }
+  catch(e) { return 'Error: System busy — try again.'; }
 
   try {
-    const sh  = _entrySheet();
-    const now = new Date();
-    const nowStr = now.toLocaleString('en-PH');
+    const sh     = _entrySheet();
+    const nowStr = new Date().toLocaleString('en-PH');
 
     if (!isAssign) {
+      // ── ENROLL NEW ASSET ────────────────────────────────────────────────
       if (!obj.barcode) return 'Error: Barcode is required.';
       if (_findRow(sh, obj.barcode) > 0) return 'Error: Barcode already exists: ' + obj.barcode;
-      
-      const statusChoice = obj.statusChoice || 'Spare';
-      const STATUS_MAP = {
-        'Spare':      { lc: 'Active',     asSt: 'Active',     stLbl: 'Unassigned' },
-        'Allocated':  { lc: 'Allocated',  asSt: 'Active',     stLbl: 'Assigned'   },
-        'Disposal':   { lc: 'Dispose',    asSt: 'Disposal',   stLbl: 'Disposed'   },
-        'BorrowItem': { lc: 'BorrowItem', asSt: 'BorrowItem', stLbl: 'Unassigned' }
-      };
-      const sm = STATUS_MAP[statusChoice] || STATUS_MAP['Spare'];
-      const isSpare = statusChoice === 'Spare' || statusChoice === 'BorrowItem';
 
+      // Serial duplicate check
+      if (obj.serial) {
+        const last2 = sh.getLastRow();
+        if (last2 >= AE_DATA_START) {
+          const serials = sh.getRange(
+            AE_DATA_START, C.SERIAL, last2 - AE_DATA_START + 1, 1).getValues();
+          const dup = serials.findIndex(r => String(r[0]).trim() === String(obj.serial).trim());
+          if (dup >= 0) {
+            const existBC = String(sh.getRange(dup + AE_DATA_START, C.BARCODE).getValue());
+            return 'Error: Serial No. already registered under barcode: ' + existBC;
+          }
+        }
+      }
+
+      const statusChoice = obj.statusChoice || 'Spare';
+      const SM = {
+        'Spare':      { lc:'Active',     as:'Active',     sl:'Unassigned' },
+        'Allocated':  { lc:'Allocated',  as:'Active',     sl:'Assigned'   },
+        'Disposal':   { lc:'Dispose',    as:'Disposal',   sl:'Disposed'   },
+        'BorrowItem': { lc:'BorrowItem', as:'BorrowItem', sl:'Unassigned' }
+      };
+      const sm      = SM[statusChoice] || SM['Spare'];
+      const isSpare = (statusChoice === 'Spare' || statusChoice === 'BorrowItem');
       const normDiv  = _normDiv(obj.division  || '');
       const normDist = _normDist(obj.district || '');
 
       const row = new Array(TOTAL_COLS).fill('');
-      row[C.ENTRY_EMP_ID - 1] = obj.entryEmpId  || '';
-      row[C.ENTRY_NAME   - 1] = obj.entryName   || '';
-      row[C.EMP_ID       - 1] = isSpare ? '' : (obj.accEmpId  || '');
-      row[C.STAFF        - 1] = isSpare ? '' : (_sanitize(obj.accName, 100)   || '');
-      row[C.DESIGNATION  - 1] = isSpare ? '' : (obj.accRole   || '');
-      row[C.DEPARTMENT   - 1] = obj.department  || ''; 
-      row[C.BASE_OFFICE  - 1] = obj.baseOffice  || ''; 
-      row[C.DIVISION     - 1] = normDiv;
-      row[C.DISTRICT     - 1] = normDist;
-      row[C.AREA         - 1] = obj.area        || '';
-      row[C.BRANCH       - 1] = _sanitize(obj.branch, 150)      || '';
-      row[C.EFF_DATE     - 1] = obj.effDate     || '';
-      row[C.BARCODE      - 1] = obj.barcode;
-      row[C.TYPE         - 1] = obj.type        || '';
-      row[C.BRAND        - 1] = obj.brand       || '';
-      row[C.SERIAL       - 1] = obj.serial ? String(obj.serial) : '';
-      row[C.SPECS        - 1] = obj.specs       || '';
-      row[C.CONDITION    - 1] = obj.condition   || 'New';
-      row[C.LIFECYCLE    - 1] = sm.lc;
-      row[C.ASSET_STATUS - 1] = sm.asSt;
-      row[C.STATUS_LABEL - 1] = sm.stLbl;
-      row[C.PURCH_DATE   - 1] = obj.purchDate   || '';
-      row[C.WARRANTY_TERM- 1] = obj.wTerm       || '';
-      row[C.WARRANTY_VAL - 1] = obj.wValidity   || '';
-      row[C.REMARKS      - 1] = _sanitize(obj.remarks, 500)     || '';
-      row[C.SUPPLIER     - 1] = obj.supplier    || '';
-      row[C.LOCATION     - 1] = obj.location    || '';
-      row[C.ENROLLED_BY  - 1] = obj.enrolledBy  || obj.entryEmpId || '';
-      row[C.CREATED_AT   - 1] = nowStr;
-      row[C.LAST_UPDATED - 1] = nowStr;
-
-      // FIXED: Serial Duplicate Check (Uses 'sh' and logic from recommendation)
-      if (obj.serial) {
-        const curLast = sh.getLastRow();
-        if (curLast >= AE_DATA_START) {
-          const serials = sh.getRange(
-            AE_DATA_START, 
-            C.SERIAL, 
-            curLast - AE_DATA_START + 1, 
-            1
-          ).getValues();
-          
-          const dupIdx = serials.findIndex(
-            r => String(r[0]).trim() === String(obj.serial).trim()
-          );
-
-          if (dupIdx >= 0) {
-            const existingBC = String(
-              sh.getRange(dupIdx + AE_DATA_START, C.BARCODE).getValue()
-            );
-            return 'Error: Serial No. already registered under barcode: ' + existingBC;
-          }
-        }
-      }
+      row[C.ENTRY_EMP_ID  - 1] = obj.entryEmpId   || '';
+      row[C.ENTRY_NAME    - 1] = obj.entryName     || '';
+      row[C.EMP_ID        - 1] = isSpare ? '' : (obj.accEmpId || '');
+      row[C.STAFF         - 1] = isSpare ? '' : _sanitize(obj.accName, 100);
+      row[C.DESIGNATION   - 1] = isSpare ? '' : (obj.accRole || '');
+      row[C.DEPARTMENT    - 1] = obj.department    || '';
+      row[C.BASE_OFFICE   - 1] = obj.baseOffice    || '';
+      row[C.DIVISION      - 1] = normDiv;
+      row[C.DISTRICT      - 1] = normDist;
+      row[C.AREA          - 1] = obj.area          || '';
+      row[C.BRANCH        - 1] = _sanitize(obj.branch, 150);
+      row[C.ASSIGNMENT    - 1] = obj.assignment    || 'Field Office';
+      row[C.EFF_DATE      - 1] = obj.effDate       || '';
+      row[C.BARCODE       - 1] = obj.barcode;
+      row[C.TYPE          - 1] = obj.type          || '';
+      row[C.BRAND         - 1] = obj.brand         || '';
+      row[C.SERIAL        - 1] = obj.serial ? String(obj.serial) : '';
+      row[C.SPECS         - 1] = obj.specs         || '';
+      row[C.SUPPLIER      - 1] = obj.supplier      || '';
+      row[C.CONDITION     - 1] = obj.condition     || 'New';
+      row[C.ASSET_LOCATION- 1] = obj.location      || '';
+      row[C.LIFECYCLE     - 1] = sm.lc;
+      row[C.STATUS_LABEL  - 1] = sm.sl;
+      row[C.ASSET_STATUS  - 1] = sm.as;
+      row[C.PURCH_DATE    - 1] = obj.purchDate     || '';
+      row[C.WARRANTY_TERM - 1] = obj.wTerm         || '';
+      row[C.WARRANTY_VAL  - 1] = obj.wValidity     || '';
+      row[C.REMARKS       - 1] = _sanitize(obj.remarks, 500);
+      row[C.CREATED_AT    - 1] = nowStr;
+      row[C.LAST_UPDATED  - 1] = nowStr;
 
       sh.appendRow(row);
       const newRowIdx = sh.getLastRow();
       sh.getRange(newRowIdx, C.SERIAL).setNumberFormat('@STRING@');
       if (obj.serial) sh.getRange(newRowIdx, C.SERIAL).setValue(String(obj.serial));
-      _log('CREATE', obj.barcode, obj.type + ' | ' + obj.brand + ' | ' + statusChoice, obj.entryEmpId || '');
+
+      // Write to Spare log sheet if applicable
+      if (statusChoice === 'Spare') {
+        _spareSheet().appendRow([
+          obj.barcode, obj.type, obj.brand, obj.serial || '', obj.condition || 'New',
+          obj.purchDate || '', obj.wValidity || '', obj.supplier || '',
+          normDiv, normDist, obj.area || '', _sanitize(obj.branch, 150),
+          obj.location || '', obj.enrolledBy || obj.entryEmpId || '',
+          nowStr, 'Available'
+        ]);
+      }
+
+      _log('CREATE', obj.barcode,
+        obj.type + ' | ' + obj.brand + ' | ' + statusChoice,
+        obj.entryEmpId || '');
       return 'Asset created: ' + obj.barcode;
     }
 
-    // Logic for isAssign = true
+    // ── isAssign = true (update lifecycle from elsewhere) ──────────────────
     const lc    = obj.lifecycle || 'Allocated';
-    const asSt  = lc === 'Transfer' ? 'Transfer' : lc === 'Dispose' ? 'Disposal' : 'Active';
+    const asSt  = lc === 'Transfer' ? 'Transfer' :
+                  lc === 'Dispose'  ? 'Disposal' : 'Active';
     const staff = _sanitize((obj.staff || '').trim(), 100);
     const stLbl = (staff && staff !== 'Unassigned') ? 'Assigned' : 'Unassigned';
     let rowIdx  = _findRow(sh, obj.barcode);
 
     if (rowIdx < 1) {
-      const newRow = new Array(TOTAL_COLS).fill('');
-      newRow[C.BARCODE     - 1] = obj.barcode;
-      newRow[C.CREATED_AT  - 1] = nowStr;
-      newRow[C.LAST_UPDATED- 1] = nowStr;
-      sh.appendRow(newRow);
+      const nr = new Array(TOTAL_COLS).fill('');
+      nr[C.BARCODE     - 1] = obj.barcode;
+      nr[C.CREATED_AT  - 1] = nowStr;
+      nr[C.LAST_UPDATED- 1] = nowStr;
+      sh.appendRow(nr);
       rowIdx = sh.getLastRow();
     }
 
     _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,    lc], [C.ASSET_STATUS, asSt], [C.STATUS_LABEL, stLbl],
-      [C.EMP_ID,       obj.employeeId  || ''], [C.STAFF,  staff || ''],
-      [C.DESIGNATION,  obj.designation || ''],
-      [C.DEPARTMENT,   obj.department  || ''],
-      [C.BASE_OFFICE,  obj.baseOffice  || ''],
-      [C.DIVISION, _normDiv(obj.division   || '')],
-      [C.DISTRICT,     _normDist(obj.district || '')],
-      [C.AREA,         obj.area || ''],
-      [C.BRANCH,       _sanitize(obj.branch, 150)      || ''], [C.EFF_DATE, obj.effDate || '']
+      [C.LIFECYCLE,   lc],  [C.ASSET_STATUS, asSt], [C.STATUS_LABEL, stLbl],
+      [C.EMP_ID,      obj.employeeId  || ''],
+      [C.STAFF,       staff           || ''],
+      [C.DESIGNATION, obj.designation || ''],
+      [C.DEPARTMENT,  obj.department  || ''],
+      [C.BASE_OFFICE, obj.baseOffice  || ''],
+      [C.DIVISION,    _normDiv(obj.division   || '')],
+      [C.DISTRICT,    _normDist(obj.district  || '')],
+      [C.AREA,        obj.area        || ''],
+      [C.BRANCH,      _sanitize(obj.branch, 150)],
+      [C.EFF_DATE,    obj.effDate     || '']
     ]);
     _log('ASSIGN', obj.barcode, staff + ' | ' + lc, obj.employeeId || '');
     return 'Asset assigned successfully';
 
-  } catch (e) { 
-    return 'Error: ' + e.message; 
-  } finally {
-    // 4. ALWAYS release the lock so other users can proceed
-    lock.releaseLock();
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
+// ─── DELETE ASSETS ────────────────────────────────────────────────────────────
 function deleteAssets(barcodes, callerEmpId) {
-  // 1. SECURITY: Role Verification
-  const masterSh = _ss().getSheetByName(SH_MASTER);
-  if (masterSh && callerEmpId) {
-    const last = masterSh.getLastRow();
-    if (last >= 5) {
-      const data = masterSh.getRange(5, 1, last - 4, 12).getValues();
-      const caller = data.find(r => 
-        String(r[0] || '').trim().toLowerCase() === String(callerEmpId).trim().toLowerCase()
-      );
-      
-      if (!caller) return 'Error: Unauthorized — identity not verified.';
-      
-      const role = String(caller[11] || '').toLowerCase(); // Column L (12th column)
-      if (!role.includes('senior') && !role.includes('admin')) {
-        return 'Error: Unauthorized — you do not have permission to delete assets.';
-      }
-    }
-  } else {
-    return 'Error: Unauthorized — caller ID required.';
-  }
-
-  // 2. CONCURRENCY: Initialize Lock
-  const lock = LockService.getScriptLock();
+  // Security: verify caller role from Users sheet
   try {
-    lock.waitLock(10000); // Wait up to 10s for other actions to finish
-  } catch (e) {
-    return 'Error: System is busy. Please try again.';
-  }
+    const userSh = _ss().getSheetByName(SH_USERS);
+    if (!userSh || !callerEmpId) return 'Error: Unauthorized — caller ID required.';
+    const last = userSh.getLastRow();
+    if (last < 2) return 'Error: Unauthorized.';
+    const rows = userSh.getRange(2, 1, last - 1, 3).getValues();
+    const caller = rows.find(r =>
+      String(r[2] || '').trim().toLowerCase() === String(callerEmpId).trim().toLowerCase()
+    );
+    if (!caller) return 'Error: Unauthorized — identity not verified.';
+    const role = String(caller[0] || '').toLowerCase();
+    if (!role.includes('supervisor') && !role.includes('admin') && !role.includes('super'))
+      return 'Error: Unauthorized — insufficient permissions.';
+  } catch(e) { return 'Error: ' + e.message; }
+
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); }
+  catch(e) { return 'Error: System busy — try again.'; }
 
   try {
     const sh = _entrySheet();
     const blocked = [], toDelete = [];
 
-    // Identify which rows to delete and which to block
     barcodes.forEach(bc => {
       const r = _findRow(sh, bc);
       if (r > 0) {
         const lc = String(sh.getRange(r, C.LIFECYCLE).getValue() || '').toLowerCase();
-        // Block deletion if asset is active in a specific lifecycle
-        if (lc === 'borrow' || lc === 'transfer' || lc === 'borrowitem') { 
-          blocked.push(bc + ' (' + lc + ')'); 
-        } else { 
-          toDelete.push({ bc, r }); 
-        }
+        if (lc === 'borrow' || lc === 'transfer' || lc === 'borrowitem')
+          blocked.push(bc + ' (' + lc + ')');
+        else
+          toDelete.push({ bc, r });
       }
     });
-    
-    if (blocked.length && !toDelete.length) {
-      return 'Error: Cannot delete — active lifecycle: ' + blocked.join(', ');
-    }
 
-    // 3. EXECUTION: Delete rows from BOTTOM to TOP
-    // Sorting descending (b.r - a.r) is vital so row indices don't shift
+    if (blocked.length && !toDelete.length)
+      return 'Error: Cannot delete — active lifecycle: ' + blocked.join(', ');
+
     toDelete.sort((a, b) => b.r - a.r).forEach(({ bc, r }) => {
-      sh.deleteRow(r); 
+      sh.deleteRow(r);
       _log('DELETE', bc, 'Deleted by ' + callerEmpId, callerEmpId);
     });
 
     let msg = 'Deleted ' + toDelete.length + ' asset(s)';
-    if (blocked.length) {
-      msg += '. Skipped ' + blocked.length + ' (Active Borrow/Transfer): ' + blocked.join(', ');
-    }
+    if (blocked.length) msg += '. Skipped ' + blocked.length + ': ' + blocked.join(', ');
     return msg;
-
-  } catch (e) { 
-    return 'Error: ' + e.message; 
-  } finally {
-    lock.releaseLock(); // Always release the lock
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
-// ─── ALLOCATE ASSET ──────────────────────────────────────────────────────────
+// ─── ALLOCATE ─────────────────────────────────────────────────────────────────
 function allocateAsset(obj) {
   const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(8000);
-  } catch(e) {
-    return 'Error: System is busy. Please try again in a few seconds.';
-  }
+  try { lock.waitLock(8000); }
+  catch(e) { return 'Error: System busy — try again.'; }
   try {
     if (!obj.barcode)   return 'Error: Barcode is required.';
     if (!obj.empId)     return 'Error: Employee ID is required.';
     if (!obj.staffName) return 'Error: Staff name is required.';
-    const sh = _entrySheet();
+
+    const sh     = _entrySheet();
     const rowIdx = _findRow(sh, obj.barcode);
     if (rowIdx < 1) return 'Error: Asset not found: ' + obj.barcode;
-    const currentLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
-    if (currentLC === 'borrow')    return 'Error: Asset is currently borrowed. Return it first.';
-    if (currentLC === 'dispose')   return 'Error: Disposed assets cannot be allocated.';
-    if (currentLC === 'transfer')  return 'Error: Asset is in an active transfer.';
-    const currentAS = String(sh.getRange(rowIdx, C.ASSET_STATUS).getValue() || '').toLowerCase();
-    if (currentAS === 'borrowitem') {
-      return 'Error: This asset is part of the Borrow Pool and cannot be permanently allocated. '
-        + 'To assign it, first change its status via the Spare Pool.';
-    }
-    if (currentLC === 'allocated') {
-  // Log the implicit deallocation before re-allocating
-  const prevStaff = String(sh.getRange(rowIdx, C.STAFF).getValue() || '');
-  _log('DEALLOCATE', obj.barcode, 
-    'Implicit dealloc from: ' + prevStaff + ' → re-allocate to: ' + obj.staffName, 
-    obj.allocatedBy || obj.empId || '');
-}
-    const nowStr = new Date().toLocaleString('en-PH');
-    const rowData = sh.getRange(rowIdx, 1, 1, sh.getLastColumn()).getValues()[0];
-    const get = c => String(rowData[c - 1] || '');
 
+    const curRow = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
+    const curAS  = String(curRow[C.ASSET_STATUS - 1] || '').toLowerCase();
+
+    if (curLC === 'borrow')    return 'Error: Asset is currently borrowed. Return it first.';
+    if (curLC === 'dispose' || curLC === 'disposal')
+                               return 'Error: Disposed assets cannot be allocated.';
+    if (curLC === 'transfer')  return 'Error: Asset is in an active transfer.';
+    if (curAS === 'borrowitem')
+      return 'Error: This asset is in the Borrow Pool. Change its status first.';
+
+    if (curLC === 'allocated') {
+      const prevStaff = String(curRow[C.STAFF - 1] || '');
+      _log('DEALLOCATE', obj.barcode,
+        'Implicit dealloc from: ' + prevStaff + ' → re-allocate to: ' + obj.staffName,
+        obj.allocatedBy || obj.empId || '');
+    }
+
+    const nowStr   = new Date().toLocaleString('en-PH');
     const normDiv  = _normDiv(obj.division  || '');
     const normDist = _normDist(obj.district || '');
 
     _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,    'Allocated'], [C.ASSET_STATUS, 'Active'],
-      [C.STATUS_LABEL, 'Assigned'],  [C.EMP_ID,       obj.empId       || ''],
-      [C.STAFF,        _sanitize(obj.staffName, 100) || ''], [C.DESIGNATION,  obj.designation || ''],
-      [C.DEPARTMENT,   obj.department  || ''],   // ← Added
-      [C.BASE_OFFICE,  obj.baseOffice  || ''],   // ← Added
-      [C.DIVISION,     normDiv],                  [C.DISTRICT,     normDist],
-      [C.AREA,         obj.area      || ''],      [C.BRANCH,       _sanitize(obj.branch, 150)      || ''],
-      [C.EFF_DATE,     obj.effDate   || nowStr],  [C.REMARKS,      _sanitize(obj.remarks, 500)     || '']
+      [C.LIFECYCLE,    'Allocated'],   [C.ASSET_STATUS, 'Active'],
+      [C.STATUS_LABEL, 'Assigned'],    [C.EMP_ID,       obj.empId           || ''],
+      [C.STAFF,        _sanitize(obj.staffName, 100)],
+      [C.DESIGNATION,  obj.designation || ''],
+      [C.DEPARTMENT,   obj.department  || ''],
+      [C.BASE_OFFICE,  obj.baseOffice  || ''],
+      [C.DIVISION,     normDiv],        [C.DISTRICT,     normDist],
+      [C.AREA,         obj.area        || ''],
+      [C.BRANCH,       _sanitize(obj.branch, 150)],
+      [C.EFF_DATE,     obj.effDate     || nowStr],
+      [C.REMARKS,      _sanitize(obj.remarks, 500)]
     ]);
+
+    // Write to Allocated log
     _allocLogSheet().appendRow([
-      obj.barcode, obj.type || get(C.TYPE), obj.brand || get(C.BRAND),
-      obj.serial || get(C.SERIAL), obj.empId, _sanitize(obj.staffName, 100),
+      obj.barcode,
+      obj.type      || String(curRow[C.TYPE  - 1] || ''),
+      obj.brand     || String(curRow[C.BRAND - 1] || ''),
+      obj.serial    || String(curRow[C.SERIAL- 1] || ''),
+      obj.empId, _sanitize(obj.staffName, 100),
       obj.designation || '', obj.department || '', obj.baseOffice || '',
       normDiv, normDist, obj.area || '', _sanitize(obj.branch, 150),
-      obj.effDate || nowStr, obj.condition || get(C.CONDITION) || 'Good',
+      obj.effDate || nowStr,
+      obj.condition || String(curRow[C.CONDITION - 1] || 'Good'),
       _sanitize(obj.remarks, 500), nowStr, obj.allocatedBy || ''
     ]);
-    _log('ALLOCATE', obj.barcode, _sanitize(obj.staffName, 100) + ' | ' + (_sanitize(obj.branch, 150) || obj.baseOffice || normDiv || ''), obj.allocatedBy || obj.empId || '');
+
+    _log('ALLOCATE', obj.barcode,
+      _sanitize(obj.staffName, 100) + ' | ' + (_sanitize(obj.branch, 150) || normDiv || ''),
+      obj.allocatedBy || obj.empId || '');
     return 'Asset allocated to ' + _sanitize(obj.staffName, 100);
-  } catch(e) {
-    return 'Error: ' + e.message;
-  } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
-// ─── DEALLOCATE ASSET ────────────────────────────────────────────────────────
+// ─── DEALLOCATE (return to spare) ─────────────────────────────────────────────
+// NOTE: Division/District/Area/Branch are PRESERVED so you know where the
+//       spare asset is physically located.
 function deallocateAsset(barcode, remarks) {
   const lock = LockService.getScriptLock();
+  try { lock.waitLock(8000); }
+  catch(e) { return 'Error: System busy — try again.'; }
   try {
-    lock.waitLock(8000);
-  } catch(e) {
-    return 'Error: System is busy. Please try again in a few seconds.';
-  }
-  try {
-    const sh = _entrySheet();
+    const sh     = _entrySheet();
     const rowIdx = _findRow(sh, barcode);
     if (rowIdx < 1) return 'Error: Asset not found: ' + barcode;
-    const currentLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
-    if (currentLC === 'borrow')  return 'Error: Return the borrow record first.';
-    if (currentLC === 'dispose') return 'Error: Disposed assets cannot be returned to spare.';
-    const prevStaff = String(sh.getRange(rowIdx, C.STAFF).getValue() || '');
+
+    const curRow = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
+    if (curLC === 'borrow')  return 'Error: Return the borrow record first.';
+    if (curLC === 'dispose' || curLC === 'disposal')
+                             return 'Error: Disposed assets cannot be returned to spare.';
+
+    const prevStaff = String(curRow[C.STAFF - 1] || '');
+    const nowStr    = new Date().toLocaleString('en-PH');
+
     const updates = [
-      [C.LIFECYCLE,   'Active'], [C.ASSET_STATUS, 'Active'],
-      [C.STATUS_LABEL,'Unassigned'], [C.EMP_ID, ''], [C.STAFF, ''],
-      [C.DESIGNATION, ''], [C.EFF_DATE, ''],
-      // Note: preserve Department/BaseOffice — the asset stays in its location
-      [C.DIVISION, ''], [C.DISTRICT, ''], [C.AREA, ''], [C.BRANCH, '']
+      [C.LIFECYCLE,   'Active'],   [C.ASSET_STATUS, 'Active'],
+      [C.STATUS_LABEL,'Unassigned'],
+      [C.EMP_ID,      ''],         [C.STAFF,         ''],
+      [C.DESIGNATION, ''],         [C.EFF_DATE,      '']
+      // Division/District/Area/Branch intentionally kept — shows where spare is stored
     ];
     if (remarks) updates.push([C.REMARKS, _sanitize(remarks, 500)]);
     _setRow(sh, rowIdx, updates);
-    _log('DEALLOCATE', barcode, `From: ${prevStaff} → Spare Pool. ${_sanitize(remarks, 500)||''}`, '');
+
+    // Write to Spare log
+    _spareSheet().appendRow([
+      barcode,
+      String(curRow[C.TYPE          - 1] || ''),
+      String(curRow[C.BRAND         - 1] || ''),
+      String(curRow[C.SERIAL        - 1] || ''),
+      String(curRow[C.CONDITION     - 1] || 'Good'),
+      String(curRow[C.PURCH_DATE    - 1] || ''),
+      String(curRow[C.WARRANTY_VAL  - 1] || ''),
+      String(curRow[C.SUPPLIER      - 1] || ''),
+      String(curRow[C.DIVISION      - 1] || ''),
+      String(curRow[C.DISTRICT      - 1] || ''),
+      String(curRow[C.AREA          - 1] || ''),
+      String(curRow[C.BRANCH        - 1] || ''),
+      String(curRow[C.ASSET_LOCATION- 1] || ''),
+      prevStaff, nowStr, 'Available'
+    ]);
+
+    _log('DEALLOCATE', barcode,
+      'From: ' + prevStaff + ' → Spare Pool. ' + (_sanitize(remarks, 500) || ''), '');
     return 'Asset returned to spare pool';
-  } catch (e) { return 'Error: ' + e.message; } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
-// ─── UPDATE ASSET DETAILS (UX-5: Edit Modal) ──────────────────────────────────
+// ─── UPDATE ASSET DETAILS ─────────────────────────────────────────────────────
 function updateAssetDetails(barcode, updates) {
   try {
-    const sh = _entrySheet();
+    const sh     = _entrySheet();
     const rowIdx = _findRow(sh, barcode);
     if (rowIdx < 1) return 'Error: Asset not found: ' + barcode;
 
     const fields = [];
-    if (updates.brand !== undefined) fields.push([C.BRAND, updates.brand]);
+    if (updates.brand     !== undefined) fields.push([C.BRAND,     updates.brand]);
     if (updates.condition !== undefined) fields.push([C.CONDITION, updates.condition]);
-    if (updates.purchDate !== undefined) fields.push([C.PURCH_DATE, updates.purchDate]);
-    if (updates.specs !== undefined) fields.push([C.SPECS, updates.specs]);
-    if (updates.remarks !== undefined) fields.push([C.REMARKS, updates.remarks]);
+    if (updates.purchDate !== undefined) fields.push([C.PURCH_DATE,updates.purchDate]);
+    if (updates.specs     !== undefined) fields.push([C.SPECS,     updates.specs]);
+    if (updates.remarks   !== undefined) fields.push([C.REMARKS,   updates.remarks]);
+    if (updates.supplier  !== undefined) fields.push([C.SUPPLIER,  updates.supplier]);
 
-    // Serial requires duplicate check
     if (updates.serial !== undefined) {
-      const currentSerial = String(
-        sh.getRange(rowIdx, C.SERIAL).getValue() || ''
-      ).trim();
-      if (updates.serial !== currentSerial && updates.serial) {
+      const currentSerial = String(sh.getRange(rowIdx, C.SERIAL).getValue() || '').trim();
+      if (updates.serial && updates.serial !== currentSerial) {
         const last = sh.getLastRow();
         if (last >= AE_DATA_START) {
           const serials = sh.getRange(
-            AE_DATA_START, C.SERIAL,
-            last - AE_DATA_START + 1, 1
-          ).getValues();
-          const dupIdx = serials.findIndex(function(r) {
-            return String(r[0]).trim() === updates.serial &&
-                   (AE_DATA_START + serials.indexOf(r)) !== rowIdx;
-          });
-          if (dupIdx >= 0) {
-            return 'Error: Serial No. already used by another asset.';
-          }
+            AE_DATA_START, C.SERIAL, last - AE_DATA_START + 1, 1).getValues();
+          const dupIdx = serials.findIndex(
+            (r, i) => String(r[0]).trim() === updates.serial && (i + AE_DATA_START) !== rowIdx);
+          if (dupIdx >= 0) return 'Error: Serial No. already used by another asset.';
         }
       }
       fields.push([C.SERIAL, updates.serial]);
     }
 
     _setRow(sh, rowIdx, fields);
-    _log('EDIT', barcode, 
-      'Updated: ' + Object.keys(updates).join(', '), 
-      '');
+    _log('EDIT', barcode, 'Updated: ' + Object.keys(updates).join(', '), '');
     return 'Asset details updated.';
-  } catch (e) { return 'Error: ' + e.message; }
+  } catch(e) { return 'Error: ' + e.message; }
 }
 
-// ─── GET ASSETS BY POOL ───────────────────────────────────────────────────────
-function getSpareAssets() {
-  try {
-    const all = getAllAssets();
-    if (!all.success) return { success: false, error: all.error };
-    return {
-      success: true,
-      data: all.data.filter(a => {
-        const lc = (a.Lifecycle || '').toLowerCase();
-        const as = (a.AssetStatus || '').toLowerCase();
-        return lc === 'active' && as !== 'borrowitem';
-      })
-    };
-  } catch (e) { return { success: false, error: e.message }; }
-}
-
-function getAllocatedAssets(districtFilter) {
-  try {
-    const all = getAllAssets();
-    if (!all.success) return { success: false, error: all.error };
-    let data = all.data.filter(a => {
-      const lc = (a.Lifecycle || '').toLowerCase();
-      return lc === 'allocated' || lc === 'transfer';
-    });
-    if (districtFilter && districtFilter !== 'all' && districtFilter !== '') {
-      data = data.filter(a =>
-        (a.District || '').toLowerCase() === districtFilter.toLowerCase()
-      );
-    }
-    return { success: true, data };
-  } catch (e) { return { success: false, error: e.message }; }
-}
-
-function getBorrowPoolAssets() {
-  try {
-    const all = getAllAssets();
-    if (!all.success) return { success: false, error: all.error };
-    return {
-      success: true,
-      data: all.data.filter(a => (a.AssetStatus || '').toLowerCase() === 'borrowitem')
-    };
-  } catch (e) { return { success: false, error: e.message }; }
-}
-
-function getActiveBorrows() {
-  try {
-    const all = getAllAssets();
-    if (!all.success) return { success: false, error: all.error };
-    return {
-      success: true,
-      data: all.data.filter(a => (a.Lifecycle || '').toLowerCase() === 'borrow')
-    };
-  } catch (e) { return { success: false, error: e.message }; }
-}
-
-// ─── TRANSFERS ───────────────────────────────────────────────────────────────
+// ─── TRANSFERS ────────────────────────────────────────────────────────────────
 function saveTransfer(t) {
   const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(8000);
-  } catch(e) {
-    return 'Error: System is busy. Please try again in a few seconds.';
-  }
+  try { lock.waitLock(8000); }
+  catch(e) { return 'Error: System busy — try again.'; }
   try {
     if (!t.barcode)      return 'Error: Barcode is required.';
     if (!t.toEmpId)      return 'Error: Destination Employee ID is required.';
     if (!t.toStaff)      return 'Error: Destination Staff Name is required.';
     if (!t.effDate)      return 'Error: Transfer Date is required.';
     if (!t.transferType) return 'Error: Transfer Type is required.';
-    const sh = _entrySheet();
-    const rowIdx = _findRow(sh, t.barcode);
-    if (rowIdx < 1) return 'Error: Asset barcode not found: ' + t.barcode;
-    const currentLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
-    if (currentLC === 'dispose' || currentLC === 'disposal')
-      return 'Error: Cannot transfer a disposed asset.';
-    if (currentLC === 'borrow')
-      return 'Error: Cannot transfer an asset currently on borrow. Return it first.';
-    const xSh    = _xferSheet();
-    const nowStr = new Date().toLocaleString('en-PH');
-    xSh.appendRow([
-      t.barcode, t.transferType,
-      _sanitize(t.fromStaff, 100), t.fromEmpId, t.fromDesig, t.fromDiv, t.fromDist, t.fromArea, _sanitize(t.fromBranch, 150), _sanitize(t.fromRemarks, 500),
-      _sanitize(t.toStaff, 100), t.toEmpId, t.toDesig, t.toDiv, t.toDist, t.toArea, _sanitize(t.toBranch, 150), _sanitize(t.toRemarks, 500),
-      t.effDate, t.status || 'Completed', nowStr
-    ]);
 
+    const sh     = _entrySheet();
+    const rowIdx = _findRow(sh, t.barcode);
+    if (rowIdx < 1) return 'Error: Asset not found: ' + t.barcode;
+
+    const curLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
+    if (curLC === 'dispose' || curLC === 'disposal')
+      return 'Error: Cannot transfer a disposed asset.';
+    if (curLC === 'borrow')
+      return 'Error: Return the asset first before transferring.';
+
+    const nowStr   = new Date().toLocaleString('en-PH');
     const normToDiv  = _normDiv(t.toDiv   || '');
     const normToDist = _normDist(t.toDist || '');
 
-    _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,    'Allocated'], [C.ASSET_STATUS, 'Active'],
-      [C.STATUS_LABEL, 'Assigned'],  [C.EMP_ID,       t.toEmpId   || ''],
-      [C.STAFF,        _sanitize(t.toStaff, 100)   || ''],  [C.DESIGNATION,  t.toDesig   || ''],
-      [C.DIVISION,     normToDiv],          [C.DISTRICT,     normToDist],
-      [C.AREA,         t.toArea    || ''],  [C.BRANCH,       _sanitize(t.toBranch, 150)  || ''],
-      [C.EFF_DATE,     t.effDate],          [C.XFER_TYPE,    t.transferType || 'Permanent'],
-      [C.FR_STAFF,     _sanitize(t.fromStaff, 100)   || ''],[C.FR_EMPID,     t.fromEmpId   || ''],
-      [C.FR_DESIG,     t.fromDesig   || ''],[C.FR_DIV,       t.fromDiv     || ''],
-      [C.FR_DIST,      t.fromDist    || ''],[C.FR_AREA,      t.fromArea    || ''],
-      [C.FR_BRANCH,    _sanitize(t.fromBranch, 150)  || ''],[C.FR_REMARKS,   _sanitize(t.fromRemarks, 500) || ''],
-      [C.TO_STAFF,     _sanitize(t.toStaff, 100)   || ''],  [C.TO_EMPID,     t.toEmpId   || ''],
-      [C.TO_DESIG,     t.toDesig   || ''],  [C.TO_DIV,       normToDiv],
-      [C.TO_DIST,      normToDist],         [C.TO_AREA,      t.toArea    || ''],
-      [C.TO_BRANCH,    _sanitize(t.toBranch, 150)  || ''],  [C.TO_REMARKS,   _sanitize(t.toRemarks, 500) || ''],
-      [C.XFER_DATE,    t.effDate]
+    // Write full record to Transfers sheet (21 columns — unchanged structure)
+    _xferSheet().appendRow([
+      t.barcode, t.transferType,
+      _sanitize(t.fromStaff, 100), t.fromEmpId, t.fromDesig,
+      t.fromDiv, t.fromDist, t.fromArea, _sanitize(t.fromBranch, 150), _sanitize(t.fromRemarks, 500),
+      _sanitize(t.toStaff, 100), t.toEmpId, t.toDesig,
+      normToDiv, normToDist, t.toArea, _sanitize(t.toBranch, 150), _sanitize(t.toRemarks, 500),
+      t.effDate, t.status || 'Completed', nowStr
     ]);
-    _log('TRANSFER', t.barcode, (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100), t.fromEmpId || '');
+
+    // Update Asset Entry with new holder (no inline transfer fields in 31-col layout)
+    _setRow(sh, rowIdx, [
+      [C.LIFECYCLE,    'Allocated'],  [C.ASSET_STATUS, 'Active'],
+      [C.STATUS_LABEL, 'Assigned'],   [C.EMP_ID,       t.toEmpId   || ''],
+      [C.STAFF,        _sanitize(t.toStaff, 100)],
+      [C.DESIGNATION,  t.toDesig   || ''],
+      [C.DIVISION,     normToDiv],    [C.DISTRICT,     normToDist],
+      [C.AREA,         t.toArea    || ''],
+      [C.BRANCH,       _sanitize(t.toBranch, 150)],
+      [C.EFF_DATE,     t.effDate]
+    ]);
+
+    _log('TRANSFER', t.barcode,
+      (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100),
+      t.fromEmpId || '');
     return 'Transfer saved';
-  } catch (e) { return 'Error: ' + e.message; } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
 function getTransferData() {
   try {
     const sh   = _xferSheet();
     const last = sh.getLastRow();
-    if (last < 2) return [];
-    return sh.getRange(2, 1, last - 1, 21).getValues()
+    if (last < EVT_DATA_START) return [];
+    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 21).getValues()
+      .filter(r => r[0])
       .map(r => r.map(v => String(v || '')));
-  } catch (e) { return []; }
+  } catch(e) { return []; }
 }
 
-// ─── BORROWS ─────────────────────────────────────────────────────────────────
+// ─── BORROWS ──────────────────────────────────────────────────────────────────
+// saveBorrow: ONLY updates Lifecycle in Asset Entry.
+// All borrower details go to the Borrows sheet only.
 function saveBorrow(b) {
   const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(8000);
-  } catch(e) {
-    return 'Error: System is busy. Please try again in a few seconds.';
-  }
+  try { lock.waitLock(8000); }
+  catch(e) { return 'Error: System busy — try again.'; }
   try {
     const sh     = _entrySheet();
     const bSh    = _borrowSheet();
     const nowStr = new Date().toLocaleString('en-PH');
     const rowIdx = _findRow(sh, b.barcode);
-    if (rowIdx < 1) return 'Error: Asset barcode not found: ' + b.barcode;
-    const rowDataRaw  = sh.getRange(rowIdx, 1, 1, sh.getLastColumn()).getValues()[0];
-    const currentLC   = String(rowDataRaw[C.LIFECYCLE - 1] || '').toLowerCase();
-    const currentAS   = String(rowDataRaw[C.ASSET_STATUS - 1] || '');
-    const isBorrowItem = currentAS.toLowerCase() === 'borrowitem';
-    const borrowable  = ['active', 'allocated', 'borrowitem'];
-    if (!borrowable.includes(currentLC)) {
-      const lcDisplay = {
-        borrow: 'already on borrow', returned: 'Returned — re-allocate first',
-        transfer: 'in active Transfer', dispose: 'Disposed', disposal: 'Disposed'
+    if (rowIdx < 1) return 'Error: Asset not found: ' + b.barcode;
+
+    const curRow  = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const curLC   = String(curRow[C.LIFECYCLE    - 1] || '').toLowerCase();
+    const curAS   = String(curRow[C.ASSET_STATUS - 1] || '').toLowerCase();
+    const isBItem = curAS === 'borrowitem';
+
+    const borrowable = ['active', 'allocated', 'borrowitem', 'spare'];
+    if (!borrowable.includes(curLC)) {
+      const labels = {
+        borrow:'already on borrow', returned:'Returned — re-allocate first',
+        transfer:'in active Transfer', dispose:'Disposed', disposal:'Disposed'
       };
-      return 'Error: Cannot borrow. Status: ' + (lcDisplay[currentLC] || currentLC);
+      return 'Error: Cannot borrow. Status: ' + (labels[curLC] || curLC);
     }
+
+    // Write to Borrows sheet (13 columns matching fixed headers)
     bSh.appendRow([
-      b.barcode, _sanitize(b.borrowerName, 100), b.empId, b.designation,
-      b.division, b.district||'', _sanitize(b.branch, 150), b.borrowDate, b.expectedReturn,
-      '', 'Borrow', _sanitize(b.remarks, 500), nowStr
+      b.barcode, _sanitize(b.borrowerName, 100), b.empId || '', b.designation || '',
+      b.division || '', b.district || '', _sanitize(b.branch, 150),
+      b.borrowDate, b.expectedReturn, '',
+      'Borrow', _sanitize(b.remarks, 500), nowStr
     ]);
+
+    // Update Asset Entry — only Lifecycle; keep staff/location intact
     _setRow(sh, rowIdx, [
       [C.LIFECYCLE,    'Borrow'],
-      [C.ASSET_STATUS, isBorrowItem ? 'BorrowItem' : 'Active'],
-      [C.STATUS_LABEL, 'Assigned'],
-      [C.BOR_NAME,     _sanitize(b.borrowerName, 100)   || ''],
-      [C.BOR_EMPID,    b.empId          || ''],
-      [C.BOR_DESIG,    b.designation    || ''],
-      [C.BOR_DIV,      b.division       || ''],
-      [C.BOR_DIST,     b.district       || ''],
-      [C.BOR_BRANCH,   _sanitize(b.branch, 150)         || ''],
-      [C.BOR_DATE,     b.borrowDate     || ''],
-      [C.EXP_RETURN,   b.expectedReturn || ''],
-      [C.ACT_RETURN,   ''],
-      [C.BOR_REMARKS,  _sanitize(b.remarks, 500)        || '']
+      [C.ASSET_STATUS, isBItem ? 'BorrowItem' : 'Active'],
+      [C.STATUS_LABEL, 'Assigned']
     ]);
-    _log('BORROW', b.barcode, _sanitize(b.borrowerName, 100) + ' | due: ' + b.expectedReturn, b.empId || '');
+
+    _log('BORROW', b.barcode,
+      _sanitize(b.borrowerName, 100) + ' | due: ' + b.expectedReturn,
+      b.empId || '');
     return 'Borrow saved';
-  } catch (e) { return 'Error: ' + e.message; } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
 function getBorrowData() {
   try {
     const sh   = _borrowSheet();
     const last = sh.getLastRow();
-    if (last < 2) return [];
-    return sh.getRange(2, 1, last - 1, 13).getValues().map(r => ({
-      barcode:       String(r[0]  || ''), borrowerName:   String(r[1]  || ''),
-      empId:         String(r[2]  || ''), designation:    String(r[3]  || ''),
-      division:      String(r[4]  || ''), district:       String(r[5]  || ''),
-      branch:        String(r[6]  || ''), borrowDate:     String(r[7]  || ''),
-      expectedReturn:String(r[8]  || ''), actualReturn:   String(r[9]  || ''),
-      status:        String(r[10] || 'Borrow'), remarks:  String(r[11] || ''),
-      timestamp:     String(r[12] || '')
-    }));
-  } catch (e) { return []; }
+    if (last < EVT_DATA_START) return [];
+    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 13).getValues()
+      .filter(r => r[0])
+      .map(r => ({
+        barcode:        String(r[0]  || ''),
+        borrowerName:   String(r[1]  || ''),
+        empId:          String(r[2]  || ''),
+        designation:    String(r[3]  || ''),
+        division:       String(r[4]  || ''),
+        district:       String(r[5]  || ''),
+        branch:         String(r[6]  || ''),
+        borrowDate:     String(r[7]  || ''),
+        expectedReturn: String(r[8]  || ''),
+        actualReturn:   String(r[9]  || ''),
+        status:         String(r[10] || 'Borrow'),
+        remarks:        String(r[11] || ''),
+        timestamp:      String(r[12] || '')
+      }));
+  } catch(e) { return []; }
 }
 
 function returnAsset(barcode, returnDate) {
@@ -1074,103 +1107,112 @@ function returnAsset(barcode, returnDate) {
     const bSh     = _borrowSheet();
     const retDate = returnDate || new Date().toLocaleDateString('en-PH');
     const last    = bSh.getLastRow();
-    if (last > 1) {
-      const data = bSh.getRange(2, 1, last - 1, 11).getValues();
+
+    // Update Borrows sheet — find the active borrow row
+    if (last >= EVT_DATA_START) {
+      const data = bSh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 13).getValues();
       for (let i = data.length - 1; i >= 0; i--) {
-        if (
-          String(data[i][0]) === String(barcode) &&
-          String(data[i][10]) === 'Borrow'
-        ) {
-          bSh.getRange(i + 2, 10).setValue(retDate);
-          bSh.getRange(i + 2, 11).setValue('Returned');
+        if (String(data[i][0]) === String(barcode) && String(data[i][10]) === 'Borrow') {
+          const sheetRow = i + EVT_DATA_START;
+          bSh.getRange(sheetRow, 10).setValue(retDate);  // Col J = ActualReturn
+          bSh.getRange(sheetRow, 11).setValue('Returned'); // Col K = Status
           break;
         }
       }
     }
+
+    // Update Asset Entry — restore previous lifecycle
     const rowIdx = _findRow(sh, barcode);
     if (rowIdx > 0) {
-      const rowData      = sh.getRange(rowIdx, 1, 1, sh.getLastColumn()).getValues()[0];
-      const origStaff    = String(rowData[C.STAFF - 1] || '').trim();
-      const origAS       = String(rowData[C.ASSET_STATUS - 1] || '');
-      const isBorrowItem = origAS.toLowerCase() === 'borrowitem';
-      const hasOwner     = !isBorrowItem && origStaff && origStaff !== 'Unassigned';
-      const restoredLC   = isBorrowItem ? 'BorrowItem' : (hasOwner ? 'Allocated' : 'Active');
-      const restoredLbl  = (isBorrowItem || !hasOwner) ? 'Unassigned' : 'Assigned';
-      const restoredAS   = isBorrowItem ? 'BorrowItem' : 'Active';
+      const curRow   = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+      const curAS    = String(curRow[C.ASSET_STATUS - 1] || '');
+      const curStaff = String(curRow[C.STAFF - 1] || '').trim();
+      const curEmpId = String(curRow[C.EMP_ID - 1] || '').trim();
+
+      const isBItem  = curAS.toLowerCase() === 'borrowitem';
+      const hasOwner = !isBItem && curStaff && curStaff !== 'Unassigned' && curEmpId;
+
+      const restoredLC  = isBItem ? 'BorrowItem' : (hasOwner ? 'Allocated' : 'Active');
+      const restoredLbl = (isBItem || !hasOwner)  ? 'Unassigned' : 'Assigned';
+      const restoredAS  = isBItem ? 'BorrowItem'  : 'Active';
+
       _setRow(sh, rowIdx, [
         [C.LIFECYCLE,    restoredLC],
         [C.STATUS_LABEL, restoredLbl],
-        [C.ASSET_STATUS, restoredAS],
-        [C.ACT_RETURN,   retDate],
-        [C.BOR_NAME,     ''],
-        [C.BOR_EMPID,    ''],
-        [C.BOR_DESIG,    ''],
-        [C.BOR_DIV,      ''],
-        [C.BOR_DIST,     ''],
-        [C.BOR_BRANCH,   ''],
-        [C.BOR_DATE,     ''],
-        [C.EXP_RETURN,   ''],
-        [C.BOR_REMARKS,  '']
+        [C.ASSET_STATUS, restoredAS]
       ]);
     }
+
     _log('RETURN', barcode, retDate, '');
     return 'Asset returned';
-  } catch (e) { return 'Error: ' + e.message; }
+  } catch(e) { return 'Error: ' + e.message; }
 }
 
-// ─── DISPOSALS ───────────────────────────────────────────────────────────────
+// ─── DISPOSALS ────────────────────────────────────────────────────────────────
+// NOTE: Location data (Division/District/Area/Branch/Staff) is PRESERVED
+//       in Asset Entry so you can see WHERE the disposed asset was/is.
 function saveDisposal(d) {
   const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(8000);
-  } catch(e) {
-    return 'Error: System is busy. Please try again in a few seconds.';
-  }
+  try { lock.waitLock(8000); }
+  catch(e) { return 'Error: System busy — try again.'; }
   try {
     const sh     = _entrySheet();
     const dSh    = _disposeSheet();
     const nowStr = new Date().toLocaleString('en-PH');
     const rowIdx = _findRow(sh, d.barcode);
+
     if (rowIdx > 0) {
-      const currentLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
-      if (currentLC === 'borrow')   return 'Error: Cannot dispose an asset that is currently borrowed.';
-      if (currentLC === 'transfer') return 'Error: Cannot dispose an asset in active transfer.';
+      const curLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
+      if (curLC === 'borrow')   return 'Error: Cannot dispose a borrowed asset.';
+      if (curLC === 'transfer') return 'Error: Cannot dispose an asset in active transfer.';
     }
-    dSh.appendRow([d.barcode, _sanitize(d.reason, 200), _sanitize(d.disposedBy, 100), d.disposeDate, _sanitize(d.remarks, 500), nowStr]);
+
+    // Write disposal record (6 columns matching fixed headers)
+    dSh.appendRow([
+      d.barcode, _sanitize(d.reason, 200), _sanitize(d.disposedBy, 100),
+      d.disposeDate, _sanitize(d.remarks, 500), nowStr
+    ]);
+
     if (rowIdx > 0) {
-      const cur = String(sh.getRange(rowIdx, C.REMARKS).getValue() || '');
+      // Only update lifecycle/status — ALL location & staff info is preserved
       _setRow(sh, rowIdx, [
-        [C.LIFECYCLE,    'Dispose'], [C.ASSET_STATUS, 'Disposal'],
-        [C.STATUS_LABEL, 'Disposed'],
-        [C.REMARKS, (cur ? cur + ' | ' : '') + 'DISPOSAL: ' + _sanitize(d.reason, 200) + ' by ' + _sanitize(d.disposedBy, 100)]
+        [C.LIFECYCLE,    'Dispose'],
+        [C.ASSET_STATUS, 'Disposal'],
+        [C.STATUS_LABEL, 'Disposed']
+        // Division, District, Area, Branch, Staff, EmpID all KEPT intact
       ]);
     }
-    _log('DISPOSE', d.barcode, _sanitize(d.reason, 200) + ' | ' + _sanitize(d.disposedBy, 100), d.disposedBy || '');
+
+    _log('DISPOSE', d.barcode,
+      _sanitize(d.reason, 200) + ' | ' + _sanitize(d.disposedBy, 100),
+      d.disposedBy || '');
     return 'Disposal recorded';
-  } catch (e) { return 'Error: ' + e.message; } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
 function getDisposalData() {
   try {
     const sh   = _disposeSheet();
     const last = sh.getLastRow();
-    if (last < 2) return [];
-    return sh.getRange(2, 1, last - 1, 6).getValues().map(r => r.map(v => String(v || '')));
-  } catch (e) { return []; }
+    if (last < EVT_DATA_START) return [];
+    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 6).getValues()
+      .filter(r => r[0])
+      .map(r => r.map(v => String(v || '')));
+  } catch(e) { return []; }
 }
 
-// ─── USERS ───────────────────────────────────────────────────────────────────
+// ─── USERS ────────────────────────────────────────────────────────────────────
 function getUserList() {
   try {
-    const sh   = _ss().getSheetByName(SH_MASTER);
+    const sh   = _ss().getSheetByName(SH_USERS);
     if (!sh) return [];
     const last = sh.getLastRow();
-    if (last < 5) return [];
-    return sh.getRange(5, 1, last - 4, Math.min(sh.getLastColumn(), 12))
-      .getValues().filter(r => String(r[0] || '').trim()).map(r => r.map(v => String(v || '')));
-  } catch (e) { return []; }
+    if (last < 2) return [];
+    return sh.getRange(2, 1, last - 1, 9)
+      .getValues().filter(r => String(r[2] || '').trim())
+      .map(r => r.map(v => String(v || '')));
+  } catch(e) { return []; }
 }
 
 function getEmployeeById(empId) {
@@ -1178,46 +1220,48 @@ function getEmployeeById(empId) {
     const sh = _ss().getSheetByName(SH_MASTER);
     if (!sh) return { ok: false, error: 'Masterlist not found.' };
     const last = sh.getLastRow();
-    if (last < 5) return { ok: false, error: 'No employees found.' };
-    const data = sh.getRange(5, 1, last - 4, Math.min(sh.getLastColumn(), 12)).getValues();
-    const id   = String(empId).trim().toLowerCase();
-    for (const row of data) {
-      if (String(row[0] || '').trim().toLowerCase() !== id) continue;
+    if (last < 2) return { ok: false, error: 'No employees found.' };
+    const id = String(empId).trim().toLowerCase();
+    const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || '').trim().toLowerCase() !== id) continue;
+      const row = sh.getRange(i + 2, 1, 1, 15).getValues()[0];
       return {
-        ok:         true,
-        empId:      String(row[0]  || '').trim(),
-        name:       String(row[2]  || '').trim(),
-        division:   _normDiv(String(row[4]  || '').trim()),
-        district:   _normDist(String(row[5] || '').trim()),
-        area:       String(row[6]  || '').trim(),
-        branch:     String(row[7]  || '').trim(),
-        position:   String(row[11] || '').trim()
+        ok:       true,
+        empId:    String(row[0]  || '').trim(),
+        name:     String(row[2]  || '').trim(),
+        division: _normDiv(String(row[4]  || '').trim()),
+        district: _normDist(String(row[5] || '').trim()),
+        area:     String(row[6]  || '').trim(),
+        branch:   String(row[7]  || '').trim(),
+        position: String(row[11] || '').trim()
       };
     }
     return { ok: false, error: 'Employee ID not found: ' + empId };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch(e) { return { ok: false, error: e.message }; }
 }
 
 // ─── DROPDOWN DATA ────────────────────────────────────────────────────────────
 function getDropdownData() {
   try {
     const sh = _ss().getSheetByName(SH_DROPDOWN);
-    if (!sh) return { categories: [], brands: {}, models: {}, suppliers: [], laptopSpecs: [] };
+    if (!sh) return { categories:[], brands:{}, models:{}, suppliers:[], laptopSpecs:[] };
     const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
     if (lastRow < 2 || lastCol < 1)
-      return { categories: [], brands: {}, models: {}, suppliers: [], laptopSpecs: [] };
+      return { categories:[], brands:{}, models:{}, suppliers:[], laptopSpecs:[] };
+
     const data  = sh.getRange(1, 1, lastRow, lastCol).getValues();
     const row1  = data[0], row2 = data[1];
     const CAT_MAP = {
-      'LAPTOP': 'Laptop', 'LAPTOP ADAPTOR': 'Laptop Adaptor', 'CPU': 'CPU',
-      'MONITOR': 'Monitor', 'KEYBOARD': 'Keyboard', 'MOUSE': 'Mouse',
-      'PRINTER': 'Printer',
-      'SCANNER': 'Scanner', 'SCANSNAP': 'Scansnap',
-      'SCANNER SCANSNAP': 'Scanner',
-      'UPS': 'UPS', 'EXTERNAL DRIVE': 'External Drive',
-      'CAMERA': 'Camera', 'SPEAKER': 'Speaker'
+      'LAPTOP':'Laptop','LAPTOP ADAPTOR':'Laptop Adaptor','CPU':'CPU',
+      'MONITOR':'Monitor','KEYBOARD':'Keyboard','MOUSE':'Mouse',
+      'PRINTER':'Printer','SCANNER':'Scanner','SCANSNAP':'Scansnap',
+      'SCANNER SCANSNAP':'Scanner','UPS':'UPS','EXTERNAL DRIVE':'External Drive',
+      'CAMERA':'Camera','SPEAKER':'Speaker'
     };
-    const result = { categories: [], brands: {}, models: {}, suppliers: [], laptopSpecs: [], laptopSpecValues: {} };
+    const result = {
+      categories:[], brands:{}, models:{}, suppliers:[], laptopSpecs:[], laptopSpecValues:{}
+    };
     let catPositions = [], supplierCol = -1, laptopSpecCol = -1, fieldSectionCol = -1;
     let usedMergedScannerHeader = false;
 
@@ -1227,14 +1271,11 @@ function getDropdownData() {
       const up = raw.toUpperCase();
       if (up === 'SUPPLIERS' || up === 'SUPPLIER') { supplierCol = c; continue; }
       if (up === 'LAPTOP SPECS' || up === 'LAPTOP SPEC') { laptopSpecCol = c; continue; }
-      if (up === 'FIELD' || up === 'FIELD ' || up.startsWith('DIVISION') || up.startsWith('DISTRICT')) {
-        if (fieldSectionCol === -1) fieldSectionCol = c;
-        continue;
+      if (up === 'FIELD' || up.startsWith('DIVISION') || up.startsWith('DISTRICT')) {
+        if (fieldSectionCol < 0) fieldSectionCol = c; continue;
       }
       if (up === 'SCANNER SCANSNAP') {
-        catPositions.push({ name: 'Scanner', col: c });
-        usedMergedScannerHeader = true;
-        continue;
+        catPositions.push({ name:'Scanner', col:c }); usedMergedScannerHeader = true; continue;
       }
       catPositions.push({ name: CAT_MAP[up] || raw, col: c });
     }
@@ -1266,21 +1307,20 @@ function getDropdownData() {
       result.categories.push('Scansnap');
       result.brands['Scansnap'] = [...result.brands['Scanner']];
       Object.keys(result.models).forEach(key => {
-        if (key.startsWith('Scanner|')) {
+        if (key.startsWith('Scanner|'))
           result.models['Scansnap|' + key.slice('Scanner|'.length)] = [...result.models[key]];
-        }
       });
     }
 
-    if (supplierCol > -1) {
+    if (supplierCol > -1)
       for (let r = 1; r < lastRow; r++) {
         const s = String(data[r][supplierCol] || '').trim();
         if (s) result.suppliers.push(s);
       }
-    }
+
     if (laptopSpecCol > -1) {
-      const specEndCol = fieldSectionCol > -1 ? fieldSectionCol : lastCol;
-      for (let c = laptopSpecCol; c < specEndCol; c++) {
+      const specEnd = fieldSectionCol > -1 ? fieldSectionCol : lastCol;
+      for (let c = laptopSpecCol; c < specEnd; c++) {
         const spec = String(row2[c] || '').trim();
         if (!spec) continue;
         result.laptopSpecs.push(spec);
@@ -1293,365 +1333,162 @@ function getDropdownData() {
       }
     }
     return result;
-  } catch (e) {
-    return { categories: [], brands: {}, models: {}, suppliers: [], laptopSpecs: [], error: e.message };
+  } catch(e) {
+    return { categories:[], brands:{}, models:{}, suppliers:[], laptopSpecs:[], error:e.message };
   }
 }
 
 function getHeadOfficeDepts() {
   try {
-    const ss    = _ss();
-    const ddSh  = ss.getSheetByName(SH_DROPDOWN);
-    if (!ddSh || ddSh.getLastRow() < 2) return [];
-    const lastCol  = ddSh.getLastColumn();
-    const lastRow  = ddSh.getLastRow();
-    const headerRow = ddSh.getRange(1, 1, 1, lastCol).getValues()[0];
+    const sh    = _ss().getSheetByName(SH_DROPDOWN);
+    if (!sh || sh.getLastRow() < 2) return [];
+    const lastCol = sh.getLastColumn(), lastRow = sh.getLastRow();
+    const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
     let deptCol = -1;
-    for (let c = 0; c < headerRow.length; c++) {
-      const h = String(headerRow[c] || '').trim().toUpperCase();
-      if (h === 'DEPARTMENTS' || h === 'HEAD OFFICE' ||
-          h === 'HO DEPTS'   || h === 'HEAD OFFICE DEPTS') {
+    for (let c = 0; c < headers.length; c++) {
+      const h = String(headers[c] || '').trim().toUpperCase();
+      if (h === 'DEPARTMENTS' || h === 'HEAD OFFICE' || h === 'HO DEPTS') {
         deptCol = c; break;
       }
     }
     if (deptCol < 0) return [];
     const depts = [];
     for (let r = 1; r < lastRow; r++) {
-      const v = String(ddSh.getRange(r + 1, deptCol + 1).getValue() || '').trim();
+      const v = String(sh.getRange(r + 1, deptCol + 1).getValue() || '').trim();
       if (v) depts.push(v);
     }
     return depts;
-  } catch (e) { return []; }
+  } catch(e) { return []; }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  NEW FUNCTION 1: Parse Eng. List V2
-//
-//  Reads the V2 sheet which uses a carry-forward horizontal layout:
-//    Col A = Group/Region
-//    Col B = SFE Employee ID  (carries forward when blank)
-//    Col C = SFE Name
-//    Col D = Division Office  (carries forward when blank)
-//    Col E = District Office
-//    Col F = FE Employee ID
-//    Col G = FE Name
-//
-//  Returns { userDivisions, userDistricts, seniorDistrictScope, isSFE, found }
-// ─────────────────────────────────────────────────────────────────────────────
-function _parseEngListV2(empId) {
-  const DEFAULT = {
-    userDivisions: [], userDistricts: [],
-    seniorDistrictScope: [], isSFE: false, found: false
-  };
-
+// ─── LOCATION DATA ────────────────────────────────────────────────────────────
+// Now reads from Org Structure instead of Eng. List V2
+function getLocationData(empId) {
   try {
-    const sh = _ss().getSheetByName('Eng. List V2');
-    if (!sh || sh.getLastRow() < 2) return DEFAULT;
-
-    const lastRow = sh.getLastRow();
-    // Read at least 7 cols to cover the layout; grab more if the sheet is wider
-    const colCount = Math.max(sh.getLastColumn(), 7);
-    // Row 1 = header; data starts at row 2
-    const data = sh.getRange(2, 1, lastRow - 1, colCount).getValues();
-
-    const id = String(empId || '').trim().toLowerCase();
-    if (!id) return DEFAULT;
-
-    // Carry-forward tracking
-    let currentSfeId = '';
-    let currentDiv   = '';
-
-    // Accumulation maps
-    // sfeMap[sfeId] = { divSet: Set<string>, distSet: Set<string> }
-    // feMap[feId]   = { divSet: Set<string>, distSet: Set<string> }
-    const sfeMap = {};
-    const feMap  = {};
-
-    data.forEach(row => {
-      const rawSfe  = String(row[1] || '').trim(); // Col B — SFE EmpID
-      const rawDiv  = String(row[3] || '').trim(); // Col D — Division
-      const rawDist = String(row[4] || '').trim(); // Col E — District
-      const rawFe   = String(row[5] || '').trim(); // Col F — FE EmpID
-
-      // Carry forward non-blank values
-      if (rawSfe) currentSfeId = rawSfe;
-      if (rawDiv) currentDiv   = rawDiv;
-
-      if (!currentSfeId) return; // skip rows before the first SFE entry
-      if (!rawDist)      return; // skip rows with no district
-
-      const normDiv  = currentDiv  ? _normDiv(currentDiv)    : '';
-      const normDist = rawDist     ? _normDist(rawDist)      : '';
-
-      // ── Build SFE scope ────────────────────────────────────────────────
-      if (!sfeMap[currentSfeId]) {
-        sfeMap[currentSfeId] = { divSet: new Set(), distSet: new Set() };
-      }
-      if (normDiv)  sfeMap[currentSfeId].divSet.add(normDiv);
-      if (normDist) sfeMap[currentSfeId].distSet.add(normDist);
-
-      // ── Build FE scope ─────────────────────────────────────────────────
-      if (rawFe) {
-        if (!feMap[rawFe]) {
-          feMap[rawFe] = { divSet: new Set(), distSet: new Set() };
+    let scopeData;
+    if (empId) {
+      // Determine role tier from Users sheet
+      let roleTier = 'fe';
+      try {
+        const uSh = _ss().getSheetByName(SH_USERS);
+        if (uSh && uSh.getLastRow() >= 2) {
+          const uData = uSh.getRange(2, 1, uSh.getLastRow() - 1, 3).getValues();
+          const uRow  = uData.find(r => String(r[2] || '').trim().toLowerCase()
+                                         === String(empId).trim().toLowerCase());
+          if (uRow) roleTier = _mapRoleTier(String(uRow[0] || '').trim());
         }
-        if (normDiv)  feMap[rawFe].divSet.add(normDiv);
-        if (normDist) feMap[rawFe].distSet.add(normDist);
-      }
-    });
+      } catch(e) {}
+      scopeData = _parseOrgStructure(empId, roleTier);
+    } else {
+      scopeData = _buildFullDivDistrictMap();
+      scopeData.seniorDistrictScope = scopeData.userDistricts;
+    }
 
-    const numSort = (a, b) => {
-      const na = parseInt(a.replace(/\D+/g, ''), 10) || 0;
-      const nb = parseInt(b.replace(/\D+/g, ''), 10) || 0;
-      return na !== nb ? na - nb : a.localeCompare(b);
+    const hoDepts = getHeadOfficeDepts();
+    if (hoDepts.length > 0) {
+      scopeData.divDistrictMap['Head Office'] = hoDepts;
+    }
+
+    return {
+      divDistrictMap:      scopeData.divDistrictMap  || {},
+      userDivisions:       scopeData.userDivisions   || [],
+      userDistricts:       scopeData.userDistricts   || [],
+      seniorDistrictScope: scopeData.seniorDistrictScope || [],
+      headOfficeDepts:     hoDepts
     };
-
-    // Check if user is an FE
-    const feKey = Object.keys(feMap).find(k => k.toLowerCase() === id);
-    if (feKey) {
-      const fe = feMap[feKey];
-      return {
-        userDivisions:       [...fe.divSet].sort(numSort),
-        userDistricts:       [...fe.distSet].sort(numSort),
-        seniorDistrictScope: [],
-        isSFE:               false,
-        found:               true
-      };
-    }
-
-    // Check if user is an SFE
-    const sfeKey = Object.keys(sfeMap).find(k => k.toLowerCase() === id);
-    if (sfeKey) {
-      const sfe   = sfeMap[sfeKey];
-      const dists = [...sfe.distSet].sort(numSort);
-      return {
-        userDivisions:       [...sfe.divSet].sort(numSort),
-        userDistricts:       dists,
-        seniorDistrictScope: dists, // SFE sees all districts their FEs serve
-        isSFE:               true,
-        found:               true
-      };
-    }
-
-    return DEFAULT;
   } catch(e) {
-    Logger.log('_parseEngListV2 error: ' + e.message);
-    return DEFAULT;
+    return {
+      divDistrictMap:{}, userDivisions:[], userDistricts:[],
+      seniorDistrictScope:[], headOfficeDepts:[], error:e.message
+    };
   }
 }
 
+function getEngineerLocationData() { return getLocationData(null); }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  NEW FUNCTION 2: Build Org Structure Lookup
-//
-//  Reads "Org Structure-FO" (headers at row 3, data from row 4).
-//  Builds a map: lowercase(branchOrDistrictOrDivision) →
-//    { division, district, area, branch }
-//
-//  This lets the frontend resolve col T (Asset Location) values like
-//  "421 - Roxas" or "District 18" back to their parent Division/District.
-// ─────────────────────────────────────────────────────────────────────────────
-function _buildOrgLookup() {
-  const lookup = {};
-
+// ─── ENGINEER LOOKUP (for Accountability Form) ────────────────────────────────
+// Reads from Org Structure: Col E (index 4) = FE Name, Col H (index 7) = Sup Name
+// Col L (index 11) = District
+function getEngineersByLocation(district, branch) {
   try {
-    const sh = _ss().getSheetByName('Org Structure-FO');
-    if (!sh || sh.getLastRow() < 4) return lookup;
-
-    const lastRow = sh.getLastRow();
-    const lastCol = Math.max(sh.getLastColumn(), 6);
-
-    // Row 3 (1-indexed) = header row
-    const headerRow = sh.getRange(3, 1, 1, lastCol).getValues()[0];
-
-    // Discover columns by header name (case-insensitive)
-    let divCol = -1, distCol = -1, areaCol = -1, branchCol = -1;
-    headerRow.forEach((h, i) => {
-      const hUp = String(h || '').trim().toUpperCase();
-      if (hUp.includes('DIVISION') && divCol    < 0) divCol    = i;
-      if (hUp.includes('DISTRICT') && distCol   < 0) distCol   = i;
-      if (hUp.includes('AREA')     && areaCol   < 0) areaCol   = i;
-      if (hUp.includes('BRANCH')   && branchCol < 0) branchCol = i;
-    });
-
-    // Need at least division + district to be useful
-    if (divCol < 0 || distCol < 0) {
-      Logger.log('_buildOrgLookup: could not find Division/District columns in Org Structure-FO');
-      return lookup;
-    }
-
-    // Data rows start at row 4 (1-indexed) → range offset = lastRow - 3 rows
-    const data = sh.getRange(4, 1, lastRow - 3, lastCol).getValues();
-
-    let curDiv = '', curDist = '', curArea = '';
+    const sh     = _ss().getSheetByName(SH_ORG);
+    if (!sh || sh.getLastRow() < 2) return { fe:'', senior:'' };
+    const last   = sh.getLastRow();
+    const data   = sh.getRange(2, 1, last - 1, 12).getValues();
+    const normDist = String(district || '').trim().toLowerCase();
+    const result = { fe:'', senior:'' };
 
     data.forEach(r => {
-      const rawDiv    = divCol    >= 0 ? String(r[divCol]    || '').trim() : '';
-      const rawDist   = distCol   >= 0 ? String(r[distCol]   || '').trim() : '';
-      const rawArea   = areaCol   >= 0 ? String(r[areaCol]   || '').trim() : '';
-      const rawBranch = branchCol >= 0 ? String(r[branchCol] || '').trim() : '';
+      const rowDist = String(r[11] || '').trim().toLowerCase(); // Col L
+      if (!normDist || rowDist !== normDist) return;
+      if (!result.fe)     result.fe     = String(r[4] || '').trim(); // Col E = FE Name
+      if (!result.senior) result.senior = String(r[7] || '').trim(); // Col H = Sup Name
+    });
+    return result;
+  } catch(e) { return { fe:'', senior:'' }; }
+}
 
-      // Carry forward non-blank hierarchy values
-      if (rawDiv)  curDiv  = _normDiv(rawDiv);
-      if (rawDist) curDist = _normDist(rawDist);
-      if (rawArea) curArea = rawArea;
+// ─── ORG LOOKUP (for resolving Asset Location column back to Div/Dist) ────────
+function _buildOrgLookup() {
+  const lookup = {};
+  try {
+    const sh = _ss().getSheetByName(SH_ORG);
+    if (!sh || sh.getLastRow() < 2) return lookup;
+    const last = sh.getLastRow();
+    const data = sh.getRange(2, 1, last - 1, 12).getValues();
 
-      const loc = { division: curDiv, district: curDist, area: curArea, branch: rawBranch };
+    data.forEach(r => {
+      const div  = _normDiv(String(r[10] || '').trim());   // Col K
+      const dist = _normDist(String(r[11] || '').trim());  // Col L
+      if (!div || !dist) return;
 
-      // Branch-level: full detail
-      if (rawBranch) {
-        lookup[rawBranch.toLowerCase()] = loc;
-      }
+      // District → Division mapping (first occurrence wins)
+      if (!lookup[dist.toLowerCase()])
+        lookup[dist.toLowerCase()] = { division:div, district:dist, area:'', branch:'' };
 
-      // District-level: first occurrence wins (for "District 18" → Division X lookups)
-      if (curDist && !lookup[curDist.toLowerCase()]) {
-        lookup[curDist.toLowerCase()] = { division: curDiv, district: curDist, area: '', branch: '' };
-      }
-
-      // Division-level: first occurrence wins
-      if (curDiv && !lookup[curDiv.toLowerCase()]) {
-        lookup[curDiv.toLowerCase()] = { division: curDiv, district: '', area: '', branch: '' };
-      }
+      // Division → mapping
+      if (!lookup[div.toLowerCase()])
+        lookup[div.toLowerCase()] = { division:div, district:'', area:'', branch:'' };
     });
 
-    Logger.log('_buildOrgLookup: built ' + Object.keys(lookup).length + ' entries');
+    // Also try to read from Org Structure-FO if it exists (branch-level data)
+    const foSh = _ss().getSheetByName('Org Structure-FO');
+    if (foSh && foSh.getLastRow() >= 4) {
+      const foLast = foSh.getLastRow();
+      const foCol  = Math.max(foSh.getLastColumn(), 6);
+      const foHdr  = foSh.getRange(3, 1, 1, foCol).getValues()[0];
+      let   divC = -1, distC = -1, areaC = -1, branchC = -1;
+      foHdr.forEach((h, i) => {
+        const hUp = String(h || '').trim().toUpperCase();
+        if (hUp.includes('DIVISION') && divC    < 0) divC    = i;
+        if (hUp.includes('DISTRICT') && distC   < 0) distC   = i;
+        if (hUp.includes('AREA')     && areaC   < 0) areaC   = i;
+        if (hUp.includes('BRANCH')   && branchC < 0) branchC = i;
+      });
+      if (divC >= 0 && distC >= 0) {
+        const foData = foSh.getRange(4, 1, foLast - 3, foCol).getValues();
+        let cDiv = '', cDist = '', cArea = '';
+        foData.forEach(r => {
+          const rDiv    = divC    >= 0 ? String(r[divC]    || '').trim() : '';
+          const rDist   = distC   >= 0 ? String(r[distC]   || '').trim() : '';
+          const rArea   = areaC   >= 0 ? String(r[areaC]   || '').trim() : '';
+          const rBranch = branchC >= 0 ? String(r[branchC] || '').trim() : '';
+          if (rDiv)  cDiv  = _normDiv(rDiv);
+          if (rDist) cDist = _normDist(rDist);
+          if (rArea) cArea = rArea;
+          const loc = { division:cDiv, district:cDist, area:cArea, branch:rBranch };
+          if (rBranch)              lookup[rBranch.toLowerCase()] = loc;
+          if (cDist && !lookup[cDist.toLowerCase()])
+            lookup[cDist.toLowerCase()] = { division:cDiv, district:cDist, area:'', branch:'' };
+          if (cDiv && !lookup[cDiv.toLowerCase()])
+            lookup[cDiv.toLowerCase()] = { division:cDiv, district:'', area:'', branch:'' };
+        });
+      }
+    }
     return lookup;
   } catch(e) {
     Logger.log('_buildOrgLookup error: ' + e.message);
     return lookup;
-  }
-}
-
-
-// ─── ENGINEER LOCATION DATA ───────────────────────────────────────────────────
-function getEngineerLocationData() {
-  return getLocationData(null);
-}
-
-function getLocationData(empId) {
-  try {
-    const ss = _ss();
-    const result = {
-      divDistrictMap:        {},
-      userDivisions:         [],
-      userDistricts:         [],
-      userDivisionDistricts: {},
-      seniorDistrictScope:   [],
-      headOfficeDepts:       []
-    };
-
-    // ── 1. Build divDistrictMap from Drop down sheet (UNCHANGED) ──────────
-    const ddSh = ss.getSheetByName(SH_DROPDOWN);
-    if (ddSh && ddSh.getLastRow() >= 2) {
-      const lastCol = ddSh.getLastColumn();
-      const lastRow = ddSh.getLastRow();
-      let divBlockStartCol = -1;
-      if (lastCol >= 1) {
-        const headerRow = ddSh.getRange(1, 1, 1, lastCol).getValues()[0];
-        for (let c = 0; c < headerRow.length; c++) {
-          const hdr = String(headerRow[c] || '').trim().toUpperCase();
-          if (hdr.startsWith('FIELD') || hdr.startsWith('DIVISION')) {
-            divBlockStartCol = c + 1;
-            break;
-          }
-        }
-      }
-      if (divBlockStartCol < 1) divBlockStartCol = 46;
-      const blockWidth = lastCol - divBlockStartCol + 1;
-      if (blockWidth > 0 && lastCol >= divBlockStartCol) {
-        const maxRows = Math.max(lastRow, 2);
-        const block = ddSh.getRange(1, divBlockStartCol, maxRows, blockWidth).getValues();
-        const divRow   = block[1];
-        const distRows = block.slice(2);
-        divRow.forEach((divName, ci) => {
-          const div = String(divName || '').trim();
-          if (!div) return;
-          const normalDiv = div.replace(/^DIv/i, 'Div');
-          const districts = [];
-          distRows.forEach(dRow => {
-            const d = String(dRow[ci] || '').trim();
-            if (d) districts.push(d);
-          });
-          result.divDistrictMap[normalDiv] = districts;
-        });
-      }
-    }
-
-    // ── 2. Get user scope from Eng. List V2 (REPLACES old Eng. List block) ─
-    const numSort = (a, b) => {
-      const na = parseInt(a.replace(/\D+/g, ''), 10) || 0;
-      const nb = parseInt(b.replace(/\D+/g, ''), 10) || 0;
-      return na !== nb ? na - nb : a.localeCompare(b);
-    };
-
-    if (empId) {
-      const v2 = _parseEngListV2(empId);
-      result.userDivisions       = v2.userDivisions;
-      result.userDistricts       = v2.userDistricts;
-      result.seniorDistrictScope = v2.seniorDistrictScope;
-
-      // If V2 found nothing, try Masterlist fallback (for HO users not in V2)
-      // This is intentionally minimal — just preserving the district so loginUser
-      // can fall back to mlDistrict from the Masterlist row.
-
-    } else {
-      // No empId → load all divisions/districts for global dropdown population
-      const engV2Sh = ss.getSheetByName('Eng. List V2');
-      if (engV2Sh && engV2Sh.getLastRow() > 1) {
-        const lastRow = engV2Sh.getLastRow();
-        const colCount = Math.max(engV2Sh.getLastColumn(), 7);
-        const data = engV2Sh.getRange(2, 1, lastRow - 1, colCount).getValues();
-        const divSet = new Set(), distSet = new Set();
-        let curDiv = '';
-        data.forEach(r => {
-          const rawDiv  = String(r[3] || '').trim();
-          const rawDist = String(r[4] || '').trim();
-          if (rawDiv)  curDiv = rawDiv;
-          if (curDiv)  divSet.add(_normDiv(curDiv));
-          if (rawDist) distSet.add(_normDist(rawDist));
-        });
-        result.userDivisions = [...divSet].sort(numSort);
-        result.userDistricts = [...distSet].sort(numSort);
-      } else {
-        // Fallback to old sheet if V2 not present
-        const engSh = ss.getSheetByName('Eng. List') || ss.getSheetByName('Eng List');
-        if (engSh && engSh.getLastRow() > 1) {
-          const lastRow = engSh.getLastRow();
-          const data = engSh.getRange(2, 1, lastRow - 1, 10).getValues();
-          const divSet = new Set(), distSet = new Set();
-          data.forEach(r => {
-            const div  = String(r[7] || '').trim();
-            const dist = String(r[8] || '').trim();
-            if (div)  divSet.add(div);
-            if (dist) distSet.add(dist);
-          });
-          result.userDivisions = [...divSet].sort(numSort);
-          result.userDistricts = [...distSet].sort(numSort);
-        }
-      }
-    }
-
-    // ── 3. Build userDivisionDistricts cross-reference ────────────────────
-    result.userDivisions.forEach(div => {
-      const mapped = result.divDistrictMap[div] || [];
-      result.userDivisionDistricts[div] = mapped.length > 0 ? mapped : result.userDistricts;
-    });
-
-    // ── 4. Head Office departments (UNCHANGED) ────────────────────────────
-    const _hoDepts = getHeadOfficeDepts();
-    result.headOfficeDepts = _hoDepts;
-    if (_hoDepts.length > 0) {
-      result.divDistrictMap['Head Office'] = _hoDepts;
-      result.userDivisionDistricts['Head Office'] = _hoDepts;
-    }
-
-    return result;
-  } catch(e) {
-    return {
-      divDistrictMap: {}, userDivisions: [], userDistricts: [],
-      userDivisionDistricts: {}, headOfficeDepts: [], seniorDistrictScope: [],
-      error: e.message
-    };
   }
 }
 
@@ -1660,31 +1497,97 @@ function _log(action, barcode, details, performer) {
   try {
     _logSheet().appendRow([
       new Date().toLocaleString('en-PH'),
-      action, barcode, details, performer || ''
+      action, barcode || '', details || '', performer || ''
     ]);
-  } catch (e) {}
+  } catch(e) {}
 }
 
 function getActivityLogs(page, pageSize) {
   try {
     const sh   = _logSheet();
     const last = sh.getLastRow();
-    if (last < 2) return { rows: [], total: 0 };
-    const all = sh.getRange(2, 1, last - 1, 5).getValues().reverse()
+    if (last < EVT_DATA_START) return { rows:[], total:0 };
+
+    const all = sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 5).getValues()
+      .filter(r => r[0])
+      .reverse()
       .map(r => ({
-        timestamp: String(r[0] || ''), action: String(r[1] || ''),
-        barcode:   String(r[2] || ''), details: String(r[3] || ''),
+        timestamp: String(r[0] || ''), action:    String(r[1] || ''),
+        barcode:   String(r[2] || ''), details:   String(r[3] || ''),
         performer: String(r[4] || '')
       }));
+
     const total = all.length;
     const ps    = (pageSize && pageSize > 0) ? Number(pageSize) : 100;
     const pg    = (page     && page     > 0) ? Number(page)     : 1;
-    const rows  = all.slice((pg - 1) * ps, pg * ps);
-    return { rows, total, page: pg, pageSize: ps, totalPages: Math.ceil(total / ps) };
-  } catch (e) { return { rows: [], total: 0 }; }
+    return {
+      rows:  all.slice((pg - 1) * ps, pg * ps),
+      total, page:pg, pageSize:ps,
+      totalPages: Math.ceil(total / ps) || 1
+    };
+  } catch(e) { return { rows:[], total:0 }; }
 }
 
-function syncAll() { return getAllAssets(); }
+// ─── BATCH LOAD ───────────────────────────────────────────────────────────────
+function getInitialData() {
+  const assets    = getAllAssets().data || [];
+  const borrows   = getBorrowData()     || [];
+  const transfers = getTransferData()   || [];
+
+  // ── Merge active borrow details into asset objects ─────────────────────────
+  const activeBorrowMap = {};
+  borrows.filter(b => b.status === 'Borrow').forEach(b => {
+    if (!activeBorrowMap[b.barcode]) activeBorrowMap[b.barcode] = b;
+  });
+  assets.forEach(a => {
+    if (a.status === 'borrowed') {
+      const b = activeBorrowMap[a.Barcode];
+      if (b) {
+        a.BorName    = b.borrowerName;
+        a.BorEmpID   = b.empId;
+        a.BorDesig   = b.designation;
+        a.BorDiv     = b.division;
+        a.BorDist    = b.district;
+        a.BorBranch  = b.branch;
+        a.BorDate    = b.borrowDate;
+        a.ExpReturn  = b.expectedReturn;
+        a.ActReturn  = b.actualReturn;
+        a.BorRemarks = b.remarks;
+      }
+    }
+  });
+
+  // ── Merge latest transfer details for assets in transfer state ────────────
+  // Transfers sheet columns: 0=Barcode, 1=Type, 10=ToStaff, 11=ToEmpID,
+  //                          13=ToDiv, 16=ToBranch, 18=EffDate, 19=Status
+  const xferMap = {};
+  transfers.forEach(r => {
+    if (!xferMap[r[0]] || r[20] > (xferMap[r[0]][20] || ''))
+      xferMap[r[0]] = r; // keep latest by timestamp
+  });
+  assets.forEach(a => {
+    if (a.status === 'transfer' && xferMap[a.Barcode]) {
+      const r = xferMap[a.Barcode];
+      a.XferType  = r[1]  || '';
+      a.ToStaff   = r[10] || '';
+      a.ToEmpID   = r[11] || '';
+      a.ToDiv     = r[13] || '';
+      a.ToBranch  = r[16] || '';
+      a.XferDate  = r[18] || '';
+    }
+  });
+
+  return {
+    assets,
+    borrows,
+    transfers,
+    disposals: getDisposalData(),
+    logs:      getActivityLogs(1, 200).rows,
+    orgLookup: _buildOrgLookup()
+  };
+}
+
+function syncAll()           { return getAllAssets(); }
 function getSpreadsheetUrl() { return _ss().getUrl(); }
 
 // ─── STAFF MOVEMENT ───────────────────────────────────────────────────────────
@@ -1693,18 +1596,17 @@ function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
     if (!empId) return 'Error: Employee ID is required.';
     const sh   = _entrySheet();
     const last = sh.getLastRow();
-    if (last < AE_DATA_START) return 'Error: No assets in system.';
+    if (last < AE_DATA_START) return 'Error: No assets found.';
 
-    const count  = last - AE_DATA_START + 1;
-    // Read ALL columns once
+    const count   = last - AE_DATA_START + 1;
     const allData = sh.getRange(AE_DATA_START, 1, count, TOTAL_COLS).getValues();
     const nowStr  = new Date().toLocaleString('en-PH');
     const id      = String(empId).trim().toLowerCase();
     const normDiv  = _normDiv(newDiv   || '');
     const normDist = _normDist(newDist || '');
-    
+
     let updated = 0, skipped = 0;
-    const rowsToWrite = []; // { rowIdx, rowData }
+    const rowsToWrite = [];
 
     for (let i = 0; i < allData.length; i++) {
       const row      = allData[i];
@@ -1712,10 +1614,9 @@ function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
       if (rowEmpId !== id) continue;
 
       const lc = String(row[C.LIFECYCLE - 1] || '').toLowerCase();
-      if (lc === 'borrow')                      { skipped++; continue; }
+      if (lc === 'borrow')                       { skipped++; continue; }
       if (lc === 'dispose' || lc === 'disposal') continue;
 
-      // Clone the row, modify in memory
       const newRow = [...row];
       if (assetAction === 'spare') {
         newRow[C.LIFECYCLE    - 1] = 'Active';
@@ -1726,46 +1627,46 @@ function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
         newRow[C.DESIGNATION  - 1] = '';
         newRow[C.EFF_DATE     - 1] = '';
       }
-      newRow[C.DIVISION     - 1] = normDiv;
-      newRow[C.DISTRICT     - 1] = normDist;
-      newRow[C.AREA         - 1] = newArea   || '';
-      newRow[C.BRANCH       - 1] = newBranch || '';
-      newRow[C.LAST_UPDATED - 1] = nowStr;
-      
+      newRow[C.DIVISION      - 1] = normDiv;
+      newRow[C.DISTRICT      - 1] = normDist;
+      newRow[C.AREA          - 1] = newArea   || '';
+      newRow[C.BRANCH        - 1] = newBranch || '';
+      newRow[C.LAST_UPDATED  - 1] = nowStr;
       rowsToWrite.push({ rowIdx: i + AE_DATA_START, rowData: newRow });
       updated++;
     }
 
-    // Batch write: one setValue call per changed row (not per cell)
     rowsToWrite.forEach(({ rowIdx, rowData }) => {
       sh.getRange(rowIdx, 1, 1, TOTAL_COLS).setValues([rowData]);
     });
 
     _log('MOVE_STAFF', empId,
-      `Action:${assetAction} → ${newDiv}/${newDist}/${newBranch} | ` +
-      `${updated} updated, ${skipped} skipped`, empId);
+      'Action:' + assetAction + ' → ' + newDiv + '/' + newDist + '/' + newBranch +
+      ' | ' + updated + ' updated, ' + skipped + ' skipped', empId);
 
-    let msg = `Staff movement recorded. ${updated} asset(s) ` +
-      `${assetAction === 'spare' ? 'returned to spare' : 'moved to new location'}.`;
-    if (skipped) msg += ` (${skipped} skipped — on active borrow)`;
+    let msg = 'Staff movement recorded. ' + updated + ' asset(s) ' +
+      (assetAction === 'spare' ? 'returned to spare' : 'moved to new location') + '.';
+    if (skipped) msg += ' (' + skipped + ' skipped — on active borrow)';
     return msg;
-  } catch (e) { return 'Error: ' + e.message; }
+  } catch(e) { return 'Error: ' + e.message; }
 }
 
-
-function moveOrgUnit(unitType, currentDiv, currentDist, currentArea, currentBranch, newDiv, newDist, newArea) {
+function moveOrgUnit(unitType, currentDiv, currentDist, currentArea, currentBranch,
+                     newDiv, newDist, newArea) {
   try {
     const sh   = _entrySheet();
     const last = sh.getLastRow();
     if (last < AE_DATA_START) return 'Error: No assets found.';
+
     const count  = last - AE_DATA_START + 1;
     const data   = sh.getRange(AE_DATA_START, 1, count, TOTAL_COLS).getValues();
     const nowStr = new Date().toLocaleString('en-PH');
     const normCurDiv  = _normDiv(currentDiv   || '');
     const normCurDist = _normDist(currentDist || '');
-    const normNewDiv  = _normDiv(newDiv   || '');
-    const normNewDist = _normDist(newDist || '');
+    const normNewDiv  = _normDiv(newDiv        || '');
+    const normNewDist = _normDist(newDist      || '');
     let updated = 0;
+
     data.forEach((row, i) => {
       const rowDiv    = _normDiv(String(row[C.DIVISION  - 1] || '').trim());
       const rowDist   = _normDist(String(row[C.DISTRICT - 1] || '').trim());
@@ -1773,144 +1674,44 @@ function moveOrgUnit(unitType, currentDiv, currentDist, currentArea, currentBran
       const rowBranch = String(row[C.BRANCH - 1] || '').trim();
       const lc        = String(row[C.LIFECYCLE - 1] || '').toLowerCase();
       if (lc === 'dispose' || lc === 'disposal') return;
+
       const rowIdx = i + AE_DATA_START;
       const updates = [];
-if (unitType === 'district') {
-  // Moving a district means reassigning it to a different division
-  if (rowDist === normCurDist && rowDiv === normCurDiv) {
-    updates.push([C.DIVISION, normNewDiv]);
-    // Only update district name if it changed (rename scenario)
-    if (normNewDist && normNewDist !== normCurDist) {
-      updates.push([C.DISTRICT, normNewDist]);
-    }
-  }
-} else if (unitType === 'area') {
-  if (rowArea === currentArea && 
-      rowDist === normCurDist && 
-      rowDiv  === normCurDiv) {
-    updates.push([C.DIVISION, normNewDiv]);
-    updates.push([C.DISTRICT, normNewDist]);
-    // Keep area name — only its parent changes
-  }
-} else if (unitType === 'branch') {
-  if (rowBranch === currentBranch && 
-      rowArea   === currentArea   &&
-      rowDist   === normCurDist   && 
-      rowDiv    === normCurDiv) {
-    updates.push([C.DIVISION, normNewDiv]);
-    updates.push([C.DISTRICT, normNewDist]);
-    updates.push([C.AREA, newArea || currentArea]); // newArea from modal
-  }
-}
+
+      if (unitType === 'district') {
+        if (rowDist === normCurDist && rowDiv === normCurDiv) {
+          updates.push([C.DIVISION, normNewDiv]);
+          if (normNewDist && normNewDist !== normCurDist)
+            updates.push([C.DISTRICT, normNewDist]);
+        }
+      } else if (unitType === 'area') {
+        if (rowArea === currentArea && rowDist === normCurDist && rowDiv === normCurDiv) {
+          updates.push([C.DIVISION, normNewDiv]);
+          updates.push([C.DISTRICT, normNewDist]);
+        }
+      } else if (unitType === 'branch') {
+        if (rowBranch === currentBranch && rowArea === currentArea &&
+            rowDist   === normCurDist   && rowDiv  === normCurDiv) {
+          updates.push([C.DIVISION, normNewDiv]);
+          updates.push([C.DISTRICT, normNewDist]);
+          updates.push([C.AREA, newArea || currentArea]);
+        }
+      }
+
       if (updates.length) {
         updates.push([C.LAST_UPDATED, nowStr]);
         updates.forEach(u => sh.getRange(rowIdx, u[0]).setValue(u[1]));
         updated++;
       }
     });
+
     _log('MOVE_ORG', unitType.toUpperCase(),
-      `${currentDiv}/${currentDist}/${currentArea}/${currentBranch} → ${newDiv}/${newDist}/${newArea} | ${updated} assets`, '');
+      currentDiv + '/' + currentDist + '/' + currentArea + '/' + currentBranch +
+      ' → ' + newDiv + '/' + newDist + '/' + newArea + ' | ' + updated + ' assets', '');
+
     return updated > 0
-      ? `${unitType.charAt(0).toUpperCase() + unitType.slice(1)} moved. ${updated} asset(s) updated.`
-      : 'Move recorded — no matching assets found (check filters or scope).';
+      ? unitType.charAt(0).toUpperCase() + unitType.slice(1) +
+        ' moved. ' + updated + ' asset(s) updated.'
+      : 'Move recorded — no matching assets found.';
   } catch(e) { return 'Error: ' + e.message; }
-}
-
-// ─── UPDATE ASSET DETAILS ─────────────────────────────────────────────────────
-function updateAssetDetails(barcode, updates) {
-  try {
-    const sh = _entrySheet();
-    const rowIdx = _findRow(sh, barcode);
-    if (rowIdx < 1) return 'Error: Asset not found: ' + barcode;
-
-    const fields = [];
-    if (updates.brand     !== undefined) fields.push([C.BRAND,     updates.brand]);
-    if (updates.condition !== undefined) fields.push([C.CONDITION, updates.condition]);
-    if (updates.purchDate !== undefined) fields.push([C.PURCH_DATE,updates.purchDate]);
-    if (updates.specs     !== undefined) fields.push([C.SPECS,     updates.specs]);
-    if (updates.remarks   !== undefined) fields.push([C.REMARKS,   updates.remarks]);
-
-    // Serial needs duplicate check
-    if (updates.serial !== undefined) {
-      const currentSerial = String(
-        sh.getRange(rowIdx, C.SERIAL).getValue() || ''
-      ).trim();
-      if (updates.serial !== currentSerial && updates.serial) {
-        const last = sh.getLastRow();
-        if (last >= AE_DATA_START) {
-          const serials = sh.getRange(
-            AE_DATA_START, C.SERIAL,
-            last - AE_DATA_START + 1, 1
-          ).getValues();
-          const dupIdx = serials.findIndex(
-            (r, i) => String(r[0]).trim() === updates.serial 
-              && (i + AE_DATA_START) !== rowIdx
-          );
-          if (dupIdx >= 0) return 'Error: Serial No. already used by another asset.';
-        }
-      }
-      fields.push([C.SERIAL, updates.serial]);
-    }
-
-    _setRow(sh, rowIdx, fields);
-    _log('EDIT', barcode, 'Updated: ' + Object.keys(updates).join(', '), '');
-    return 'Asset details updated.';
-  } catch(e) { return 'Error: ' + e.message; }
-}
-
-// ─── BATCH DATA LOADING ───────────────────────────────────────────────────────
-function getInitialData() {
-  return {
-    assets:    getAllAssets().data         || [],
-    borrows:   getBorrowData()             || [],
-    transfers: getTransferData()           || [],
-    disposals: getDisposalData()           || [],
-    logs:      getActivityLogs(1, 200).rows|| [],
-    orgLookup: _buildOrgLookup()           || {}
-  };
-}
-function getEngineersByLocation(district, branch) {
-  try {
-    var ss     = _ss();
-    var engSh  = ss.getSheetByName('Eng. List') || ss.getSheetByName('Eng List');
-    var result = { fe: '', senior: '' };
-
-    if (!engSh || engSh.getLastRow() < 2) return result;
-
-    var last = engSh.getLastRow();
-    var data = engSh.getRange(2, 1, last - 1, 10).getValues();
-
-    var normDist   = String(district || '').trim().toLowerCase();
-    var normBranch = String(branch   || '').trim().toLowerCase();
-
-    // Find engineers matching the district
-    var matches = data.filter(function(r) {
-      var rowDist = String(r[8] || '').trim().toLowerCase();
-      return normDist && rowDist === normDist;
-    });
-
-    // Try to narrow by branch if provided
-    if (normBranch && matches.length > 1) {
-      var branchMatches = matches.filter(function(r) {
-        var rowBranch = String(r[9] || '').trim().toLowerCase();
-        return rowBranch === normBranch;
-      });
-      if (branchMatches.length) matches = branchMatches;
-    }
-
-    matches.forEach(function(r) {
-      var role = String(r[3] || '').trim().toLowerCase(); // supervisor/role column
-      var name = String(r[2] || '').trim();               // name column
-      if (!name) return;
-      if (role.includes('senior') || role.includes('supervisor')) {
-        if (!result.senior) result.senior = name;
-      } else {
-        if (!result.fe) result.fe = name;
-      }
-    });
-
-    return result;
-  } catch(e) {
-    return { fe: '', senior: '' };
-  }
 }
