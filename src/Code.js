@@ -271,11 +271,20 @@ function _parseRemarks(remarks, roleTier) {
 
   // Scope type detection
   var scopeType = null;
-  if (['dual scope','all scope','both scope','full visibility','all data'].some(k => r.includes(k)))
+  if ([
+    'dual scope','all scope','both scope','full visibility','all data',
+    'all inventory access','all view access','all access','full access to all'
+  ].some(k => r.includes(k)))
     scopeType = 'both';
-  else if (['can see field','field scope','field data','field only'].some(k => r.includes(k)))
+  else if ([
+    'can see field','field scope','field data','field only',
+    'field office inventories','field office inventory','field office'
+  ].some(k => r.includes(k)))
     scopeType = 'field';
-  else if (['can see ho','can see head office','ho scope','ho data','ho only','head office only'].some(k => r.includes(k)))
+  else if ([
+    'can see ho','can see head office','ho scope','ho data','ho only','head office only',
+    'central office inventories','central office inventory','central office'
+  ].some(k => r.includes(k)))
     scopeType = 'ho';
 
   const DEFAULTS = {
@@ -488,7 +497,10 @@ function loginUser(empId, password) {
       const firstLogin  = (pwd === '1234' || pwd === _hashPwd('1234'));
       const roleTier    = _mapRoleTier(role);
       const perms       = _parseRemarks(remarks, roleTier);
-      const scopeType = perms.scopeType !== null ? perms.scopeType : (roleTier === 'ho' ? 'ho' : 'field');
+      const BOTH_ROLES = ['super admin', 'superadmin', 'super user', 'superuser'];
+      const fallbackScope = BOTH_ROLES.includes(role.trim().toLowerCase()) ? 'both'
+        : (roleTier === 'ho' ? 'ho' : 'field');
+      const scopeType = perms.scopeType !== null ? perms.scopeType : fallbackScope;
       const scopeData   = _parseOrgStructure(rowId, roleTier);
       const mlData      = _getMasterlistEntry(rowId);
 

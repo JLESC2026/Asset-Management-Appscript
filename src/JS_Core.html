@@ -345,14 +345,27 @@ function _filterByScope(assets) {
   function _matchesField(a) {
     var ea = (a.EffectiveAssignment || '').trim().toLowerCase();
     if (ea !== 'field office' && ea !== '' && ea !== 'unknown') return false;
-    if (ea === '' || ea === 'unknown') return false; // blanks already handled via EffectiveAssignment
+    if (ea === '' || ea === 'unknown') return false;
+
     var assetDiv  = (a.Division  || '').toLowerCase().trim();
     var assetDist = (a.District  || '').toLowerCase().trim();
+
+    // HO-tier users with field scope see ALL field assets (they have full div/dist lists)
+    if (isHO()) {
+      if (userDivs.length === 0 && userDists.length === 0) return true; // full access
+      if (assetDiv  && userDivs.length  > 0 && userDivs.indexOf(assetDiv)   >= 0) return true;
+      if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) return true;
+      return assetDiv === '' && assetDist === ''; // include unlocated field assets
+    }
+
+    // Senior FE: division + district match
     if (isSenior()) {
       if (assetDiv  && userDivs.length  > 0 && userDivs.indexOf(assetDiv)   >= 0) return true;
       if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) return true;
       return false;
     }
+
+    // Regular FE: district match only
     if (assetDist && userDists.length > 0) return userDists.indexOf(assetDist) >= 0;
     return false;
   }
