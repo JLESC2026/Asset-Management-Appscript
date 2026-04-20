@@ -51,7 +51,9 @@ function renderSpare() {
 
     return `<tr>
       <td><input type="checkbox" class="cb cb-spare" value="${esc(a.Barcode)}" onclick="checkSelTable('spare')"/></td>
-      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td>${a.hasRealBarcode
+        ? `<span class="mono-bc">${esc(a.Barcode)}</span>`
+        : `<span class="mono-bc" style="color:var(--text3);font-style:italic">—</span>`}</td>
       <td><span class="type-tag">${esc(a.Type)}</span></td>
       <td>${esc(a.Brand) || '—'}</td>
       <td class="mono-sm">${esc(a.Serial) || '—'}</td>
@@ -61,10 +63,15 @@ function renderSpare() {
       <td style="font-size:.78rem;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(a.Supplier) || '—'}</td>
       <td>
         <div style="display:flex;gap:4px">
-          ${canAllocate() ? `<button class="btn btn-icon btn-allocate" data-tip="Allocate" onclick="openAllocateModal('${esc(a.Barcode)}')">${_ICO.allocate}</button>` : ''}
-          ${canBorrow()   ? `<button class="btn btn-icon btn-borrow"   data-tip="Borrow"   onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>` : ''}
-          ${canDispose()  ? `<button class="btn btn-icon btn-danger"   data-tip="Dispose"  onclick="openDisposalModal('${esc(a.Barcode)}')">${_ICO.dispose}</button>` : ''}
-          <button class="btn btn-icon btn-secondary" data-tip="View" onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
+          ${!a.hasRealBarcode
+            ? `<button class="btn btn-icon btn-secondary" data-tip="No barcode" onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>`
+            : `
+              ${canAllocate() ? `<button class="btn btn-icon btn-allocate" data-tip="Allocate" onclick="openAllocateModal('${esc(a.Barcode)}')">${_ICO.allocate}</button>` : ''}
+              ${canBorrow()   ? `<button class="btn btn-icon btn-borrow"   data-tip="Borrow"   onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>` : ''}
+              ${canDispose()  ? `<button class="btn btn-icon btn-danger"   data-tip="Dispose"  onclick="openDisposalModal('${esc(a.Barcode)}')">${_ICO.dispose}</button>` : ''}
+              <button class="btn btn-icon btn-secondary" data-tip="View" onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
+            `
+          }
         </div>
       </td>
     </tr>`;

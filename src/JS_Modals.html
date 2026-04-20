@@ -60,6 +60,16 @@ function viewAsset(barcode) {
 
   // Footer actions
   const footer = document.getElementById('viewModalFooter');
+  if (!a.hasRealBarcode) {
+    footer.innerHTML = `
+      <div style="flex:1;padding:8px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);
+        border-radius:6px;font-size:.8rem;color:#fbbf24">
+        ⚠ No barcode assigned — allocate, borrow, transfer and dispose are unavailable until a barcode is added.
+      </div>
+      <button class="btn btn-secondary" onclick="closeModal('viewModal')">Close</button>`;
+    openModal('viewModal');
+    return;
+  }
   let actions = '';
   if (a.status === 'spare') {
     const btns = [];

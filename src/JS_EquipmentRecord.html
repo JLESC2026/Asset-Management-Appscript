@@ -252,6 +252,10 @@ function _renderEquipTree(tree) {
   }
 
   var html = '<div class="st-tree">';
+  if (isDualScope() && isHO()) {
+    // HO users with dual scope already see field via their _filterByScope
+    // No structural change needed — falls through to normal field tree
+  }
   divKeys.forEach(function(div){ html += _renderEquipDivNode(div, tree[div]); });
   html += '</div>';
   container.innerHTML = html;

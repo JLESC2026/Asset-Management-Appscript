@@ -138,7 +138,9 @@ function renderAllocated() {
     const isXfer = (a.Lifecycle || '').toLowerCase() === 'transfer';
     return `<tr>
       <td><input type="checkbox" class="cb cb-allocated" value="${esc(a.Barcode)}" onclick="checkSelTable('allocated')"/></td>
-      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td>${a.hasRealBarcode
+        ? `<span class="mono-bc">${esc(a.Barcode)}</span>`
+        : `<span class="mono-bc" style="color:var(--text3);font-style:italic">—</span>`}</td>
       <td><span class="type-tag">${esc(a.Type)}</span></td>
       <td>${esc(a.Brand) || '—'}</td>
       <td>
@@ -152,11 +154,16 @@ function renderAllocated() {
       <td><span class="cond-${(a.Condition || 'good').toLowerCase()}">${esc(a.Condition)}</span></td>
       <td>
         <div style="display:flex;gap:4px">
-          ${canTransfer() ? `<button class="btn btn-icon btn-transfer"  data-tip="Transfer" onclick="openTransferModal('${esc(a.Barcode)}')">${_ICO.transfer}</button>` : ''}
-          ${canBorrow()   ? `<button class="btn btn-icon btn-borrow"    data-tip="Borrow"   onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>` : ''}
-          ${canDealloc()  ? `<button class="btn btn-icon btn-spare"     data-tip="↩ Spare"  onclick="openDeallocModal('${esc(a.Barcode)}','${esc(a.Staff)}')">${_ICO.spare}</button>` : ''}
-          ${canDispose()  ? `<button class="btn btn-icon btn-danger"    data-tip="Dispose"  onclick="openDisposalModal('${esc(a.Barcode)}')">${_ICO.dispose}</button>` : ''}
-          <button class="btn btn-icon btn-secondary" data-tip="View" onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
+          ${!a.hasRealBarcode
+            ? `<button class="btn btn-icon btn-secondary" data-tip="No barcode" onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>`
+            : `
+              ${canTransfer() ? `<button class="btn btn-icon btn-transfer"  data-tip="Transfer" onclick="openTransferModal('${esc(a.Barcode)}')">${_ICO.transfer}</button>` : ''}
+              ${canBorrow()   ? `<button class="btn btn-icon btn-borrow"    data-tip="Borrow"   onclick="openBorrowModal('${esc(a.Barcode)}')">${_ICO.borrow}</button>` : ''}
+              ${canDealloc()  ? `<button class="btn btn-icon btn-spare"     data-tip="↩ Spare"  onclick="openDeallocModal('${esc(a.Barcode)}','${esc(a.Staff)}')">${_ICO.spare}</button>` : ''}
+              ${canDispose()  ? `<button class="btn btn-icon btn-danger"    data-tip="Dispose"  onclick="openDisposalModal('${esc(a.Barcode)}')">${_ICO.dispose}</button>` : ''}
+              <button class="btn btn-icon btn-secondary" data-tip="View" onclick="viewAsset('${esc(a.Barcode)}')">${_ICO.view}</button>
+            `
+          }
         </div>
       </td>
     </tr>`;

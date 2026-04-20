@@ -264,6 +264,10 @@ function canBorrow()   { return !!(SESSION && SESSION.perms && SESSION.perms.can
 function canTransfer() { return !!(SESSION && SESSION.perms && SESSION.perms.canTransfer); }
 function isViewOnly()  { return !!(SESSION && SESSION.perms && SESSION.perms.viewOnly); }
 
+function canSeeHO()    { return SESSION && (SESSION.scopeType === 'ho'    || SESSION.scopeType === 'both'); }
+function canSeeField() { return SESSION && (SESSION.scopeType === 'field' || SESSION.scopeType === 'both'); }
+function isDualScope() { return SESSION && SESSION.scopeType === 'both'; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  _getScopeDistricts
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,66 +330,53 @@ function _resolveByOrgLookup(asset) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  _filterByScope  — FIX v2
 //
-//  The Assignment column is the single source of truth:
+//  The EffectiveAssignment column is the single source of truth:
 //    'Central Office' → HO users only
 //    'Field Office'   → Field users only (scoped by Division / District)
 //    blank            → shown to nobody (legacy / disposal rows)
 //
-//  This eliminates the previous bug where ~3,158 blank-Assignment rows were
-//  incorrectly surfaced to HO users via the fallback
-//    `return !(a.District || a.Division || a.Area || a.Branch)`.
 // ─────────────────────────────────────────────────────────────────────────────
 function _filterByScope(assets) {
   if (assets === ASSETS && _scopeCache) return _scopeCache;
 
+  var userDivs  = (SESSION.userDivisions || []).map(function(d){ return (d||'').toLowerCase(); });
+  var userDists = _getScopeDistricts();
+
+  function _matchesField(a) {
+    var ea = (a.EffectiveAssignment || '').trim().toLowerCase();
+    if (ea !== 'field office' && ea !== '' && ea !== 'unknown') return false;
+    if (ea === '' || ea === 'unknown') return false; // blanks already handled via EffectiveAssignment
+    var assetDiv  = (a.Division  || '').toLowerCase().trim();
+    var assetDist = (a.District  || '').toLowerCase().trim();
+    if (isSenior()) {
+      if (assetDiv  && userDivs.length  > 0 && userDivs.indexOf(assetDiv)   >= 0) return true;
+      if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) return true;
+      return false;
+    }
+    if (assetDist && userDists.length > 0) return userDists.indexOf(assetDist) >= 0;
+    return false;
+  }
+
+  function _matchesHO(a) {
+    var ea = (a.EffectiveAssignment || '').trim().toLowerCase();
+    return ea === 'central office';
+  }
+
   var result;
+  var scope = SESSION.scopeType || (isHO() ? 'ho' : 'field');
 
-  // ── HEAD OFFICE ────────────────────────────────────────────────────────────
-  // HO users see ONLY assets explicitly marked 'Central Office'.
-  if (isHO()) {
-    result = assets.filter(function(a) {
-      return (a.Assignment || '').trim().toLowerCase() === 'central office';
-    });
-
-  // ── FIELD USERS (Senior FE and regular FE) ────────────────────────────────
-  // Field users see ONLY assets explicitly marked 'Field Office'.
-  // Blank-assignment assets (legacy / disposal rows) are shown to nobody.
-  } else {
-    var userDivs = (SESSION.userDivisions || []).map(function(d){
-      return (d || '').toLowerCase();
-    });
-    var userDists = _getScopeDistricts(); // already lowercase
-
+  if (scope === 'ho') {
+    result = assets.filter(_matchesHO);
+  } else if (scope === 'field') {
     if (userDivs.length === 0 && userDists.length === 0) {
       result = [];
     } else {
-      result = assets.filter(function(a) {
-        // Strict gate: only Field Office assets are visible to field users
-        if ((a.Assignment || '').trim().toLowerCase() !== 'field office') return false;
-
-        var assetDiv  = (a.Division  || '').toLowerCase().trim();
-        var assetDist = (a.District  || '').toLowerCase().trim();
-
-        // ── SENIOR FE ───────────────────────────────────────────────────────
-        if (isSenior()) {
-          // 1. Primary: Division match
-          if (assetDiv && userDivs.length > 0 && userDivs.indexOf(assetDiv) >= 0) {
-            return true;
-          }
-          // 2. Fallback: District match (assets enrolled with district but no division)
-          if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) {
-            return true;
-          }
-          return false;
-        }
-
-        // ── REGULAR FE ──────────────────────────────────────────────────────
-        if (assetDist && userDists.length > 0) {
-          return userDists.indexOf(assetDist) >= 0;
-        }
-        return false;
-      });
+      result = assets.filter(_matchesField);
     }
+  } else { // 'both'
+    result = assets.filter(function(a) {
+      return _matchesHO(a) || (userDivs.length > 0 || userDists.length > 0 ? _matchesField(a) : true);
+    });
   }
 
   if (assets === ASSETS) _scopeCache = result;
@@ -540,6 +531,7 @@ function doLogin(){
         roleTier:            r.roleTier || 'fe',
         name:                r.name||r.username,
         perms:               r.perms || {},
+        scopeType:           r.scopeType || (r.roleTier === 'ho' ? 'ho' : 'field'),
         division:            r.division||'',
         district:            r.district||'',
         userDivisions:       r.userDivisions||[],
@@ -677,6 +669,12 @@ function _applyPermissions() {
   // ── Role badge in topbar ─────────────────────────────────────────────────
   var badge = document.getElementById('districtBadge');
   if (!badge) return;
+  if (isDualScope && isDualScope()) {
+    badge.textContent = '🔁 Dual Scope';
+    badge.style.cssText += ';background:rgba(124,106,247,.12);border-color:rgba(124,106,247,.3);color:var(--accent2)';
+    badge.style.display = 'block';
+    return; // skip the rest of the badge logic
+  }
   if (isAdmin()) {
     badge.textContent = '🔑 Admin';
     badge.style.cssText += ';background:rgba(232,81,24,.12);border-color:rgba(232,81,24,.3);color:var(--accent)';

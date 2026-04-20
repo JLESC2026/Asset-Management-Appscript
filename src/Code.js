@@ -269,19 +269,28 @@ function _mapRoleTier(role) {
 function _parseRemarks(remarks, roleTier) {
   const r = String(remarks || '').toLowerCase().trim();
 
+  // Scope type detection
+  var scopeType = null;
+  if (['dual scope','all scope','both scope','full visibility','all data'].some(k => r.includes(k)))
+    scopeType = 'both';
+  else if (['can see field','field scope','field data','field only'].some(k => r.includes(k)))
+    scopeType = 'field';
+  else if (['can see ho','can see head office','ho scope','ho data','ho only','head office only'].some(k => r.includes(k)))
+    scopeType = 'ho';
+
   const DEFAULTS = {
     ho:     { canAdd:true,  canEdit:true, canDelete:true,  canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false },
     senior: { canAdd:true,  canEdit:true, canDelete:false, canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false },
     fe:     { canAdd:true,  canEdit:true, canDelete:false, canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false }
   };
   const perms = Object.assign({}, DEFAULTS[roleTier] || DEFAULTS.fe);
-  if (!r) return perms;
+  if (!r) return Object.assign({}, perms, { scopeType: scopeType });
 
   if (['view only','view-only','read only','read-only','view access only','can only view','view'].some(k => r.includes(k)))
-    return { canAdd:false, canEdit:false, canDelete:false, canAllocate:false, canDealloc:false, canDispose:false, canBorrow:false, canTransfer:false, viewOnly:true };
+    return Object.assign({}, { canAdd:false, canEdit:false, canDelete:false, canAllocate:false, canDealloc:false, canDispose:false, canBorrow:false, canTransfer:false, viewOnly:true }, { scopeType: scopeType });
 
   if (['full access','all access','full permission','all permissions','unrestricted','complete access'].some(k => r.includes(k)))
-    return { canAdd:true, canEdit:true, canDelete:true, canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false };
+    return Object.assign({}, { canAdd:true, canEdit:true, canDelete:true, canAllocate:true, canDealloc:true, canDispose:true, canBorrow:true, canTransfer:true, viewOnly:false }, { scopeType: scopeType });
 
   if (r.includes('can delete')   || r.includes('can remove'))                             perms.canDelete   = true;
   if (r.includes('can add')      || r.includes('can enroll')  || r.includes('can create')) perms.canAdd     = true;
@@ -298,7 +307,7 @@ function _parseRemarks(remarks, roleTier) {
   if (r.includes('no dispose')   || r.includes('cannot dispose'))                              perms.canDispose  = false;
   if (r.includes('no borrow')    || r.includes('cannot borrow'))                               perms.canBorrow   = false;
   if (r.includes('no transfer')  || r.includes('cannot transfer'))                             perms.canTransfer = false;
-  return perms;
+  return Object.assign({}, perms, { scopeType: scopeType });
 }
 
 // ─── MASTERLIST LOOKUP (autofill only) ───────────────────────────────────────
@@ -479,6 +488,7 @@ function loginUser(empId, password) {
       const firstLogin  = (pwd === '1234' || pwd === _hashPwd('1234'));
       const roleTier    = _mapRoleTier(role);
       const perms       = _parseRemarks(remarks, roleTier);
+      const scopeType = perms.scopeType !== null ? perms.scopeType : (roleTier === 'ho' ? 'ho' : 'field');
       const scopeData   = _parseOrgStructure(rowId, roleTier);
       const mlData      = _getMasterlistEntry(rowId);
 
@@ -490,6 +500,7 @@ function loginUser(empId, password) {
         supervisorName:      supName,
         supervisorDesig:     supDesig,
         remarks, perms, firstLogin,
+        scopeType,
         division:            scopeData.userDivisions[0]  || mlData.division || '',
         district:            scopeData.userDistricts[0]  || mlData.district || '',
         userDivisions:       scopeData.userDivisions,
@@ -566,13 +577,22 @@ function getAllAssets() {
 
     const data   = sh.getRange(AE_DATA_START, 1, last - AE_DATA_START + 1, TOTAL_COLS).getValues();
     const result = data
-      .filter(row => {
+      .filter((row, rowIdx) => {
         const bc = String(row[C.BARCODE - 1] || '').trim();
-        return bc && bc !== '-' && bc !== 'N/A' && bc !== 'None' && bc !== '#N/A';
+        const badBc = !bc || bc === '-' || bc === 'N/A' || bc === 'None' || bc === '#N/A';
+        if (!badBc) return true;
+        // Keep rows with no barcode ONLY if they have some location/staff data
+        const hasData = [C.DIVISION,C.DISTRICT,C.BRANCH,C.STAFF,C.EMP_ID,C.DEPARTMENT,C.BASE_OFFICE,C.ASSET_LOCATION]
+          .some(col => String(row[col - 1] || '').trim());
+        return hasData;
       })
-      .map(row => {
+      .map((row, rowIdx) => {
         const get    = col => String(row[col - 1] || '');
         const status = _computeStatus(get(C.LIFECYCLE), get(C.ASSET_STATUS), get(C.EMP_ID));
+
+        const rawBc = String(row[C.BARCODE - 1] || '').trim();
+        const badBc = !rawBc || rawBc === '-' || rawBc === 'N/A' || rawBc === 'None' || rawBc === '#N/A';
+        const syntheticKey = badBc ? ('NOBC-' + (rowIdx + AE_DATA_START)) : rawBc;
 
         const rawLC    = get(C.LIFECYCLE);
         const displayLC = rawLC || {
@@ -581,8 +601,17 @@ function getAllAssets() {
           'borrow-item':'BorrowItem'
         }[status] || 'Active';
 
+        const rawAssignment = get(C.ASSIGNMENT).trim();
+        let effectiveAssignment = rawAssignment;
+        if (!rawAssignment) {
+          if (get(C.DEPARTMENT) || get(C.BASE_OFFICE)) effectiveAssignment = 'Central Office';
+          else if (get(C.DIVISION) || get(C.DISTRICT) || get(C.BRANCH)) effectiveAssignment = 'Field Office';
+          else effectiveAssignment = 'Unknown';
+        }
+
         return {
-          Barcode:      get(C.BARCODE),
+          Barcode:       badBc ? syntheticKey : rawBc,
+          hasRealBarcode: !badBc,
           Type:         get(C.TYPE),
           Brand:        get(C.BRAND),
           Serial:       get(C.SERIAL),
@@ -603,7 +632,8 @@ function getAllAssets() {
           Designation:  get(C.DESIGNATION),
           Department:   get(C.DEPARTMENT),
           BaseOffice:   get(C.BASE_OFFICE),
-          Assignment:   get(C.ASSIGNMENT),
+          Assignment:        rawAssignment,
+          EffectiveAssignment: effectiveAssignment,
           Division:     _normDiv(get(C.DIVISION)),
           District:     _normDist(get(C.DISTRICT)),
           Area:         get(C.AREA),

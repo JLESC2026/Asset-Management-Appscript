@@ -41,7 +41,9 @@ function renderDisposal() {
 
     return `<tr>
       <td><input type="checkbox" class="cb cb-disposal" value="${esc(a.Barcode)}" onclick="checkSelTable('disposal')"/></td>
-      <td><span class="mono-bc">${esc(a.Barcode)}</span></td>
+      <td>${a.hasRealBarcode
+        ? `<span class="mono-bc">${esc(a.Barcode)}</span>`
+        : `<span class="mono-bc" style="color:var(--text3);font-style:italic">—</span>`}</td>
       <td><span class="type-tag">${esc(a.Type)}</span></td>
       <td>${esc(a.Brand) || '—'}</td>
       <td class="mono-sm">${esc(a.Serial) || '—'}</td>
