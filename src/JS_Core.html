@@ -602,7 +602,44 @@ function startApp(){
   document.getElementById('changePwdScreen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('topUser').textContent=SESSION.name||SESSION.username;
-  document.getElementById('topRole').textContent=SESSION.role;
+  document.getElementById('topRole').textContent = (function() {
+    var divs = (SESSION.userDivisions || []).filter(function(d){ return d && d.trim(); });
+
+    // Abbreviate "Division X" → "Div X", keep others as-is
+    var abbrev = divs.map(function(d){
+      return d.replace(/^Division\s+/i, 'Div ').trim();
+    });
+
+    // HO-only or no field scope
+    if (abbrev.length === 0) {
+      if (SESSION.scopeType === 'both') return 'All Access';
+      return 'Head Office';
+    }
+
+    // All divisions (8 or more)
+    var allDivs = Object.keys(SESSION.divDistrictMap || {})
+      .filter(function(d){ return d && d.trim(); });
+    if (allDivs.length > 0 && abbrev.length >= allDivs.length) return 'All Divisions';
+
+    // 1 division
+    if (abbrev.length === 1) return abbrev[0];
+
+    // 2–3 divisions — join with & 
+    if (abbrev.length <= 3) {
+      var nums = abbrev.map(function(a){ return a.replace(/^Div\s*/i,''); });
+      if (abbrev.length === 2) return 'Div ' + nums[0] + ' & ' + nums[1];
+      return 'Div ' + nums[0] + ', ' + nums[1] + ' & ' + nums[2];
+    }
+
+    // 4–7 divisions — range notation
+    var nums = abbrev.map(function(a){
+      return parseInt(a.replace(/\D/g,''), 10);
+    }).filter(function(n){ return !isNaN(n); }).sort(function(a,b){ return a-b; });
+    if (nums.length > 0) return 'Div ' + nums[0] + '–' + nums[nums.length - 1];
+
+    // Fallback
+    return abbrev.slice(0,3).join(', ');
+  })();
   document.getElementById('dashDate').textContent=new Date().toLocaleDateString('en-PH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
   var badge=document.getElementById('districtBadge');
@@ -683,10 +720,10 @@ function _applyPermissions() {
   var badge = document.getElementById('districtBadge');
   if (!badge) return;
   if (isDualScope && isDualScope()) {
-    badge.textContent = '🔁 Dual Scope';
+    badge.textContent = SESSION.designation || SESSION.role || 'All Access';
     badge.style.cssText += ';background:rgba(124,106,247,.12);border-color:rgba(124,106,247,.3);color:var(--accent2)';
     badge.style.display = 'block';
-    return; // skip the rest of the badge logic
+    // intentionally no return — fall through to also set role tag below
   }
   if (isAdmin()) {
     badge.textContent = '🔑 Admin';

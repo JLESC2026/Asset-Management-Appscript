@@ -15,12 +15,80 @@ var _currentEquipBranchIdx = -1; // Tracks the open branch modal index for print
 function renderEquipmentRecord() {
   _eqSearchQ   = (document.getElementById('equipSearch')?.value || '').toLowerCase();
   _eqBranchReg = [];
+
+  if (isDualScope()) {
+    _renderDualScopeEquipTree();
+    return;
+  }
+
   if (isHO()) {
     _renderHOEquipTree();
     return;
   }
+
   var tree = _buildEquipTree();
   _renderEquipTree(tree);
+}
+
+function _renderDualScopeEquipTree() {
+  var container = document.getElementById('equipTree');
+  if (!container) return;
+
+  var allScoped = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
+  var hoAssets  = allScoped.filter(function(a){
+    return (a.EffectiveAssignment || '').trim().toLowerCase() === 'central office';
+  });
+  var fieldAssets = allScoped.filter(function(a){
+    return (a.EffectiveAssignment || '').trim().toLowerCase() === 'field office';
+  });
+
+  var summEl = document.getElementById('equipSummary');
+  if (summEl) {
+    summEl.innerHTML =
+      '<div class="pool-pill pool-pill-accent">' + allScoped.length + ' Assets Total</div>'
+      + '<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">'
+      +   hoAssets.length + ' Head Office</div>'
+      + '<div class="pool-pill">' + fieldAssets.length + ' Field</div>';
+  }
+
+  container.innerHTML = '';
+
+  // ── HO section ────────────────────────────────────────────────────────────
+  var hoLabel = document.createElement('div');
+  hoLabel.style.cssText =
+    'font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;'
+    + 'color:#0891b2;padding:6px 4px 8px;';
+  hoLabel.textContent = '🏛 Head Office';
+  container.appendChild(hoLabel);
+
+  var hoWrap = document.createElement('div');
+  hoWrap.id = 'equipTree';
+  container.appendChild(hoWrap);
+  _renderHOEquipTree();
+  hoWrap.id = '__dualHOEquip';
+
+  // ── Divider ───────────────────────────────────────────────────────────────
+  var divider = document.createElement('div');
+  divider.style.cssText = 'border-top:1px solid var(--border);margin:16px 0 10px;';
+  container.appendChild(divider);
+
+  // ── Field section ─────────────────────────────────────────────────────────
+  var fieldLabel = document.createElement('div');
+  fieldLabel.style.cssText =
+    'font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;'
+    + 'color:var(--accent2);padding:0 4px 8px;';
+  fieldLabel.textContent = '🏢 Field Offices';
+  container.appendChild(fieldLabel);
+
+  var fieldWrap = document.createElement('div');
+  fieldWrap.id = 'equipTree';
+  container.appendChild(fieldWrap);
+  var tree = _buildEquipTree();
+  _renderEquipTree(tree);
+  fieldWrap.id = '__dualFieldEquip';
+
+  // Restore container id
+  container.id = 'equipTree';
 }
 
 // ── HO Equipment Tree ─────────────────────────────────────────────────────────
