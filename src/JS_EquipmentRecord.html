@@ -16,79 +16,105 @@ function renderEquipmentRecord() {
   _eqSearchQ   = (document.getElementById('equipSearch')?.value || '').toLowerCase();
   _eqBranchReg = [];
 
-  if (isDualScope()) {
-    _renderDualScopeEquipTree();
-    return;
-  }
-
-  if (isHO()) {
-    _renderHOEquipTree();
-    return;
-  }
-
-  var tree = _buildEquipTree();
-  _renderEquipTree(tree);
+  _renderEquipmentTree();
 }
 
-function _renderDualScopeEquipTree() {
+function _renderEquipmentTree() {
   var container = document.getElementById('equipTree');
   if (!container) return;
 
-  var allScoped = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
-  var hoAssets  = allScoped.filter(function(a){
-    return (a.EffectiveAssignment || '').trim().toLowerCase() === 'central office';
-  });
-  var fieldAssets = allScoped.filter(function(a){
-    return (a.EffectiveAssignment || '').trim().toLowerCase() === 'field office';
+  // Build both trees
+  var hoTree = _buildHOEquipTree();
+  var fieldTree = _buildEquipTree();
+
+  // Compute totals
+  var hoTotal = 0, hoLocTotal = 0;
+  Object.keys(hoTree).forEach(function(dept) {
+    hoLocTotal += Object.keys(hoTree[dept]).length;
+    Object.keys(hoTree[dept]).forEach(function(bo) {
+      hoTotal += hoTree[dept][bo].length;
+    });
   });
 
+  var fieldTotal = 0, fieldBranchTotal = 0;
+  Object.keys(fieldTree).forEach(function(div) {
+    Object.keys(fieldTree[div]).forEach(function(dist) {
+      Object.keys(fieldTree[div][dist]).forEach(function(area) {
+        var bs = Object.keys(fieldTree[div][dist][area]);
+        fieldBranchTotal += bs.length;
+        bs.forEach(function(b) { fieldTotal += fieldTree[div][dist][area][b].length; });
+      });
+    });
+  });
+
+  // Render summary
+  var allTotal = hoTotal + fieldTotal;
   var summEl = document.getElementById('equipSummary');
   if (summEl) {
-    summEl.innerHTML =
-      '<div class="pool-pill pool-pill-accent">' + allScoped.length + ' Assets Total</div>'
-      + '<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">'
-      +   hoAssets.length + ' Head Office</div>'
-      + '<div class="pool-pill">' + fieldAssets.length + ' Field</div>';
+    var summaryHtml = '<div class="pool-pill pool-pill-accent">' + allTotal + ' Assets</div>';
+    if (canSeeHO())    summaryHtml += '<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">🏛 Head Office (' + hoTotal + ')</div>';
+    if (canSeeField()) summaryHtml += '<div class="pool-pill">🏢 Field (' + fieldTotal + ')</div>';
+    summEl.innerHTML = summaryHtml || '';
   }
 
-  container.innerHTML = '';
+  // Empty state
+  if (!allTotal) {
+    container.innerHTML = '<div class="st-empty">'
+      + '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>'
+      + 'No equipment records found' + (_eqSearchQ ? ' matching your search' : ' in your scope') + '.'
+      + '</div>';
+    return;
+  }
 
-  // ── HO section ────────────────────────────────────────────────────────────
-  var hoLabel = document.createElement('div');
-  hoLabel.style.cssText =
-    'font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;'
-    + 'color:#0891b2;padding:6px 4px 8px;';
-  hoLabel.textContent = '🏛 Head Office';
-  container.appendChild(hoLabel);
+  // Render tree with collapsible roots
+  var html = '<div class="st-tree">';
 
-  var hoWrap = document.createElement('div');
-  hoWrap.id = 'equipTree';
-  container.appendChild(hoWrap);
-  _renderHOEquipTree();
-  hoWrap.id = '__dualHOEquip';
+  // Head Office root (if visible to user)
+  if (canSeeHO()) {
+    var hoKey = '__HO_ROOT__';
+    var hoOpen = !!_eqExpanded[hoKey];
+    var hoDeptCount = Object.keys(hoTree).length;
+    html += '<div class="st-node st-div" style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.03)">'
+      + '<div class="st-row" data-eqkey="' + esc(hoKey) + '" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))" style="cursor:pointer;background:rgba(8,145,178,.06)">'
+      + '<span class="st-chevron ' + (hoOpen ? 'open' : '') + '">›</span>'
+      + '<span class="st-icon">🏛</span>'
+      + '<span class="st-label" style="color:#0891b2">Head Office</span>'
+      + '<span class="st-meta">' + hoDeptCount + ' dept(s) · ' + hoLocTotal + ' location(s) · ' + hoTotal + ' assets</span>'
+      + '</div>';
+    if (hoOpen) {
+      html += '<div class="st-children">';
+      Object.keys(hoTree).sort().forEach(function(dept) {
+        html += _renderHOEquipDeptNode(dept, hoTree[dept], hoTree);
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  }
 
-  // ── Divider ───────────────────────────────────────────────────────────────
-  var divider = document.createElement('div');
-  divider.style.cssText = 'border-top:1px solid var(--border);margin:16px 0 10px;';
-  container.appendChild(divider);
+  // Field root (if visible to user)
+  if (canSeeField()) {
+    var fieldKey = '__FIELD_ROOT__';
+    var fieldOpen = !!_eqExpanded[fieldKey];
+    var divCount = Object.keys(fieldTree).length;
+    html += '<div class="st-node st-div" style="border-color:rgba(124,106,247,.3);background:rgba(124,106,247,.03)">'
+      + '<div class="st-row" data-eqkey="' + esc(fieldKey) + '" onclick="eqToggle(this.getAttribute(\'data-eqkey\'))" style="cursor:pointer;background:rgba(124,106,247,.06)">'
+      + '<span class="st-chevron ' + (fieldOpen ? 'open' : '') + '">›</span>'
+      + '<span class="st-icon">🏢</span>'
+      + '<span class="st-label" style="color:var(--accent2)">Field Offices</span>'
+      + '<span class="st-meta">' + divCount + ' division(s) · ' + fieldBranchTotal + ' branch(es) · ' + fieldTotal + ' assets</span>'
+      + '</div>';
+    if (fieldOpen) {
+      html += '<div class="st-children">';
+      Object.keys(fieldTree).sort().forEach(function(div) {
+        html += _renderEquipDivNode(div, fieldTree[div], fieldTree);
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  }
 
-  // ── Field section ─────────────────────────────────────────────────────────
-  var fieldLabel = document.createElement('div');
-  fieldLabel.style.cssText =
-    'font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;'
-    + 'color:var(--accent2);padding:0 4px 8px;';
-  fieldLabel.textContent = '🏢 Field Offices';
-  container.appendChild(fieldLabel);
-
-  var fieldWrap = document.createElement('div');
-  fieldWrap.id = 'equipTree';
-  container.appendChild(fieldWrap);
-  var tree = _buildEquipTree();
-  _renderEquipTree(tree);
-  fieldWrap.id = '__dualFieldEquip';
-
-  // Restore container id
-  container.id = 'equipTree';
+  html += '</div>';
+  container.innerHTML = html;
 }
 
 // ── HO Equipment Tree ─────────────────────────────────────────────────────────
@@ -113,51 +139,8 @@ function _buildHOEquipTree() {
   return tree;
 }
 
-function _renderHOEquipTree() {
-  var container = document.getElementById('equipTree');
-  if (!container) return;
-  var tree    = _buildHOEquipTree();
-  var deptKeys = Object.keys(tree).sort();
-
-  var totalAssets = 0, totalLocations = 0;
-  deptKeys.forEach(function(dept) {
-    var bos = Object.keys(tree[dept]);
-    totalLocations += bos.length;
-    bos.forEach(function(bo){ totalAssets += tree[dept][bo].length; });
-  });
-
-  var summEl = document.getElementById('equipSummary');
-  if (summEl) {
-    summEl.innerHTML = deptKeys.length
-      ? '<div class="pool-pill pool-pill-accent">'+totalAssets+' Assets</div>'
-        +'<div class="pool-pill">'+totalLocations+' Location(s)</div>'
-        +'<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">🏛 Head Office</div>'
-        +'<div class="pool-pill">'+deptKeys.length+' Department(s)</div>'
-      : '';
-  }
-
-  if (!deptKeys.length) {
-    container.innerHTML = '<div class="st-empty">'
-      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>'
-      +'No Head Office equipment found'+(_eqSearchQ?' matching your search':'')+'.'
-      +'</div>';
-    return;
-  }
-
-  var html = '<div class="st-tree">'
-    +'<div class="st-node st-div" style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.03)">'
-    +'<div class="st-row" style="cursor:default;background:rgba(8,145,178,.06)">'
-    +'<span class="st-icon">🏛</span>'
-    +'<span class="st-label" style="color:#0891b2">Head Office</span>'
-    +'<span class="st-meta">'+deptKeys.length+' dept(s) · '+totalAssets+' assets</span>'
-    +'</div>'
-    +'<div class="st-children">';
-  deptKeys.forEach(function(dept){ html += _renderHOEquipDeptNode(dept, tree[dept]); });
-  html += '</div></div></div>';
-  container.innerHTML = html;
-}
-
-function _renderHOEquipDeptNode(dept, boTree) {
+// ── Equipment tree renderers (unified, used by _renderEquipmentTree) ───────
+function _renderHOEquipDeptNode(dept, boTree, hoTree) {
   var key = 'eq-ho-dept::'+dept;
   var isOpen = !!_eqExpanded[key];
   var boKeys = Object.keys(boTree).sort();
@@ -173,14 +156,14 @@ function _renderHOEquipDeptNode(dept, boTree) {
     +'</div>';
   if (isOpen) {
     html += '<div class="st-children">';
-    boKeys.forEach(function(bo){ html += _renderHOEquipLocationNode(dept, bo, boTree[bo]); });
+    boKeys.forEach(function(bo){ html += _renderHOEquipLocationNode(dept, bo, boTree[bo], hoTree); });
     html += '</div>';
   }
   html += '</div>';
   return html;
 }
 
-function _renderHOEquipLocationNode(dept, bo, assets) {
+function _renderHOEquipLocationNode(dept, bo, assets, hoTree) {
   var idx = _eqBranchReg.length;
   _eqBranchReg.push({ hoMode: true, dept: dept, bo: bo, assets: assets });
 
@@ -214,22 +197,25 @@ function _renderHOEquipLocationNode(dept, bo, assets) {
 }
 
 function eqExpandAll() {
-  if (isHO()) {
-    var tree = _buildHOEquipTree();
-    Object.keys(tree).forEach(function(dept){ _eqExpanded['eq-ho-dept::'+dept] = true; });
-    renderEquipmentRecord();
-    return;
-  }
-  var tree = _buildEquipTree();
-  Object.keys(tree).forEach(function(div) {
-    _eqExpanded['eq-div::'+div] = true;
-    Object.keys(tree[div]).forEach(function(dist) {
-      _eqExpanded['eq-dist::'+div+'::'+dist] = true;
-      Object.keys(tree[div][dist]).forEach(function(area) {
-        _eqExpanded['eq-area::'+div+'::'+dist+'::'+area] = true;
+  _eqExpanded['__HO_ROOT__']    = true;
+  _eqExpanded['__FIELD_ROOT__'] = true;
+
+  var hoTree    = _buildHOEquipTree();
+  Object.keys(hoTree).forEach(function(dept) {
+    _eqExpanded['eq-ho-dept::' + dept] = true;
+  });
+
+  var fieldTree = _buildEquipTree();
+  Object.keys(fieldTree).forEach(function(div) {
+    _eqExpanded['eq-div::' + div] = true;
+    Object.keys(fieldTree[div]).forEach(function(dist) {
+      _eqExpanded['eq-dist::' + div + '::' + dist] = true;
+      Object.keys(fieldTree[div][dist]).forEach(function(area) {
+        _eqExpanded['eq-area::' + div + '::' + dist + '::' + area] = true;
       });
     });
   });
+
   renderEquipmentRecord();
 }
 
@@ -240,10 +226,8 @@ function eqCollapseAll() {
 
 function eqToggle(key) {
   _eqExpanded[key] = !_eqExpanded[key];
-  _eqBranchReg = [];
-  if (isHO()) { _renderHOEquipTree(); return; }
-  var tree = _buildEquipTree();
-  _renderEquipTree(tree);
+  _eqBranchReg     = [];
+  renderEquipmentRecord();
 }
 
 
@@ -286,49 +270,8 @@ function _buildEquipTree() {
   return tree;
 }
 
-function _renderEquipTree(tree) {
-  var container = document.getElementById('equipTree');
-  if (!container) return;
-  var divKeys = Object.keys(tree).sort();
+// ── Equipment tree helpers and renderers ────────────────────────────────────
 
-  var totalAssets = 0, totalBranches = 0;
-  divKeys.forEach(function(div) {
-    Object.keys(tree[div]).forEach(function(dist) {
-      Object.keys(tree[div][dist]).forEach(function(area) {
-        var bs = Object.keys(tree[div][dist][area]);
-        totalBranches += bs.length;
-        bs.forEach(function(b){ totalAssets += tree[div][dist][area][b].length; });
-      });
-    });
-  });
-
-  var summEl = document.getElementById('equipSummary');
-  if (summEl) {
-    summEl.innerHTML = divKeys.length
-      ? '<div class="pool-pill pool-pill-accent">'+totalAssets+' Assets</div>'
-        +'<div class="pool-pill">'+totalBranches+' Branch(es)</div>'
-        +'<div class="pool-pill">'+divKeys.length+' Division(s)</div>'
-      : '';
-  }
-
-  if (!divKeys.length) {
-    container.innerHTML = '<div class="st-empty">'
-      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>'
-      +'No equipment records found'+(_eqSearchQ?' matching your search':' in your scope')+'.'
-      +'</div>';
-    return;
-  }
-
-  var html = '<div class="st-tree">';
-  if (isDualScope() && isHO()) {
-    // HO users with dual scope already see field via their _filterByScope
-    // No structural change needed — falls through to normal field tree
-  }
-  divKeys.forEach(function(div){ html += _renderEquipDivNode(div, tree[div]); });
-  html += '</div>';
-  container.innerHTML = html;
-}
-// Recursively collect all assets from any depth of tree subtree.
 function _collectTreeAssets(subtree) {
   if (Array.isArray(subtree)) return subtree;
   var all = [];
@@ -338,9 +281,7 @@ function _collectTreeAssets(subtree) {
   return all;
 }
 
-// Render an "Assigned To [level]" leaf node for assets whose location
-// is only known up to a certain hierarchy level (division, district, or area).
-function _renderAssignedToLeaf(div, dist, area, assets) {
+function _renderAssignedToLeaf(div, dist, area, assets, fieldTree) {
   var idx = _eqBranchReg.length;
   _eqBranchReg.push({
     hoMode: false,
@@ -372,8 +313,8 @@ function _renderAssignedToLeaf(div, dist, area, assets) {
   return '<div class="st-node st-emp" style="margin-left:28px;border-style:dashed;opacity:.88">'
     + '<div class="st-row" style="cursor:default;gap:10px">'
     + '<span class="st-icon">' + icon + '</span>'
-    + '<div style="flex:1;min-width:0">'
-    + '<div style="font-weight:600;font-size:.82rem;color:var(--text2);font-style:italic">'
+    + '<div style="flex:1;min-width:0;overflow:hidden">'
+    + '<div style="font-weight:600;font-size:.82rem;color:var(--text2);font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
     +   'Assigned To ' + esc(parentLabel)
     + '</div>'
     + '<div style="font-size:.72rem;color:var(--text3);margin-top:2px">'
@@ -386,7 +327,7 @@ function _renderAssignedToLeaf(div, dist, area, assets) {
     + '</div>'
     + '</div>';
 }
-function _renderEquipDivNode(div, distTree) {
+function _renderEquipDivNode(div, distTree, fieldTree) {
   var key = 'eq-div::'+div;
   var isOpen = !!_eqExpanded[key];
   var distKeys = Object.keys(distTree).sort();
@@ -412,18 +353,18 @@ function _renderEquipDivNode(div, distTree) {
     +'</div>';
   if (isOpen) {
     html += '<div class="st-children">';
-    distKeys.forEach(function(dist){ html += _renderEquipDistNode(div, dist, distTree[dist]); });
+    distKeys.forEach(function(dist){ html += _renderEquipDistNode(div, dist, distTree[dist], fieldTree); });
     html += '</div>';
   }
   html += '</div>';
   return html;
 }
 
-function _renderEquipDistNode(div, dist, distTree) {
+function _renderEquipDistNode(div, dist, distTree, fieldTree) {
   // ── "Assigned To Division" node — no district info ───────────────────────
   if (_isSentinel(dist)) {
     var assets = _collectTreeAssets(distTree);
-    return assets.length ? _renderAssignedToLeaf(div, dist, _LOC_NOAREA, assets) : '';
+    return assets.length ? _renderAssignedToLeaf(div, dist, _LOC_NOAREA, assets, fieldTree) : '';
   }
 
   var key    = 'eq-dist::' + div + '::' + dist;
@@ -457,9 +398,9 @@ function _renderEquipDistNode(div, dist, distTree) {
       if (_isSentinel(area)) {
         // District-level assets — "Assigned To [District]"
         var assets = _collectTreeAssets(distTree[area]);
-        if (assets.length) html += _renderAssignedToLeaf(div, dist, area, assets);
+        if (assets.length) html += _renderAssignedToLeaf(div, dist, area, assets, fieldTree);
       } else {
-        html += _renderEquipAreaNode(div, dist, area, distTree[area]);
+        html += _renderEquipAreaNode(div, dist, area, distTree[area], fieldTree);
       }
     });
     html += '</div>';
@@ -469,7 +410,7 @@ function _renderEquipDistNode(div, dist, distTree) {
   return html;
 }
 
-function _renderEquipAreaNode(div, dist, area, branchTree) {
+function _renderEquipAreaNode(div, dist, area, branchTree, fieldTree) {
   var branchKeys = Object.keys(branchTree).sort();
 
   var assetCount = 0, realBranchCount = 0;
@@ -503,9 +444,9 @@ function _renderEquipAreaNode(div, dist, area, branchTree) {
       if (_isSentinel(branch)) {
         // Area-level assets — "Assigned To [Area]"
         var assets = branchTree[branch];
-        if (assets.length) html += _renderAssignedToLeaf(div, dist, area, assets);
+        if (assets.length) html += _renderAssignedToLeaf(div, dist, area, assets, fieldTree);
       } else {
-        html += _renderEquipBranchNode(div, dist, area, branch, branchTree[branch]);
+        html += _renderEquipBranchNode(div, dist, area, branch, branchTree[branch], fieldTree);
       }
     });
     html += '</div>';
@@ -515,7 +456,7 @@ function _renderEquipAreaNode(div, dist, area, branchTree) {
   return html;
 }
 
-function _renderEquipBranchNode(div, dist, area, branch, assets) {
+function _renderEquipBranchNode(div, dist, area, branch, assets, fieldTree) {
   var idx = _eqBranchReg.length;
   _eqBranchReg.push({
     hoMode: false, div: div, dist: dist, area: area, branch: branch, assets: assets

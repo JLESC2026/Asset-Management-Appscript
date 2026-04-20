@@ -603,42 +603,40 @@ function startApp(){
   document.getElementById('app').style.display='flex';
   document.getElementById('topUser').textContent=SESSION.name||SESSION.username;
   document.getElementById('topRole').textContent = (function() {
+    var scope = SESSION.scopeType || (isAdmin() ? 'ho' : 'field');
+
+    if (scope === 'both') return 'All Assets';
+    if (scope === 'ho')   return 'Head Office';
+
+    // Field scope — summarize by divisions first, then districts as fallback
     var divs = (SESSION.userDivisions || []).filter(function(d){ return d && d.trim(); });
 
-    // Abbreviate "Division X" → "Div X", keep others as-is
-    var abbrev = divs.map(function(d){
-      return d.replace(/^Division\s+/i, 'Div ').trim();
-    });
-
-    // HO-only or no field scope
-    if (abbrev.length === 0) {
-      if (SESSION.scopeType === 'both') return 'All Access';
-      return 'Head Office';
+    if (divs.length === 0) {
+      // Fallback to district display
+      var dists = (SESSION.userDistricts || []).filter(function(d){ return d && d.trim(); });
+      if (dists.length === 0) return SESSION.role || 'Field';
+      var dnums = dists.map(function(d){
+        return parseInt(d.replace(/\D+/g,''), 10);
+      }).filter(function(n){ return !isNaN(n); }).sort(function(a,b){ return a-b; });
+      if (dnums.length === 0) return dists.slice(0,2).join(', ');
+      if (dnums.length === 1) return 'District ' + dnums[0];
+      if (dnums.length === 2) return 'District ' + dnums[0] + ' & ' + dnums[1];
+      return 'Districts ' + dnums[0] + '–' + dnums[dnums.length-1];
     }
 
-    // All divisions (8 or more)
     var allDivs = Object.keys(SESSION.divDistrictMap || {})
       .filter(function(d){ return d && d.trim(); });
-    if (allDivs.length > 0 && abbrev.length >= allDivs.length) return 'All Divisions';
+    if (allDivs.length > 0 && divs.length >= allDivs.length) return 'All Divisions';
 
-    // 1 division
-    if (abbrev.length === 1) return abbrev[0];
-
-    // 2–3 divisions — join with & 
-    if (abbrev.length <= 3) {
-      var nums = abbrev.map(function(a){ return a.replace(/^Div\s*/i,''); });
-      if (abbrev.length === 2) return 'Div ' + nums[0] + ' & ' + nums[1];
-      return 'Div ' + nums[0] + ', ' + nums[1] + ' & ' + nums[2];
-    }
-
-    // 4–7 divisions — range notation
-    var nums = abbrev.map(function(a){
-      return parseInt(a.replace(/\D/g,''), 10);
+    var nums = divs.map(function(d){
+      return parseInt(d.replace(/\D+/g,''), 10);
     }).filter(function(n){ return !isNaN(n); }).sort(function(a,b){ return a-b; });
-    if (nums.length > 0) return 'Div ' + nums[0] + '–' + nums[nums.length - 1];
 
-    // Fallback
-    return abbrev.slice(0,3).join(', ');
+    if (nums.length === 0) return divs.slice(0,2).join(', ');
+    if (nums.length === 1) return 'Division ' + nums[0];
+    if (nums.length === 2) return 'Division ' + nums[0] + ' & ' + nums[1];
+    if (nums.length === 3) return 'Division ' + nums[0] + ', ' + nums[1] + ' & ' + nums[2];
+    return 'Divisions ' + nums[0] + '–' + nums[nums.length-1];
   })();
   document.getElementById('dashDate').textContent=new Date().toLocaleDateString('en-PH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
@@ -719,21 +717,27 @@ function _applyPermissions() {
   // ── Role badge in topbar ─────────────────────────────────────────────────
   var badge = document.getElementById('districtBadge');
   if (!badge) return;
-  if (isDualScope && isDualScope()) {
+  if (isDualScope()) {
     badge.textContent = SESSION.designation || SESSION.role || 'All Access';
-    badge.style.cssText += ';background:rgba(124,106,247,.12);border-color:rgba(124,106,247,.3);color:var(--accent2)';
+    badge.style.background = 'rgba(124,106,247,.12)';
+    badge.style.borderColor = 'rgba(124,106,247,.3)';
+    badge.style.color = 'var(--accent2)';
     badge.style.display = 'block';
-    // intentionally no return — fall through to also set role tag below
-  }
-  if (isAdmin()) {
-    badge.textContent = '🔑 Admin';
-    badge.style.cssText += ';background:rgba(232,81,24,.12);border-color:rgba(232,81,24,.3);color:var(--accent)';
+  } else if (isAdmin()) {
+    badge.textContent = SESSION.designation || SESSION.role || 'Admin';
+    badge.style.background = 'rgba(232,81,24,.12)';
+    badge.style.borderColor = 'rgba(232,81,24,.3)';
+    badge.style.color = 'var(--accent)';
     badge.style.display = 'block';
   } else if (isSenior()) {
-    var divLabel = (SESSION.userDivisions && SESSION.userDivisions.length > 0) ? SESSION.userDivisions.join(', ') : (SESSION.division || '');
+    var divLabel = (SESSION.userDivisions && SESSION.userDivisions.length > 0)
+      ? SESSION.userDivisions.join(', ')
+      : (SESSION.division || '');
     if (divLabel) { badge.textContent = '🏢 ' + divLabel; badge.style.display = 'block'; }
   } else {
-    var distList = (SESSION.userDistricts && SESSION.userDistricts.length > 0) ? SESSION.userDistricts : (SESSION.district ? [SESSION.district] : []);
+    var distList = (SESSION.userDistricts && SESSION.userDistricts.length > 0)
+      ? SESSION.userDistricts
+      : (SESSION.district ? [SESSION.district] : []);
     if (distList.length) { badge.textContent = '📍 ' + distList.join(', '); badge.style.display = 'block'; }
   }
 }

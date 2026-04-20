@@ -12,14 +12,12 @@
 
 function renderStaffAssets() {
   _stSearchQ = (document.getElementById('staffAssetsSearch')?.value || '').toLowerCase();
-  _stTree = _buildStaffTree();
   _renderStaffTree();
   _updateStaffBadge();
 }
 
 function onStaffAssetsSearch() {
   _stSearchQ = (document.getElementById('staffAssetsSearch')?.value || '').toLowerCase();
-  _stTree = _buildStaffTree();
   if (_stSearchQ) _stAutoExpand();
   _renderStaffTree();
 }
@@ -58,9 +56,7 @@ function _buildHOStaffTree() {
 // Uses _resolveAssetLocation() so missing hierarchy levels are filled from
 // BaseOffice (col G) then Asset Location. Assets with truly no location are
 // skipped here (but remain visible in Asset Pools and Equipment Record).
-function _buildStaffTree() {
-  if (isHO() && !isDualScope()) return _buildHOStaffTree();
-
+function _buildFieldStaffTree() {
   var base = _filterByScope(
     ASSETS.filter(function(a){ return ['allocated','transfer'].indexOf(a.status) >= 0; })
   );
@@ -72,35 +68,32 @@ function _buildStaffTree() {
       })
     : base;
 
-var tree = {};
+  var tree = {};
   data.forEach(function(a) {
     var loc = _resolveAssetLocation(a);
-    if (!loc) return; // No location at all → skip in Staff Assets view
+    if (!loc) return;
 
     var div    = loc.div;
     var dist   = loc.dist   || _LOC_NODIST;
     var area   = loc.area   || _LOC_NOAREA;
     var branch = loc.branch || _LOC_NOBRANCH;
+    var empId  = a.EmpID       || 'UNKNOWN';
+    var staff  = a.Staff       || 'Unassigned';
+    var desig  = a.Designation || '';
 
-    var empId = a.EmpID       || 'UNKNOWN';
-    var staff = a.Staff       || 'Unassigned';
-    var desig = a.Designation || '';
-
-    if (!tree[div])                         tree[div]                        = {};
-    if (!tree[div][dist])                   tree[div][dist]                  = {};
-    if (!tree[div][dist][area])             tree[div][dist][area]            = {};
-    if (!tree[div][dist][area][branch])     tree[div][dist][area][branch]    = {};
+    if (!tree[div])                         tree[div]                         = {};
+    if (!tree[div][dist])                   tree[div][dist]                   = {};
+    if (!tree[div][dist][area])             tree[div][dist][area]             = {};
+    if (!tree[div][dist][area][branch])     tree[div][dist][area][branch]     = {};
 
     if (!tree[div][dist][area][branch][empId]) {
       tree[div][dist][area][branch][empId] = {
-        name:        staff,
-        empId:       empId,
-        designation: desig,
-        division:    div,
-        district:    _isSentinel(dist)   ? '' : dist,
-        area:        _isSentinel(area)   ? '' : area,
-        branch:      _isSentinel(branch) ? '' : branch,
-        assets:      []
+        name: staff, empId: empId, designation: desig,
+        division: div,
+        district: _isSentinel(dist)   ? '' : dist,
+        area:     _isSentinel(area)   ? '' : area,
+        branch:   _isSentinel(branch) ? '' : branch,
+        assets: []
       };
     }
     tree[div][dist][area][branch][empId].assets.push(a);
@@ -109,20 +102,25 @@ var tree = {};
 }
 
 function _stAutoExpand() {
-  if (isHO()) {
-    Object.keys(_stTree).forEach(function(dept) {
-      _stExpanded['ho-dept::'+dept] = true;
-    });
-    return;
-  }
-  Object.keys(_stTree).forEach(function(div) {
+  _stExpanded['__HO_ROOT__']    = true;
+  _stExpanded['__FIELD_ROOT__'] = true;
+
+  // HO departments
+  var hoTree = _buildHOStaffTree();
+  Object.keys(hoTree).forEach(function(dept) {
+    _stExpanded['ho-dept::' + dept] = true;
+  });
+
+  // Field hierarchy
+  var fieldTree = _buildFieldStaffTree();
+  Object.keys(fieldTree).forEach(function(div) {
     _stExpanded[div] = true;
-    Object.keys(_stTree[div]).forEach(function(dist) {
-      _stExpanded[div+'::'+dist] = true;
-      Object.keys(_stTree[div][dist]).forEach(function(area) {
-        _stExpanded[div+'::'+dist+'::'+area] = true;
-        Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
-          _stExpanded[div+'::'+dist+'::'+area+'::'+branch] = true;
+    Object.keys(fieldTree[div]).forEach(function(dist) {
+      _stExpanded[div + '::' + dist] = true;
+      Object.keys(fieldTree[div][dist]).forEach(function(area) {
+        _stExpanded[div + '::' + dist + '::' + area] = true;
+        Object.keys(fieldTree[div][dist][area]).forEach(function(branch) {
+          _stExpanded[div + '::' + dist + '::' + area + '::' + branch] = true;
         });
       });
     });
@@ -130,21 +128,23 @@ function _stAutoExpand() {
 }
 
 function stExpandAll() {
-  if (isHO()) {
-    Object.keys(_stTree).forEach(function(dept) {
-      _stExpanded['ho-dept::'+dept] = true;
-    });
-    _renderStaffTree();
-    return;
-  }
-  Object.keys(_stTree).forEach(function(div) {
+  _stExpanded['__HO_ROOT__']    = true;
+  _stExpanded['__FIELD_ROOT__'] = true;
+
+  var hoTree = _buildHOStaffTree();
+  Object.keys(hoTree).forEach(function(dept) {
+    _stExpanded['ho-dept::' + dept] = true;
+  });
+
+  var fieldTree = _buildFieldStaffTree();
+  Object.keys(fieldTree).forEach(function(div) {
     _stExpanded[div] = true;
-    Object.keys(_stTree[div]).forEach(function(dist) {
-      _stExpanded[div+'::'+dist] = true;
-      Object.keys(_stTree[div][dist]).forEach(function(area) {
-        _stExpanded[div+'::'+dist+'::'+area] = true;
-        Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
-          _stExpanded[div+'::'+dist+'::'+area+'::'+branch] = true;
+    Object.keys(fieldTree[div]).forEach(function(dist) {
+      _stExpanded[div + '::' + dist] = true;
+      Object.keys(fieldTree[div][dist]).forEach(function(area) {
+        _stExpanded[div + '::' + dist + '::' + area] = true;
+        Object.keys(fieldTree[div][dist][area]).forEach(function(branch) {
+          _stExpanded[div + '::' + dist + '::' + area + '::' + branch] = true;
         });
       });
     });
@@ -173,435 +173,121 @@ function _updateStaffBadge() {
 // ── Main render dispatcher ────────────────────────────────────────────────────
 function _renderStaffTree() {
   _stEmpRegistry = [];
-
-  if (isHO() && !isDualScope()) {
-    _renderHOStaffTree();
-    return;
-  }
-
-  if (isDualScope()) {
-    _renderDualScopeStaffTree();
-    return;
-  }
-
-  _renderFieldStaffTree();
-}
-
-function _renderDualScopeStaffTree() {
   var container = document.getElementById('staffAssetsTree');
+  if (!container) return;
 
-  // ── Totals for summary pills ──────────────────────────────────────────────
-  var hoAssets    = _filterByScope(ASSETS).filter(function(a) {
-    return ['allocated','transfer'].indexOf(a.status) >= 0
-      && (a.EffectiveAssignment || '').trim().toLowerCase() === 'central office';
-  });
-  var fieldAssets = _filterByScope(ASSETS).filter(function(a) {
-    return ['allocated','transfer'].indexOf(a.status) >= 0
-      && (a.EffectiveAssignment || '').trim().toLowerCase() === 'field office';
-  });
-  var total = hoAssets.length + fieldAssets.length;
+  var showHO    = canSeeHO();
+  var showField = canSeeField();
 
-  var summEl = document.getElementById('staffAssetsSummary');
-  if (summEl) {
-    summEl.innerHTML =
-      '<div class="pool-pill pool-pill-blue">' + total + ' Assets Total</div>'
-      + '<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">'
-      +   hoAssets.length + ' Head Office</div>'
-      + '<div class="pool-pill">' + fieldAssets.length + ' Field</div>';
-  }
+  // ── Build both trees ──────────────────────────────────────────────────────
+  var hoTree    = showHO    ? _buildHOStaffTree()    : {};
+  var fieldTree = showField ? _buildFieldStaffTree() : {};
 
-  // ── Render HO section ────────────────────────────────────────────────────
-  var hoWrap = document.createElement('div');
-  hoWrap.innerHTML =
-    '<div style="font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;'
-    + 'color:#0891b2;padding:6px 4px 8px;margin-top:4px">🏛 Head Office</div>';
-  container.innerHTML = '';
-  container.appendChild(hoWrap);
-
-  var hoTreeWrap = document.createElement('div');
-  hoTreeWrap.id = '__dualHOTree';
-  container.appendChild(hoTreeWrap);
-
-  // Temporarily redirect staffAssetsTree so _renderHOStaffTree writes into hoTreeWrap
-  var _origContainer = document.getElementById('staffAssetsTree');
-  hoTreeWrap.id = 'staffAssetsTree';
-  _renderHOStaffTree();
-  hoTreeWrap.id = '__dualHOTree';
-
-  // ── Divider ───────────────────────────────────────────────────────────────
-  var divider = document.createElement('div');
-  divider.style.cssText =
-    'border-top:1px solid var(--border);margin:16px 0 10px;';
-  container.appendChild(divider);
-
-  // ── Field section label ───────────────────────────────────────────────────
-  var fieldLabel = document.createElement('div');
-  fieldLabel.style.cssText =
-    'font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;'
-    + 'color:var(--accent2);padding:0 4px 8px;';
-  fieldLabel.textContent = '🏢 Field Offices';
-  container.appendChild(fieldLabel);
-
-  // ── Field tree ────────────────────────────────────────────────────────────
-  var fieldTreeWrap = document.createElement('div');
-  fieldTreeWrap.id = 'staffAssetsTree';
-  container.appendChild(fieldTreeWrap);
-  _renderFieldStaffTree();
-  fieldTreeWrap.id = '__dualFieldTree';
-
-  // Restore original container id
-  container.id = 'staffAssetsTree';
-}
-
-// ── HO rendering: Head Office → Department → Staff ────────────────────────────
-function _renderHOStaffTree() {
-  var container = document.getElementById('staffAssetsTree');
-  var deptKeys = Object.keys(_stTree).sort();
-
-  var totalEmp = 0, totalAsset = 0;
-  deptKeys.forEach(function(dept) {
-    var emps = Object.keys(_stTree[dept]);
-    totalEmp += emps.length;
-    emps.forEach(function(e){ totalAsset += (_stTree[dept][e].assets||[]).length; });
+  // ── Compute totals for summary pills ──────────────────────────────────────
+  var hoEmp = 0, hoAssets = 0;
+  Object.keys(hoTree).forEach(function(dept) {
+    Object.keys(hoTree[dept]).forEach(function(empId) {
+      hoEmp++;
+      hoAssets += (hoTree[dept][empId].assets || []).length;
+    });
   });
 
-  var summEl = document.getElementById('staffAssetsSummary');
-  if (summEl) {
-    summEl.innerHTML = deptKeys.length
-      ? '<div class="pool-pill pool-pill-blue">'+totalAsset+' Assets</div>'
-        +'<div class="pool-pill">'+totalEmp+' Staff Members</div>'
-        +'<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">🏛 Head Office</div>'
-        +'<div class="pool-pill">'+deptKeys.length+' Department(s)</div>'
-      : '';
-  }
-
-  if (!deptKeys.length) {
-    container.innerHTML = '<div class="st-empty">'
-      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" style="margin:0 auto 12px;display:block;color:var(--text3)"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
-      +'No Head Office assets found'+((_stSearchQ)?' matching your search':'')+'.'
-      +'</div>';
-    return;
-  }
-
-  var html = '<div class="st-tree">'
-    +'<div class="st-node st-div" style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.03)">'
-    +'<div class="st-row" style="cursor:default;background:rgba(8,145,178,.06)">'
-    +'<span class="st-icon">🏛</span>'
-    +'<span class="st-label" style="color:#0891b2">Head Office</span>'
-    +'<span class="st-meta">'+deptKeys.length+' dept(s) · '+totalEmp+' staff · '+totalAsset+' assets</span>'
-    +'</div>'
-    +'<div class="st-children">';
-  deptKeys.forEach(function(dept){ html += _renderHODeptNode(dept); });
-  html += '</div></div></div>';
-  container.innerHTML = html;
-}
-
-function _renderHODeptNode(dept) {
-  var key = 'ho-dept::'+dept;
-  var isOpen = !!_stExpanded[key];
-  var empKeys = Object.keys(_stTree[dept]).sort(function(a,b){
-    return (_stTree[dept][a].name||'').localeCompare(_stTree[dept][b].name||'');
-  });
-  var assetCount = 0;
-  empKeys.forEach(function(e){ assetCount += (_stTree[dept][e].assets||[]).length; });
-
-  var html = '<div class="st-node st-dist" style="background:rgba(124,106,247,.03);border-color:rgba(124,106,247,.25)">'
-    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
-    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">🏢</span>'
-    +'<span class="st-label" style="color:var(--accent2)">'+esc(dept)+'</span>'
-    +'<span class="st-meta">'+empKeys.length+' staff · '+assetCount+' assets</span>'
-    +'</div>';
-  if (isOpen) {
-    html += '<div class="st-children">';
-    empKeys.forEach(function(empId){ html += _renderHOEmpNode(dept, empId); });
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function _renderHOEmpNode(dept, empId) {
-  var emp = _stTree[dept] && _stTree[dept][empId];
-  if (!emp) return '';
-  var typeCounts = {};
-  (emp.assets||[]).forEach(function(a){ if(a&&a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
-  var chips = Object.entries(typeCounts)
-    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
-    .join('');
-
-  return '<div class="st-node st-emp st-emp-inline">'
-    +'<div class="st-emp-row">'
-    +'<div style="display:flex;gap:4px;flex-shrink:0">'
-    +'<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal(\''+esc(empId)+'\',\''+esc(dept)+'\',\'\',\'\',\'\',\'ho\')">'
-    +_ICO.view+'</button>'
-    +'</div>'
-    +'<span class="st-icon">👤</span>'
-    +'<div class="st-emp-info">'
-    +'<span class="st-label">'+esc(emp.name||'Unknown')+'</span>'
-    +'<span class="st-emp-sub">'
-    +'<span class="mono-sm" style="font-size:.7rem">'+esc(empId)+'</span>'
-    +(emp.designation?'<span style="color:var(--text3)">·</span><span style="font-size:.72rem;color:var(--text2)">'+esc(emp.designation)+'</span>':'')
-    +(emp.baseOffice?'<span style="color:var(--text3)">·</span><span class="loc-pill lp-branch" style="font-size:.68rem">'+esc(emp.baseOffice)+'</span>':'')
-    +'</span>'
-    +'</div>'
-    +'<div class="st-type-chips">'+(chips||'<span style="color:var(--text3);font-size:.76rem">—</span>')+'</div>'
-    +'</div>'
-    +'</div>';
-}
-
-// ── Field rendering: Division → District → Area → Branch → Staff ──────────────
-function _renderFieldStaffTree() {
-  var container = document.getElementById('staffAssetsTree');
-  var divKeys = Object.keys(_stTree).sort();
-
-  var totalEmp = 0, totalAsset = 0;
-  divKeys.forEach(function(div) {
-    Object.keys(_stTree[div]).forEach(function(dist) {
-      Object.keys(_stTree[div][dist]).forEach(function(area) {
-        Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
-          var emps = Object.keys(_stTree[div][dist][area][branch]);
-          totalEmp += emps.length;
-          emps.forEach(function(e){ totalAsset += (_stTree[div][dist][area][branch][e].assets||[]).length; });
+  var fieldEmp = 0, fieldAssets = 0;
+  Object.keys(fieldTree).forEach(function(div) {
+    Object.keys(fieldTree[div]).forEach(function(dist) {
+      Object.keys(fieldTree[div][dist]).forEach(function(area) {
+        Object.keys(fieldTree[div][dist][area]).forEach(function(branch) {
+          Object.keys(fieldTree[div][dist][area][branch]).forEach(function(empId) {
+            fieldEmp++;
+            fieldAssets += (fieldTree[div][dist][area][branch][empId].assets || []).length;
+          });
         });
       });
     });
   });
 
+  var totalEmp    = hoEmp    + fieldEmp;
+  var totalAssets = hoAssets + fieldAssets;
+
   var summEl = document.getElementById('staffAssetsSummary');
   if (summEl) {
-    summEl.innerHTML = divKeys.length
-      ? '<div class="pool-pill pool-pill-blue">'+totalAsset+' Assets</div>'
-        +'<div class="pool-pill">'+totalEmp+' Staff Members</div>'
-        +'<div class="pool-pill">'+divKeys.length+' Division(s)</div>'
-      : '';
+    var pills = '<div class="pool-pill pool-pill-blue">' + totalAssets + ' Assets</div>'
+      + '<div class="pool-pill">' + totalEmp + ' Staff Members</div>';
+    if (showHO && showField) {
+      pills += '<div class="pool-pill" style="background:rgba(8,145,178,.1);border-color:rgba(8,145,178,.3);color:#0891b2">' + hoAssets + ' HO</div>';
+      pills += '<div class="pool-pill">' + fieldAssets + ' Field</div>';
+    }
+    summEl.innerHTML = pills;
   }
 
-  if (!divKeys.length) {
-    var isSearching = !!_stSearchQ;
-    var emptyHtml = '<div class="st-empty">'
-      + '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-      + 'stroke-width="1.2" style="margin:0 auto 14px;display:block;color:var(--text3)">'
-      + '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>'
-      + '<circle cx="9" cy="7" r="4"/>'
-      + '<path d="M23 21v-2a4 4 0 0 0-3-3.87"/>'
-      + '<path d="M16 3.13a4 4 0 0 1 0 7.75"/>'
-      + '</svg>';
-
-    if (isSearching) {
-      emptyHtml += '<div style="font-weight:700;font-size:.95rem;margin-bottom:6px">'
-        + 'No staff found matching "' + esc(_stSearchQ) + '"</div>'
-        + '<div style="color:var(--text3);font-size:.82rem;margin-bottom:16px">'
-        + 'Try searching by name, Employee ID, barcode, or location.</div>'
-        + '<button class="btn btn-secondary btn-sm" onclick="'
-        + 'document.getElementById(\'staffAssetsSearch\').value=\'\';'
-        + 'onStaffAssetsSearch()">'
-        + 'Clear Search</button>';
-    } else {
-      emptyHtml += '<div style="font-weight:700;font-size:.95rem;margin-bottom:6px">'
-        + 'No allocated assets in your scope</div>'
-        + '<div style="color:var(--text3);font-size:.82rem;margin-bottom:6px">'
-        + 'Assets allocated to staff in your district will appear here.</div>'
-        + '<div style="color:var(--text3);font-size:.78rem;margin-bottom:16px;'
-        + 'padding:8px 14px;background:var(--bg3);border:1px solid var(--border);'
-        + 'border-radius:var(--radius2);text-align:left;max-width:360px;margin-left:auto;'
-        + 'margin-right:auto">'
-        + '💡 Your scope: <strong>'
-        + (SESSION && SESSION.userDistricts && SESSION.userDistricts.length
-            ? SESSION.userDistricts.join(', ')
-            : 'No district assigned')
-        + '</strong></div>'
-        + '<button class="btn btn-primary btn-sm" onclick="switchPage(\'spare\');'
-        + 'setTimeout(openAddAssetModal,100)">'
-        + '+ Enroll First Asset</button>';
-    }
-    emptyHtml += '</div>';
-    container.innerHTML = emptyHtml;
+  if (!showHO && !showField) {
+    container.innerHTML = '<div class="st-empty">No assets in scope.</div>';
     return;
   }
 
   var html = '<div class="st-tree">';
-  divKeys.forEach(function(div){ html += _renderStaffDivNode(div); });
+
+  // ── HEAD OFFICE ROOT NODE ─────────────────────────────────────────────────
+  if (showHO) {
+    var hoOpen  = !!_stExpanded['__HO_ROOT__'];
+    var deptKeys = Object.keys(hoTree).sort();
+    html += '<div class="st-node st-div" style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.03)">'
+      + '<div class="st-row" data-stkey="__HO_ROOT__" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+      + '<span class="st-chevron ' + (hoOpen ? 'open' : '') + '">›</span>'
+      + '<span class="st-icon">🏛</span>'
+      + '<span class="st-label" style="color:#0891b2">Head Office</span>'
+      + '<span class="st-meta">' + deptKeys.length + ' dept(s) · ' + hoEmp + ' staff · ' + hoAssets + ' assets</span>'
+      + '</div>';
+    if (hoOpen) {
+      html += '<div class="st-children">';
+      deptKeys.forEach(function(dept) { html += _renderHODeptNode(dept, hoTree); });
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ── FIELD OFFICE ROOT NODE ────────────────────────────────────────────────
+  if (showField) {
+    var fieldOpen = !!_stExpanded['__FIELD_ROOT__'];
+    var divKeys   = Object.keys(fieldTree).sort();
+
+    if (divKeys.length === 0 && !_stSearchQ) {
+      // No field assets in scope — show helpful empty state inside a root node
+      html += '<div class="st-node st-div">'
+        + '<div class="st-row" style="cursor:default">'
+        + '<span class="st-icon">🏢</span>'
+        + '<span class="st-label">Field Office</span>'
+        + '<span class="st-meta">No allocated assets in scope</span>'
+        + '</div></div>';
+    } else {
+      html += '<div class="st-node st-div">'
+        + '<div class="st-row" data-stkey="__FIELD_ROOT__" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+        + '<span class="st-chevron ' + (fieldOpen ? 'open' : '') + '">›</span>'
+        + '<span class="st-icon">🏢</span>'
+        + '<span class="st-label">Field Office</span>'
+        + '<span class="st-meta">' + divKeys.length + ' division(s) · ' + fieldEmp + ' staff · ' + fieldAssets + ' assets</span>'
+        + '</div>';
+
+      if (fieldOpen) {
+        html += '<div class="st-children">';
+        if (divKeys.length === 0) {
+          html += '<div class="st-empty-small">No assets match your search.</div>';
+        } else {
+          divKeys.forEach(function(div) { html += _renderStaffDivNode(div, fieldTree); });
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+  }
+
   html += '</div>';
   container.innerHTML = html;
 }
 
-function _renderStaffDivNode(div) {
-  var key = div;
-  var isOpen = !!_stExpanded[key];
-  var distKeys = Object.keys(_stTree[div]).sort();
-  var assetCount = 0, empCount = 0;
-  distKeys.forEach(function(dist) {
-    Object.keys(_stTree[div][dist]).forEach(function(area) {
-      Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
-        var emps = Object.keys(_stTree[div][dist][area][branch]);
-        empCount += emps.length;
-        emps.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
-      });
-    });
-  });
-  var html = '<div class="st-node st-div">'
-    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
-    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">🏢</span>'
-    +'<span class="st-label">'+esc(div)+'</span>'
-    +'<span class="st-meta">'+empCount+' staff · '+assetCount+' assets</span>'
-    +'</div>';
-  if (isOpen) {
-    html += '<div class="st-children">';
-    distKeys.forEach(function(dist){ html += _renderStaffDistNode(div, dist); });
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
+// DELETED: Old dual-scope and field rendering functions - replaced by unified _renderStaffTree()
 
-function _renderStaffDistNode(div, dist) {
-  // "Assigned To Division" — no district info: render emp nodes flat
-  if (_isSentinel(dist)) {
-    var html = '';
-    Object.keys(_stTree[div][dist] || {}).forEach(function(area) {
-      Object.keys(_stTree[div][dist][area] || {}).forEach(function(branch) {
-        Object.keys(_stTree[div][dist][area][branch] || {}).sort().forEach(function(empId) {
-          html += _renderEmpNode(div, dist, area, branch, empId);
-        });
-      });
-    });
-    return html;
-  }
-
-  var key = div+'::'+dist;
-  var isOpen = !!_stExpanded[key];
-  var areaKeys = Object.keys(_stTree[div][dist]).sort();
-  var assetCount = 0, empCount = 0;
-  areaKeys.forEach(function(area) {
-    Object.keys(_stTree[div][dist][area]).forEach(function(branch) {
-      var emps = Object.keys(_stTree[div][dist][area][branch]);
-      empCount += emps.length;
-      emps.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
-    });
-  });
-  var html = '<div class="st-node st-dist">'
-    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
-    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">📍</span>'
-    +'<span class="st-label">'+esc(dist)+'</span>'
-    +'<span class="st-meta">'+empCount+' staff · '+assetCount+' assets</span>'
-    +'</div>';
-  if (isOpen) {
-    html += '<div class="st-children">';
-    areaKeys.forEach(function(area) {
-      if (_isSentinel(area)) {
-        Object.keys(_stTree[div][dist][area]).sort().forEach(function(branch) {
-          html += _renderStaffBranchNode(div, dist, area, branch);
-        });
-      } else {
-        html += _renderStaffAreaNode(div, dist, area);
-      }
-    });
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function _renderStaffAreaNode(div, dist, area) {
-  var key = div+'::'+dist+'::'+area;
-  var isOpen = !!_stExpanded[key];
-  var branchKeys = Object.keys(_stTree[div][dist][area]).sort();
-  var assetCount = 0, empCount = 0;
-  branchKeys.forEach(function(branch) {
-    var emps = Object.keys(_stTree[div][dist][area][branch]);
-    empCount += emps.length;
-    emps.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
-  });
-  var areaLabel = area === '(No Area)' ? '<em style="opacity:.6">No Area</em>' : esc(area);
-  var html = '<div class="st-node st-area">'
-    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
-    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">📁</span>'
-    +'<span class="st-label">'+areaLabel+'</span>'
-    +'<span class="st-meta">'+empCount+' staff · '+assetCount+' assets</span>'
-    +'</div>';
-  if (isOpen) {
-    html += '<div class="st-children">';
-    branchKeys.forEach(function(branch){ html += _renderStaffBranchNode(div, dist, area, branch); });
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function _renderStaffBranchNode(div, dist, area, branch) {
-  // No-branch sentinel: show emp nodes directly without a branch container
-  if (_isSentinel(branch)) {
-    var html = '';
-    var empIds = Object.keys(_stTree[div][dist][area][branch] || {}).sort();
-    empIds.forEach(function(empId) { html += _renderEmpNode(div, dist, area, branch, empId); });
-    return html;
-  }
-
-  var empIds = Object.keys(_stTree[div][dist][area][branch]).sort(function(a,b){
-    var na = _stTree[div][dist][area][branch][a].name;
-    var nb = _stTree[div][dist][area][branch][b].name;
-    return na.localeCompare(nb);
-  });
-  var assetCount = 0;
-  empIds.forEach(function(e){ assetCount += (_stTree[div][dist][area][branch][e].assets||[]).length; });
-
-  if (branch === '(No Branch)') {
-    var html = '';
-    empIds.forEach(function(empId) { html += _renderEmpNode(div, dist, area, branch, empId); });
-    return html;
-  }
-
-  var key = div+'::'+dist+'::'+area+'::'+branch;
-  var isOpen = !!_stExpanded[key];
-  var html = '<div class="st-node st-branch">'
-    +'<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
-    +'<span class="st-chevron '+(isOpen?'open':'')+'">›</span>'
-    +'<span class="st-icon">🏬</span>'
-    +'<span class="st-label">'+esc(branch)+'</span>'
-    +'<span class="st-meta">'+empIds.length+' staff · '+assetCount+' assets</span>'
-    +'</div>';
-  if (isOpen) {
-    html += '<div class="st-children">';
-    empIds.forEach(function(empId) { html += _renderEmpNode(div, dist, area, branch, empId); });
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function _renderEmpNode(div, dist, area, branch, empId) {
-  var emp = _stTree?.[div]?.[dist]?.[area]?.[branch]?.[empId];
-  if (!emp) return '';
-  var typeCounts = {};
-  (emp.assets||[]).forEach(function(a){ if(a&&a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
-  var chips = Object.entries(typeCounts)
-    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
-    .join('');
-  return '<div class="st-node st-emp st-emp-inline">'
-    +'<div class="st-emp-row">'
-    +'<div style="display:flex;gap:4px;flex-shrink:0">'
-    +'<button class="btn btn-icon btn-secondary" data-tip="Move Staff" onclick="openMoveStaffModal(\''+esc(empId)+'\')" style="color:var(--cyan);border-color:rgba(8,145,178,.3)">'
-    +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>'
-    +'</button>'
-    +'<button class="btn btn-icon btn-secondary" data-tip="View Assets ('+(emp.assets||[]).length+')" onclick="openStaffAssetModal(\''+esc(empId)+'\',\''+esc(div||'')+'\',\''+esc(dist||'')+'\',\''+esc(area||'')+'\',\''+esc(branch||'')+'\')">'
-    +_ICO.view+'</button>'
-    +'</div>'
-    +'<span class="st-icon">👤</span>'
-    +'<div class="st-emp-info">'
-    +'<span class="st-label">'+esc(emp.name||'Unknown')+'</span>'
-    +'<span class="st-emp-sub">'
-    +'<span class="mono-sm" style="font-size:.7rem">'+esc(empId)+'</span>'
-    +(emp.designation?'<span style="color:var(--text3)">·</span><span style="font-size:.72rem;color:var(--text2)">'+esc(emp.designation)+'</span>':'')
-    +'</span>'
-    +'</div>'
-    +'<div class="st-type-chips">'+(chips||'<span style="color:var(--text3);font-size:.76rem">—</span>')+'</div>'
-    +'</div>'
-    +'</div>';
-}
+// DELETED: Old HO rendering function - replaced by unified _renderStaffTree
 
 // ── Staff Asset Modal (handles both HO and field) ─────────────────────────────
 function openStaffAssetModal(empId, div, dist, area, branch, mode) {
