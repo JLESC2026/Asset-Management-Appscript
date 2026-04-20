@@ -25,7 +25,10 @@ function onStaffAssetsSearch() {
 // ── HO-specific tree builder: Head Office → Department → EmpID ───────────────
 function _buildHOStaffTree() {
   var base = _filterByScope(
-    ASSETS.filter(function(a){ return ['allocated','transfer'].indexOf(a.status) >= 0; })
+    ASSETS.filter(function(a){
+      return ['allocated','transfer'].indexOf(a.status) >= 0 &&
+             (a.EffectiveAssignment || '').trim().toLowerCase() === 'central office';
+    })
   );
   var data = _stSearchQ
     ? base.filter(function(a){
@@ -58,7 +61,10 @@ function _buildHOStaffTree() {
 // skipped here (but remain visible in Asset Pools and Equipment Record).
 function _buildFieldStaffTree() {
   var base = _filterByScope(
-    ASSETS.filter(function(a){ return ['allocated','transfer'].indexOf(a.status) >= 0; })
+    ASSETS.filter(function(a){
+      return ['allocated','transfer'].indexOf(a.status) >= 0 &&
+             (a.EffectiveAssignment || '').trim().toLowerCase() === 'field office';
+    })
   );
   var data = _stSearchQ
     ? base.filter(function(a){
@@ -159,6 +165,12 @@ function stCollapseAll() {
 
 function stToggle(key) {
   _stExpanded[key] = !_stExpanded[key];
+  // Rebuild the combined staff tree to avoid stale/undefined lookups
+  var ho = _buildHOStaffTree();
+  var field = _buildFieldStaffTree();
+  _stTree = {};
+  Object.keys(ho).forEach(function(k){ _stTree[k] = ho[k]; });
+  Object.keys(field).forEach(function(k){ _stTree[k] = field[k]; });
   _renderStaffTree();
 }
 
@@ -361,4 +373,66 @@ function openStaffAssetModal(empId, div, dist, area, branch, mode) {
   }
   openModal('staffAssetModal');
 }
+
+// ── Helper to render Head Office Department Nodes ────────────────────────────
+window._renderHODeptNode = function(dept, hoTree) {
+  var isExpanded = !!_stExpanded['ho-dept::' + dept];
+  var emps = hoTree[dept];
+  var empIds = Object.keys(emps).sort();
+  
+  var html = '<div class="st-node st-dept">'
+    + '<div class="st-row" data-stkey="ho-dept::' + dept + '" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    + '<span class="st-chevron ' + (isExpanded ? 'open' : '') + '">›</span>'
+    + '<span class="st-label">' + dept + '</span>'
+    + '<span class="st-meta">' + empIds.length + ' staff</span>'
+    + '</div>';
+
+  if (isExpanded) {
+    html += '<div class="st-children">';
+    empIds.forEach(function(eid) {
+      var emp = emps[eid];
+      html += _renderStaffLeaf(emp, 'ho');
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+};
+
+// ── Helper to render Field Division/District/Area/Branch Nodes ────────────────
+window._renderStaffDivNode = function(div, fieldTree) {
+  var isExpanded = !!_stExpanded[div];
+  var dists = fieldTree[div];
+  var distKeys = Object.keys(dists).sort();
+
+  var html = '<div class="st-node st-div">'
+    + '<div class="st-row" data-stkey="' + div + '" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    + '<span class="st-chevron ' + (isExpanded ? 'open' : '') + '">›</span>'
+    + '<span class="st-label">' + div + '</span>'
+    + '</div>';
+
+  if (isExpanded) {
+    html += '<div class="st-children">';
+    distKeys.forEach(function(dist) {
+      // You would likely need similar recursive logic here for 
+      // District -> Area -> Branch -> Leaf
+      html += '<div class="st-empty-small">' + dist + ' (Tree continues...)</div>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+};
+
+// ── Helper to render the actual Staff Member (Leaf Node) ──────────────────────
+window._renderStaffLeaf = function(emp, mode) {
+  var key = mode + '::' + emp.empId;
+  return '<div class="st-leaf" onclick="openStaffAssetModal(\''+emp.empId+'\',\''+(emp.department||emp.division)+'\',\''+(emp.district||'')+'\',\''+(emp.area||'')+'\',\''+(emp.branch||'')+'\',\''+mode+'\')">'
+    + '<div class="st-staff-info">'
+    + '<div class="st-staff-name">' + (emp.name || 'Unknown') + '</div>'
+    + '<div class="st-staff-id">' + emp.empId + ' · ' + (emp.designation || '—') + '</div>'
+    + '</div>'
+    + '<div class="st-staff-badge">' + (emp.assets || []).length + '</div>'
+    + '</div>';
+};
 </script>

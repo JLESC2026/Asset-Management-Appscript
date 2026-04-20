@@ -119,7 +119,10 @@ function _renderEquipmentTree() {
 
 // ── HO Equipment Tree ─────────────────────────────────────────────────────────
 function _buildHOEquipTree() {
-  var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
+  var base = _filterByScope(ASSETS.filter(function(a){
+    return a.status !== 'disposal' &&
+           (a.EffectiveAssignment || '').trim().toLowerCase() === 'central office';
+  }));
   var data = _eqSearchQ
     ? base.filter(function(a){
         return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,a.Department,a.BaseOffice,a.Branch,a.Location]
@@ -232,7 +235,10 @@ function eqToggle(key) {
 
 
 function _buildEquipTree() {
-  var base = _filterByScope(ASSETS.filter(function(a){ return a.status !== 'disposal'; }));
+  var base = _filterByScope(ASSETS.filter(function(a){
+    return a.status !== 'disposal' &&
+           (a.EffectiveAssignment || '').trim().toLowerCase() === 'field office';
+  }));
   var data = _eqSearchQ
     ? base.filter(function(a){
         return [a.Barcode,a.Type,a.Brand,a.Serial,a.Staff,a.EmpID,
