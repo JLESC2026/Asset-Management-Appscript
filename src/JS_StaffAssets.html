@@ -165,13 +165,7 @@ function stCollapseAll() {
 
 function stToggle(key) {
   _stExpanded[key] = !_stExpanded[key];
-  // Rebuild the combined staff tree to avoid stale/undefined lookups
-  var ho = _buildHOStaffTree();
-  var field = _buildFieldStaffTree();
-  _stTree = {};
-  Object.keys(ho).forEach(function(k){ _stTree[k] = ho[k]; });
-  Object.keys(field).forEach(function(k){ _stTree[k] = field[k]; });
-  _renderStaffTree();
+  _renderStaffTree(); // _renderStaffTree always updates _stTree and _stFieldTree
 }
 
 function _updateStaffBadge() {
@@ -191,9 +185,13 @@ function _renderStaffTree() {
   var showHO    = canSeeHO();
   var showField = canSeeField();
 
-  // ── Build both trees ──────────────────────────────────────────────────────
+  // ── Build both trees and expose globally for openStaffAssetModal ──────────
   var hoTree    = showHO    ? _buildHOStaffTree()    : {};
   var fieldTree = showField ? _buildFieldStaffTree() : {};
+
+  _stTree = {};
+  Object.keys(hoTree).forEach(function(dept) { _stTree[dept] = hoTree[dept]; });
+  window._stFieldTree = fieldTree;
 
   // ── Compute totals for summary pills ──────────────────────────────────────
   var hoEmp = 0, hoAssets = 0;
@@ -306,11 +304,16 @@ function openStaffAssetModal(empId, div, dist, area, branch, mode) {
   _samCurrentEmpId = empId;
   var emp, assets;
   if (mode === 'ho') {
-    var dept = div;
-    emp = _stTree[dept] && _stTree[dept][empId];
+    emp = _stTree[div] && _stTree[div][empId];
     assets = emp ? (emp.assets||[]) : [];
   } else {
-    emp = _stTree[div]?.[dist]?.[area]?.[branch]?.[empId];
+    // Use _stFieldTree; dist/area/branch are '' when sentinel-collapsed
+    var ft        = window._stFieldTree || {};
+    var distKey   = dist   || _LOC_NODIST;
+    var areaKey   = area   || _LOC_NOAREA;
+    var branchKey = branch || _LOC_NOBRANCH;
+    var bTree = (((ft[div] || {})[distKey] || {})[areaKey] || {})[branchKey] || {};
+    emp    = bTree[empId] || null;
     assets = emp ? (emp.assets||[]) : [];
   }
   if (!emp) { toast('Staff data not found.','err'); return; }
@@ -340,12 +343,12 @@ function openStaffAssetModal(empId, div, dist, area, branch, mode) {
 
   if (mode === 'ho') {
     if(pd){ pd.textContent = '🏛 Head Office'; pd.className = 'loc-pill lp-div'; }
-    if(ps){ ps.textContent = div || '—'; ps.className = 'loc-pill lp-dist'; }
-    if(pb){ pb.textContent = emp.baseOffice || '—'; pb.className = 'loc-pill lp-branch'; }
+    if(ps){ ps.textContent = div  || '—'; ps.className = 'loc-pill lp-dist'; }
+    if(pb){ pb.textContent = (emp && emp.baseOffice) || branch || '—'; pb.className = 'loc-pill lp-branch'; }
   } else {
-    if(pd) pd.textContent = (div !== '(No Division)')  ? div    : '—';
-    if(ps) ps.textContent = (dist !== '(No District)')  ? dist   : '—';
-    if(pb) pb.textContent = (branch !== '(No Branch)')  ? branch : '—';
+    if(pd) pd.textContent = div    || '—';
+    if(ps) ps.textContent = dist   || '—';
+    if(pb) pb.textContent = branch || '—';
   }
   if(pc) pc.textContent = assets.length+' asset'+(assets.length!==1?'s':'');
 
@@ -374,49 +377,183 @@ function openStaffAssetModal(empId, div, dist, area, branch, mode) {
   openModal('staffAssetModal');
 }
 
-// ── Helper to render Head Office Department Nodes ────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  STAFF TREE NODE RENDERERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── HO: Department node ──────────────────────────────────────────────────────
 window._renderHODeptNode = function(dept, hoTree) {
   var isExpanded = !!_stExpanded['ho-dept::' + dept];
   var emps = hoTree[dept];
-  var empIds = Object.keys(emps).sort();
-  
-  var html = '<div class="st-node st-dept">'
-    + '<div class="st-row" data-stkey="ho-dept::' + dept + '" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
-    + '<span class="st-chevron ' + (isExpanded ? 'open' : '') + '">›</span>'
-    + '<span class="st-label">' + dept + '</span>'
-    + '<span class="st-meta">' + empIds.length + ' staff</span>'
-    + '</div>';
+  var empIds = Object.keys(emps).sort(function(a,b){
+    return (emps[a].name||'').localeCompare(emps[b].name||'');
+  });
+  var totalAssets = 0;
+  empIds.forEach(function(eid){ totalAssets += (emps[eid].assets||[]).length; });
+  var typeCounts = {};
+  empIds.forEach(function(eid){
+    (emps[eid].assets||[]).forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  });
+  var chips = Object.entries(typeCounts).sort(function(a,b){return b[1]-a[1];}).slice(0,4)
+    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
+    .join('');
 
+  var html = '<div class="st-node st-emp" style="margin:2px 0 2px var(--tree-indent)">'
+    + '<div class="st-row" data-stkey="ho-dept::'+esc(dept)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    + '<span class="st-chevron '+(isExpanded?'open':'')+'">›</span>'
+    + '<span class="st-icon">🏢</span>'
+    + '<span class="st-label">'+esc(dept)+'</span>'
+    + '<div class="st-type-chips" style="flex:0 1 auto">'+chips+'</div>'
+    + '<span class="st-meta">'+empIds.length+' staff · '+totalAssets+' assets</span>'
+    + '</div>';
   if (isExpanded) {
     html += '<div class="st-children">';
-    empIds.forEach(function(eid) {
-      var emp = emps[eid];
-      html += _renderStaffLeaf(emp, 'ho');
-    });
+    empIds.forEach(function(eid){ html += _renderStaffEmpInline(emps[eid], dept, '', '', '', 'ho'); });
     html += '</div>';
   }
   html += '</div>';
   return html;
 };
 
-// ── Helper to render Field Division/District/Area/Branch Nodes ────────────────
+// ── Field: Division node ──────────────────────────────────────────────────────
 window._renderStaffDivNode = function(div, fieldTree) {
-  var isExpanded = !!_stExpanded[div];
+  var key = div;
+  var isExpanded = !!_stExpanded[key];
   var dists = fieldTree[div];
   var distKeys = Object.keys(dists).sort();
-
-  var html = '<div class="st-node st-div">'
-    + '<div class="st-row" data-stkey="' + div + '" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
-    + '<span class="st-chevron ' + (isExpanded ? 'open' : '') + '">›</span>'
-    + '<span class="st-label">' + div + '</span>'
+  var totalStaff = 0, totalAssets = 0;
+  distKeys.forEach(function(dist){
+    Object.keys(dists[dist]).forEach(function(area){
+      Object.keys(dists[dist][area]).forEach(function(branch){
+        Object.keys(dists[dist][area][branch]).forEach(function(eid){
+          totalStaff++;
+          totalAssets += (dists[dist][area][branch][eid].assets||[]).length;
+        });
+      });
+    });
+  });
+  var html = '<div class="st-node st-dist" style="margin:4px 0">'
+    + '<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    + '<span class="st-chevron '+(isExpanded?'open':'')+'">›</span>'
+    + '<span class="st-icon">🏢</span>'
+    + '<span class="st-label">'+esc(div)+'</span>'
+    + '<span class="st-meta">'+distKeys.length+' dist · '+totalStaff+' staff · '+totalAssets+' assets</span>'
     + '</div>';
-
   if (isExpanded) {
     html += '<div class="st-children">';
-    distKeys.forEach(function(dist) {
-      // You would likely need similar recursive logic here for 
-      // District -> Area -> Branch -> Leaf
-      html += '<div class="st-empty-small">' + dist + ' (Tree continues...)</div>';
+    distKeys.forEach(function(dist){ html += _renderStaffDistNode(div, dist, dists[dist]); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+};
+
+// ── Field: District node ──────────────────────────────────────────────────────
+window._renderStaffDistNode = function(div, dist, areaTree) {
+  var key = div+'::'+dist;
+  var isExpanded = !!_stExpanded[key];
+  var areaKeys = Object.keys(areaTree).sort();
+  var totalStaff = 0, totalAssets = 0;
+  areaKeys.forEach(function(area){
+    Object.keys(areaTree[area]).forEach(function(branch){
+      Object.keys(areaTree[area][branch]).forEach(function(eid){
+        totalStaff++;
+        totalAssets += (areaTree[area][branch][eid].assets||[]).length;
+      });
+    });
+  });
+  var label = _isSentinel(dist)
+    ? '<span style="color:var(--text3);font-style:italic">No District</span>'
+    : esc(dist);
+  var html = '<div class="st-node st-area">'
+    + '<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    + '<span class="st-chevron '+(isExpanded?'open':'')+'">›</span>'
+    + '<span class="st-icon">📍</span>'
+    + '<span class="st-label">'+label+'</span>'
+    + '<span class="st-meta">'
+    +   areaKeys.filter(function(a){return !_isSentinel(a);}).length
+    +   ' area(s) · '+totalStaff+' staff · '+totalAssets+' assets'
+    + '</span>'
+    + '</div>';
+  if (isExpanded) {
+    html += '<div class="st-children">';
+    areaKeys.forEach(function(area){ html += _renderStaffAreaNode(div, dist, area, areaTree[area]); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+};
+
+// ── Field: Area node ──────────────────────────────────────────────────────────
+window._renderStaffAreaNode = function(div, dist, area, branchTree) {
+  var key = div+'::'+dist+'::'+area;
+  var isExpanded = !!_stExpanded[key];
+  var branchKeys = Object.keys(branchTree).sort();
+  var totalStaff = 0, totalAssets = 0;
+  branchKeys.forEach(function(branch){
+    Object.keys(branchTree[branch]).forEach(function(eid){
+      totalStaff++;
+      totalAssets += (branchTree[branch][eid].assets||[]).length;
+    });
+  });
+  var label = _isSentinel(area)
+    ? '<span style="color:var(--text3);font-style:italic">No Area</span>'
+    : esc(area);
+  var html = '<div class="st-node st-branch">'
+    + '<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    + '<span class="st-chevron '+(isExpanded?'open':'')+'">›</span>'
+    + '<span class="st-icon">📁</span>'
+    + '<span class="st-label">'+label+'</span>'
+    + '<span class="st-meta">'
+    +   branchKeys.filter(function(b){return !_isSentinel(b);}).length
+    +   ' branch(es) · '+totalStaff+' staff · '+totalAssets+' assets'
+    + '</span>'
+    + '</div>';
+  if (isExpanded) {
+    html += '<div class="st-children">';
+    branchKeys.forEach(function(branch){ html += _renderStaffBranchNode(div, dist, area, branch, branchTree[branch]); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+};
+
+// ── Field: Branch node ────────────────────────────────────────────────────────
+window._renderStaffBranchNode = function(div, dist, area, branch, empTree) {
+  var key = div+'::'+dist+'::'+area+'::'+branch;
+  var isExpanded = !!_stExpanded[key];
+  var empIds = Object.keys(empTree).sort(function(a,b){
+    return (empTree[a].name||'').localeCompare(empTree[b].name||'');
+  });
+  var totalAssets = 0;
+  empIds.forEach(function(eid){ totalAssets += (empTree[eid].assets||[]).length; });
+  var typeCounts = {};
+  empIds.forEach(function(eid){
+    (empTree[eid].assets||[]).forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  });
+  var chips = Object.entries(typeCounts).sort(function(a,b){return b[1]-a[1];}).slice(0,4)
+    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
+    .join('');
+  var label = _isSentinel(branch)
+    ? '<span style="color:var(--text3);font-style:italic">No Branch</span>'
+    : esc(branch);
+  // Pass empty strings for sentinels so openStaffAssetModal remaps via _LOC_* constants
+  var passDist   = _isSentinel(dist)   ? '' : dist;
+  var passArea   = _isSentinel(area)   ? '' : area;
+  var passBranch = _isSentinel(branch) ? '' : branch;
+
+  var html = '<div class="st-node st-emp" style="margin:2px 0 2px var(--tree-indent)">'
+    + '<div class="st-row" data-stkey="'+esc(key)+'" onclick="stToggle(this.getAttribute(\'data-stkey\'))">'
+    + '<span class="st-chevron '+(isExpanded?'open':'')+'">›</span>'
+    + '<span class="st-icon">🏬</span>'
+    + '<span class="st-label">'+label+'</span>'
+    + '<div class="st-type-chips" style="flex:0 1 auto">'+chips+'</div>'
+    + '<span class="st-meta">'+empIds.length+' staff · '+totalAssets+' assets</span>'
+    + '</div>';
+  if (isExpanded) {
+    html += '<div class="st-children">';
+    empIds.forEach(function(eid){
+      html += _renderStaffEmpInline(empTree[eid], div, passDist, passArea, passBranch, 'field');
     });
     html += '</div>';
   }
@@ -424,15 +561,36 @@ window._renderStaffDivNode = function(div, fieldTree) {
   return html;
 };
 
-// ── Helper to render the actual Staff Member (Leaf Node) ──────────────────────
-window._renderStaffLeaf = function(emp, mode) {
-  var key = mode + '::' + emp.empId;
-  return '<div class="st-leaf" onclick="openStaffAssetModal(\''+emp.empId+'\',\''+(emp.department||emp.division)+'\',\''+(emp.district||'')+'\',\''+(emp.area||'')+'\',\''+(emp.branch||'')+'\',\''+mode+'\')">'
-    + '<div class="st-staff-info">'
-    + '<div class="st-staff-name">' + (emp.name || 'Unknown') + '</div>'
-    + '<div class="st-staff-id">' + emp.empId + ' · ' + (emp.designation || '—') + '</div>'
+// ── Shared: Staff member inline leaf (HO and Field) ───────────────────────────
+window._renderStaffEmpInline = function(emp, div, dist, area, branch, mode) {
+  var typeCounts = {};
+  (emp.assets||[]).forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  var typeChips = Object.entries(typeCounts).sort(function(a,b){return b[1]-a[1];}).slice(0,4)
+    .map(function(e){ return '<span class="st-type-chip">'+esc(e[0])+' <strong>'+e[1]+'</strong></span>'; })
+    .join('');
+  var passDiv    = div    || '';
+  var passDist   = dist   || '';
+  var passArea   = area   || '';
+  var passBranch = mode === 'ho' ? (emp.baseOffice || branch || '') : (branch || '');
+
+  return '<div class="st-emp st-emp-inline">'
+    + '<div class="st-emp-row" style="cursor:pointer" onclick="openStaffAssetModal(\''
+    +   esc(emp.empId||'')+'\',\''+esc(passDiv)+'\',\''+esc(passDist)
+    +   '\',\''+esc(passArea)+'\',\''+esc(passBranch)+'\',\''+mode+'\')">'
+    + '<span class="st-icon" style="flex-shrink:0">👤</span>'
+    + '<div class="st-emp-info">'
+    +   '<span class="st-label" style="font-size:.85rem;white-space:normal;word-break:break-word">'+esc(emp.name||'Unknown')+'</span>'
+    +   '<div class="st-emp-sub">'
+    +     '<span class="mono-sm">'+esc(emp.empId||'')+'</span>'
+    +     (emp.designation ? '<span style="font-size:.7rem;color:var(--text3)"> · '+esc(emp.designation)+'</span>' : '')
+    +   '</div>'
     + '</div>'
-    + '<div class="st-staff-badge">' + (emp.assets || []).length + '</div>'
+    + '<div class="st-type-chips" style="flex:0 1 auto;margin:0 8px">'+typeChips+'</div>'
+    + '<span class="st-meta" style="flex-shrink:0;margin-left:auto">'+((emp.assets||[]).length)+' assets</span>'
+    + '</div>'
     + '</div>';
 };
+
+// Alias for any lingering references
+window._renderStaffLeaf = window._renderStaffEmpInline;
 </script>
