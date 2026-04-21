@@ -951,19 +951,33 @@ function _startCooldownTick(formId, cooldownUntil, displayElId) {
   }, 1000);
 }
 
-function _loadApprovalData() {
+function _loadApprovalData(onComplete) {
   if (!SESSION) return;
   google.script.run
     .withSuccessHandler(function(r) {
-      MY_FORMS      = r.myForms      || [];
-      PENDING_FORMS = r.pendingForms || [];
-      APPROVAL_CFG  = r.config       || {};
+      MY_FORMS      = _parseApprovalForms(r.myForms      || []);
+      PENDING_FORMS = _parseApprovalForms(r.pendingForms || []);
+      APPROVAL_CFG  = r.config || {};
       _updateApprovalBadge();
-      // If currently on approval page, refresh it
       if (currentPage === 'for-approval') renderForApprovalPage();
+      if (typeof onComplete === 'function') onComplete();
     })
-    .withFailureHandler(function(){})
+    .withFailureHandler(function(){
+      if (typeof onComplete === 'function') onComplete();
+    })
     .getApprovalDashboardData(SESSION.username, SESSION.roleTier);
+}
+
+// Parses assetsJson string → assets array + assetCount on every form object
+function _parseApprovalForms(forms) {
+  return forms.map(function(f) {
+    if (!f.assets) {
+      try { f.assets = JSON.parse(f.assetsJson || '[]'); }
+      catch(e) { f.assets = []; }
+    }
+    f.assetCount = f.assets.length;
+    return f;
+  });
 }
 
 // ═══════════════════════════════════════

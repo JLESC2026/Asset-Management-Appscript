@@ -455,7 +455,10 @@ function openReviseForm(formId) {
 
 // ─── FORM PREVIEW HTML BUILDER ────────────────────────────────────────────────
 function _buildFormPreviewHtml(form) {
-  var assets = form.assets || [];
+  var assets = form.assets;
+  if (!assets) {
+    try { assets = JSON.parse(form.assetsJson || '[]'); } catch(e) { assets = []; }
+  }
   var statusColors = {
     Draft:     { bg:'rgba(107,130,160,.12)', color:'var(--text3)' },
     Pending:   { bg:'rgba(59,130,246,.1)',   color:'var(--blue)' },

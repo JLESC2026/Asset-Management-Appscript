@@ -465,9 +465,9 @@ function _submitEnroll() {
         closeModal('addAssetModal');
         loadData();
         if (formId) {
-          // Refresh approval data then open the preview
+          _loadApprovalData(function() { openFormPreview(formId); });
+        } else {
           _loadApprovalData();
-          setTimeout(function() { openFormPreview(formId); }, 600);
         }
       }
     })
@@ -871,10 +871,9 @@ function submitTransfer() {
         closeModal('transferModal');
         loadData();
         if (fromFormId && toFormId) {
-          _loadApprovalData();
-          setTimeout(function() {
+          _loadApprovalData(function() {
             openTransferReview(fromFormId, toFormId);
-          }, 600);
+          });
         }
       }
     })
