@@ -506,4 +506,34 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
   .badge,.type-tag,.loc-pill,.cond-good,.cond-damage{border:1px solid #ccc;background:white!important;color:#333!important}
   .page.active::before{content:'IICTD Asset Management — ' attr(id);display:block;font-size:14pt;font-weight:bold;margin-bottom:12pt;border-bottom:2px solid #333;padding-bottom:6pt}
 }
+
+/* ── APPROVAL CARDS ── */
+.approval-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);transition:border-color .15s,box-shadow .15s}
+.approval-card:hover{box-shadow:var(--shadow-md)}
+.approval-card-draft{border-color:var(--border2)}
+.approval-card-pending{border-color:rgba(59,130,246,.4);background:rgba(59,130,246,.02)}
+.approval-card-confirmed{border-color:rgba(22,163,74,.35);background:rgba(22,163,74,.02)}
+.approval-card-rejected{border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.02)}
+.approval-card-rejected:hover{border-color:var(--red);box-shadow:0 4px 16px rgba(239,68,68,.12)}
+
+/* ── COOLDOWN BADGE ── */
+.cooldown-badge{display:inline-block;background:rgba(232,81,24,.1);border:1px solid rgba(232,81,24,.28);color:var(--orange);font-size:.74rem;font-weight:600;padding:4px 12px;border-radius:20px}
+
+/* ── TRANSFER REVIEW PANELS ── */
+.transfer-review-panel{display:flex;flex-direction:column;gap:8px}
+.form-panel-rejected{position:relative;opacity:.8}
+.form-panel-rejected::after{content:'✕ Rejected';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(239,68,68,.12);color:var(--red);padding:8px 20px;border-radius:8px;font-weight:700;font-size:.88rem;pointer-events:none}
+.form-panel-confirmed{position:relative;opacity:.75}
+.form-panel-confirmed::after{content:'✓ Confirmed';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(22,163,74,.12);color:var(--green);padding:8px 20px;border-radius:8px;font-weight:700;font-size:.88rem;pointer-events:none}
+
+/* ── REJECTION BANNER ── */
+.rejection-banner{margin-top:0;margin-bottom:0}
+
+/* ── APPROVAL PAGE RESPONSIVE ── */
+@media(max-width:640px){
+  #myFormsGrid{grid-template-columns:1fr!important}
+  #pendingEnrollmentGrid{grid-template-columns:1fr!important}
+  #transferReviewPanels{grid-template-columns:1fr!important}
+  #transferReviewPanels>svg{display:none}
+}
 </style>

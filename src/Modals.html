@@ -602,3 +602,177 @@
     </div>
   </div>
 </div>
+
+<!-- ══ FORM PREVIEW MODAL (drafter — before submit) ══ -->
+<div class="modal-backdrop" id="formPreviewModal">
+  <div class="modal modal-lg" style="max-height:92vh;display:flex;flex-direction:column">
+    <div class="modal-hdr" style="flex-shrink:0">
+      <div>
+        <h3>Accountability Form Preview</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="fpmSubtitle">
+          Review before submitting for approval
+        </p>
+      </div>
+      <button class="modal-close" onclick="closeModal('formPreviewModal')">×</button>
+    </div>
+    <div class="modal-body" id="formPreviewBody" style="overflow-y:auto;flex:1;padding:20px 28px">
+      <div style="text-align:center;padding:40px;color:var(--text3)">Loading preview…</div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button class="btn btn-secondary" onclick="closeModal('formPreviewModal')">Cancel</button>
+      <button class="btn btn-secondary" id="fpmSaveDraftBtn"
+        onclick="saveDraftFromPreview()" style="color:var(--yellow);border-color:rgba(217,119,6,.35)">
+        Save as Draft
+      </button>
+      <div style="flex:1"></div>
+      <div id="fpmCooldownBadge" style="display:none;font-size:.76rem;color:var(--orange);
+        padding:5px 12px;background:rgba(232,81,24,.08);border:1px solid rgba(232,81,24,.25);
+        border-radius:6px;font-weight:600"></div>
+      <button class="btn btn-primary" id="fpmSubmitBtn" onclick="submitFromPreview()">
+        Submit for Review
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SINGLE REVIEW MODAL (supervisor — enrollment) ══ -->
+<div class="modal-backdrop" id="singleReviewModal">
+  <div class="modal modal-lg" style="max-height:92vh;display:flex;flex-direction:column">
+    <div class="modal-hdr" style="flex-shrink:0">
+      <div>
+        <h3>Review Form</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="srmSubtitle">
+          Enrollment Accountability Form
+        </p>
+      </div>
+      <button class="modal-close" onclick="closeModal('singleReviewModal')">×</button>
+    </div>
+    <div class="modal-body" id="singleReviewBody" style="overflow-y:auto;flex:1;padding:20px 28px">
+      <div style="text-align:center;padding:40px;color:var(--text3)">Loading…</div>
+    </div>
+    <!-- Rejection comment area (hidden by default) -->
+    <div id="srmRejectPanel" style="display:none;padding:14px 28px;
+      background:rgba(239,68,68,.06);border-top:1px solid rgba(239,68,68,.2)">
+      <div style="font-size:.76rem;font-weight:700;color:var(--red);margin-bottom:6px">
+        Rejection Comment *
+      </div>
+      <textarea id="srmRejectComment" placeholder="Explain why this form is being rejected…"
+        style="width:100%;min-height:70px;background:var(--bg3);border:1px solid rgba(239,68,68,.35);
+               color:var(--text);padding:9px 12px;border-radius:var(--radius2);
+               font-family:inherit;font-size:.85rem;outline:none;resize:vertical"></textarea>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button class="btn btn-secondary" onclick="closeModal('singleReviewModal')">Cancel</button>
+      <button class="btn btn-danger" id="srmRejectBtn" onclick="toggleSrmReject()">
+        Reject
+      </button>
+      <div style="flex:1"></div>
+      <button class="btn btn-success" id="srmConfirmBtn" onclick="confirmSingleFormAction()">
+        ✓ Confirm
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TRANSFER REVIEW MODAL (supervisor — paired) ══ -->
+<div class="modal-backdrop" id="transferReviewModal">
+  <div class="modal modal-lg" style="max-height:92vh;max-width:980px;display:flex;flex-direction:column">
+    <div class="modal-hdr" style="flex-shrink:0">
+      <div>
+        <h3>Review Transfer Pair</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px">
+          Both forms must be confirmed or rejected together
+        </p>
+      </div>
+      <button class="modal-close" onclick="closeModal('transferReviewModal')">×</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;flex:1;padding:16px 20px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" id="transferReviewPanels">
+        <!-- Left: From Panel -->
+        <div id="trmFromPanel" class="transfer-review-panel">
+          <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+                      color:var(--text3);margin-bottom:10px">From (Releasing Party)</div>
+          <div id="trmFromBody" style="background:var(--bg3);border:1px solid var(--border);
+            border-radius:var(--radius2);padding:14px;min-height:120px">
+            Loading…
+          </div>
+          <div id="trmFromRejectPanel" style="display:none;margin-top:10px">
+            <textarea id="trmFromRejectComment" placeholder="Comment for releasing party…"
+              style="width:100%;min-height:60px;background:var(--bg3);
+                     border:1px solid rgba(239,68,68,.35);color:var(--text);
+                     padding:8px 10px;border-radius:var(--radius2);
+                     font-family:inherit;font-size:.82rem;outline:none;resize:vertical"></textarea>
+          </div>
+        </div>
+        <!-- Right: To Panel -->
+        <div id="trmToPanel" class="transfer-review-panel">
+          <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+                      color:#60a5fa;margin-bottom:10px">To (Receiving Party)</div>
+          <div id="trmToBody" style="background:rgba(59,130,246,.04);
+            border:1px solid rgba(59,130,246,.2);
+            border-radius:var(--radius2);padding:14px;min-height:120px">
+            Loading…
+          </div>
+          <div id="trmToRejectPanel" style="display:none;margin-top:10px">
+            <textarea id="trmToRejectComment" placeholder="Comment for receiving party…"
+              style="width:100%;min-height:60px;background:var(--bg3);
+                     border:1px solid rgba(239,68,68,.35);color:var(--text);
+                     padding:8px 10px;border-radius:var(--radius2);
+                     font-family:inherit;font-size:.82rem;outline:none;resize:vertical"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button class="btn btn-secondary" onclick="closeModal('transferReviewModal')">Cancel</button>
+      <button class="btn btn-danger" id="trmRejectBtn" onclick="toggleTrmReject()">
+        Reject Transfer
+      </button>
+      <div style="flex:1"></div>
+      <button class="btn btn-success" id="trmConfirmBtn" onclick="confirmTransferPairAction()">
+        ✓ Confirm Both
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ REVISE FORM MODAL (drafter — after rejection) ══ -->
+<div class="modal-backdrop" id="reviseFormModal">
+  <div class="modal modal-lg" style="max-height:92vh;display:flex;flex-direction:column">
+    <div class="modal-hdr" style="flex-shrink:0">
+      <div>
+        <h3>Revise & Resubmit</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="rfmSubtitle">
+          Your form was rejected — review the comment and resubmit
+        </p>
+      </div>
+      <button class="modal-close" onclick="closeModal('reviseFormModal')">×</button>
+    </div>
+    <!-- Rejection banner -->
+    <div id="rfmRejectionBanner" class="rejection-banner" style="
+      margin:0 28px 0;padding:12px 16px;
+      background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
+      border-radius:var(--radius2);font-size:.84rem;color:var(--red);
+      display:flex;gap:10px;align-items:flex-start;flex-shrink:0
+    ">
+      <span style="font-size:1.1rem;flex-shrink:0">✕</span>
+      <div>
+        <div style="font-weight:700;margin-bottom:3px">Rejection Reason</div>
+        <div id="rfmRejectionComment" style="color:#f87171;font-size:.82rem">—</div>
+      </div>
+    </div>
+    <div class="modal-body" id="rfmFormBody" style="overflow-y:auto;flex:1;padding:16px 28px">
+      <div style="text-align:center;padding:40px;color:var(--text3)">Loading…</div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button class="btn btn-secondary" onclick="closeModal('reviseFormModal')">Cancel</button>
+      <div style="flex:1"></div>
+      <div id="rfmCooldownBadge" style="display:none;font-size:.76rem;color:var(--orange);
+        padding:5px 12px;background:rgba(232,81,24,.08);border:1px solid rgba(232,81,24,.25);
+        border-radius:6px;font-weight:600"></div>
+      <button class="btn btn-primary" id="rfmResubmitBtn" onclick="resubmitFormAction()">
+        Resubmit for Review
+      </button>
+    </div>
+  </div>
+</div>

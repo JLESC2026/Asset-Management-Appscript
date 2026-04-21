@@ -46,6 +46,11 @@ var _stEmpRegistry = [];
 var _dirtyPages    = [];
 var _scopeCache    = null;
 var ORG_LOOKUP = {};
+// ── Approval System State ─────────────────────────────────────────────────────
+var PENDING_FORMS = [];
+var MY_FORMS      = [];
+var APPROVAL_CFG  = {};
+var _approvalPollTimer = null;
 // ═══════════════════════════════════════
 //  LOCATION RESOLUTION HELPERS
 //  Used by JS_StaffAssets and JS_EquipmentRecord
@@ -267,6 +272,10 @@ function isViewOnly()  { return !!(SESSION && SESSION.perms && SESSION.perms.vie
 function canSeeHO()    { return SESSION && (SESSION.scopeType === 'ho'    || SESSION.scopeType === 'both'); }
 function canSeeField() { return SESSION && (SESSION.scopeType === 'field' || SESSION.scopeType === 'both'); }
 function isDualScope() { return SESSION && SESSION.scopeType === 'both'; }
+
+function canSubmitForm()       { return !!(SESSION && (SESSION.roleTier === 'fe' || SESSION.roleTier === 'senior')); }
+function canReviewForms()      { return !!(SESSION && (SESSION.roleTier === 'senior' || SESSION.roleTier === 'ho')); }
+function canSeeForApprovalPage(){ return !!SESSION; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  _getScopeDistricts
@@ -831,12 +840,15 @@ function renderAll(){
     'activity':         renderActivityTable,
     'staff-assets':     renderStaffAssets,
     'equipment-record': renderEquipmentRecord
+    , 'for-approval':    renderForApprovalPage
   };
 
   var renderer = pageRenderMap[currentPage];
   if (renderer) renderer();
 
   _dirtyPages = Object.keys(pageRenderMap).filter(function(p){ return p !== currentPage && p !== 'dashboard'; });
+  // ── Load approval data ──────────────────────────────────────────────────────
+  _loadApprovalData();
 }
 
 function globalFilter(q){
@@ -882,6 +894,76 @@ function updateBadges(){
   if(equipEl) equipEl.textContent = equipCount;
   var staffEl = document.getElementById('nbStaffAssets');
   if(staffEl) staffEl.textContent = alloc;
+  // ── Approval badge ──────────────────────────────────────────────────────────
+  _updateApprovalBadge();
+}
+
+function _updateApprovalBadge() {
+  var el = document.getElementById('nbForApproval');
+  if (!el) return;
+  el.classList.remove('nb-loading');
+
+  if (!canReviewForms()) {
+    // For FEs — show their own rejected form count as a nudge
+    var rejected = MY_FORMS.filter(function(f){ return f.status === 'Rejected'; }).length;
+    el.textContent = rejected || '0';
+    el.style.display = rejected ? '' : 'none';
+    return;
+  }
+  // For supervisors/admins — show pending review count
+  var pending = PENDING_FORMS.length;
+  el.textContent = pending || '0';
+  el.style.display = pending ? '' : 'none';
+}
+
+function _formatCooldown(cooldownUntil) {
+  if (!cooldownUntil) return '';
+  var until = new Date(cooldownUntil);
+  var now   = new Date();
+  var diff  = Math.max(0, Math.round((until - now) / 1000));
+  if (diff <= 0) return '';
+  var h = Math.floor(diff / 3600);
+  var m = Math.floor((diff % 3600) / 60);
+  var s = diff % 60;
+  if (h > 0) return h + 'h ' + m + 'm remaining';
+  if (m > 0) return m + 'm ' + s + 's remaining';
+  return s + 's remaining';
+}
+
+function _startCooldownTick(formId, cooldownUntil, displayElId) {
+  var el = document.getElementById(displayElId);
+  if (!el || !cooldownUntil) return;
+  var tick = setInterval(function() {
+    var txt = _formatCooldown(cooldownUntil);
+    if (!txt) {
+      clearInterval(tick);
+      var cdEl = document.getElementById(displayElId);
+      if (cdEl) {
+        cdEl.style.display = 'none';
+        // Re-enable submit button if present
+        var btn = document.getElementById('approvalSubmitBtn-' + formId);
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit for Review'; }
+      }
+      return;
+    }
+    var cdEl = document.getElementById(displayElId);
+    if (cdEl) cdEl.textContent = '⏱ ' + txt;
+  }, 1000);
+}
+
+function _loadApprovalData() {
+  if (!SESSION) return;
+  google.script.run
+    .withSuccessHandler(function(r) {
+      MY_FORMS      = r.myForms      || [];
+      PENDING_FORMS = r.pendingForms || [];
+      APPROVAL_CFG  = r.config       || {};
+      _updateApprovalBadge();
+      // If currently on approval page, refresh it
+      if (currentPage === 'for-approval') renderForApprovalPage();
+    })
+    .withFailureHandler(function(){})
+    .getApprovalDashboardData(SESSION.username, SESSION.roleTier);
 }
 
 // ═══════════════════════════════════════

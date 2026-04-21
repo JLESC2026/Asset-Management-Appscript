@@ -1,0 +1,96 @@
+<!-- ══ FOR APPROVAL PAGE ══ -->
+<div class="page" id="page-for-approval">
+
+  <div class="page-header">
+    <div>
+      <h2>For Approval</h2>
+      <p style="color:var(--text3);font-size:.82rem;margin-top:1px" id="approvalPageSubtitle">
+        Accountability forms pending submission or review
+      </p>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-secondary btn-sm" onclick="_loadApprovalData()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="tabs" style="margin-bottom:18px">
+    <button class="tab-btn active" id="atab-mine" onclick="switchApprovalTab('mine')">
+      My Forms
+      <span id="nbMyForms"
+        style="background:rgba(232,81,24,.18);color:var(--accent);font-size:.68rem;
+               padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:700">0</span>
+    </button>
+    <button class="tab-btn" id="atab-review" onclick="switchApprovalTab('review')" style="display:none">
+      Pending Review
+      <span id="nbPendingReview"
+        style="background:rgba(59,130,246,.18);color:var(--blue);font-size:.68rem;
+               padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:700">0</span>
+    </button>
+  </div>
+
+  <!-- MY FORMS PANE -->
+  <div id="approvalPane-mine">
+    <div class="filter-bar" style="margin-bottom:16px">
+      <select class="filter-select" id="myFormsFilter" onchange="renderMyForms()">
+        <option value="">All Status</option>
+        <option value="Draft">Draft</option>
+        <option value="Pending">Pending Review</option>
+        <option value="Rejected">Rejected</option>
+        <option value="Confirmed">Confirmed</option>
+      </select>
+      <select class="filter-select" id="myFormsTypeFilter" onchange="renderMyForms()">
+        <option value="">All Types</option>
+        <option value="Enrollment">Enrollment</option>
+        <option value="Transfer-From">Transfer (From)</option>
+        <option value="Transfer-To">Transfer (To)</option>
+      </select>
+      <span id="myFormsCount" style="margin-left:auto;font-size:.8rem;color:var(--text3)"></span>
+    </div>
+    <div id="myFormsGrid" style="
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+      gap:14px;min-height:120px
+    ">
+      <div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--text3);font-size:.88rem">
+        Loading your forms…
+      </div>
+    </div>
+  </div>
+
+  <!-- PENDING REVIEW PANE -->
+  <div id="approvalPane-review" style="display:none">
+    <div id="pendingEnrollmentSection" style="margin-bottom:28px">
+      <div style="font-size:.7rem;font-weight:700;color:var(--accent);text-transform:uppercase;
+                  letter-spacing:.1em;margin-bottom:12px;padding-bottom:7px;
+                  border-bottom:1px solid rgba(232,81,24,.2)">
+        📋 Enrollment Forms
+      </div>
+      <div id="pendingEnrollmentGrid" style="
+        display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px
+      ">
+        <div style="color:var(--text3);font-size:.85rem;padding:16px 0">
+          No enrollment forms pending review.
+        </div>
+      </div>
+    </div>
+    <div id="pendingTransferSection">
+      <div style="font-size:.7rem;font-weight:700;color:var(--cyan);text-transform:uppercase;
+                  letter-spacing:.1em;margin-bottom:12px;padding-bottom:7px;
+                  border-bottom:1px solid rgba(8,145,178,.2)">
+        🔄 Transfer Accountability Pairs
+      </div>
+      <div id="pendingTransferGrid" style="display:flex;flex-direction:column;gap:14px">
+        <div style="color:var(--text3);font-size:.85rem;padding:16px 0">
+          No transfer pairs pending review.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

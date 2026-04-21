@@ -455,10 +455,21 @@ function _submitEnroll() {
   };
 
   google.script.run
-    .withSuccessHandler(r => {
+    .withSuccessHandler(function(r) {
       _unlockBtn(btn);
-      toast(r, r.startsWith('Error') ? 'err' : 'ok');
-      if (!r.startsWith('Error')) { closeModal('addAssetModal'); loadData(); }
+      var msg    = typeof r === 'string' ? r : (r.message || 'Asset created.');
+      var formId = r && r.formId ? r.formId : null;
+      var isErr  = msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        closeModal('addAssetModal');
+        loadData();
+        if (formId) {
+          // Refresh approval data then open the preview
+          _loadApprovalData();
+          setTimeout(function() { openFormPreview(formId); }, 600);
+        }
+      }
     })
     .withFailureHandler(err => {
       _unlockBtn(btn);
@@ -849,10 +860,23 @@ function submitTransfer() {
   const _btn = document.querySelector('#transferModal .modal-footer .btn-primary');
   _lockBtn(_btn);
   google.script.run
-    .withSuccessHandler(r => {
+    .withSuccessHandler(function(r) {
       _unlockBtn(_btn);
-      toast(r, r.startsWith('Error') ? 'err' : 'ok');
-      if (!r.startsWith('Error')) { closeModal('transferModal'); loadData(); }
+      var msg        = typeof r === 'string' ? r : (r.message || 'Transfer saved.');
+      var fromFormId = r && r.fromFormId ? r.fromFormId : null;
+      var toFormId   = r && r.toFormId   ? r.toFormId   : null;
+      var isErr      = msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        closeModal('transferModal');
+        loadData();
+        if (fromFormId && toFormId) {
+          _loadApprovalData();
+          setTimeout(function() {
+            openTransferReview(fromFormId, toFormId);
+          }, 600);
+        }
+      }
     })
     .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .saveTransfer({
