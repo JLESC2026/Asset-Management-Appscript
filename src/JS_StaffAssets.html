@@ -302,6 +302,11 @@ function _renderStaffTree() {
 // ── Staff Asset Modal (handles both HO and field) ─────────────────────────────
 function openStaffAssetModal(empId, div, dist, area, branch, mode) {
   _samCurrentEmpId = empId;
+  window._samDiv    = div;
+  window._samDist   = dist;
+  window._samArea   = area;
+  window._samBranch = branch;
+  window._samMode   = mode;
   var emp, assets;
   if (mode === 'ho') {
     emp = _stTree[div] && _stTree[div][empId];
@@ -374,6 +379,16 @@ function openStaffAssetModal(empId, div, dist, area, branch, mode) {
   if (modalEl) {
     modalEl.classList.toggle('modal-name-safe', (emp.name || '').length > 28);
   }
+
+  // Show/hide Transfer All button based on conditions
+  var bxBtn = document.getElementById('samBulkXferBtn');
+  if (bxBtn) {
+    var hasAllocated = assets.some(function(a){ 
+      return ['allocated','transfer'].indexOf(a.status) >= 0; 
+    });
+    bxBtn.style.display = (canTransfer && canTransfer() && hasAllocated) ? '' : 'none';
+  }
+
   openModal('staffAssetModal');
 }
 
@@ -593,4 +608,209 @@ window._renderStaffEmpInline = function(emp, div, dist, area, branch, mode) {
 
 // Alias for any lingering references
 window._renderStaffLeaf = window._renderStaffEmpInline;
+
+// ── BULK TRANSFER MODAL FUNCTIONS ──────────────────────────────────────────
+function openBulkTransferModal(empId, div, dist, area, branch, mode) {
+  closeModal('staffAssetModal');
+  
+  // Get from employee data
+  var emp, assets;
+  if (mode === 'ho') {
+    emp = _stTree[div] && _stTree[div][empId];
+    assets = emp ? (emp.assets||[]) : [];
+  } else {
+    var ft = window._stFieldTree || {};
+    var distKey = dist || _LOC_NODIST;
+    var areaKey = area || _LOC_NOAREA;
+    var branchKey = branch || _LOC_NOBRANCH;
+    var bTree = (((ft[div] || {})[distKey] || {})[areaKey] || {})[branchKey] || {};
+    emp = bTree[empId] || null;
+    assets = emp ? (emp.assets||[]) : [];
+  }
+  
+  if (!emp) { toast('Staff data not found.','err'); return; }
+  
+  // Filter to only allocated/transfer status
+  var toTransfer = assets.filter(function(a) {
+    return ['allocated','transfer'].indexOf(a.status) >= 0;
+  });
+  
+  // Store from employee info
+  window._bxFromEmp = emp;
+  window._bxFromAssets = toTransfer;
+  window._bxSelectedAssets = toTransfer.map(function(a) { return a.Barcode; });
+  
+  // Populate from party
+  document.getElementById('bxFromName').textContent = emp.name || '—';
+  document.getElementById('bxFromEmpId').textContent = empId || '—';
+  
+  var locStr = '';
+  if (mode === 'ho') {
+    locStr = '🏛 Head Office / ' + (div || '—');
+  } else {
+    locStr = (div || '—') + ' / ' + (dist || '—') + ' / ' + (branch || '—');
+  }
+  document.getElementById('bxFromLoc').textContent = locStr;
+  
+  // Build asset checklist
+  var listHtml = toTransfer.map(function(a, idx) {
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 10px;' +
+           'background:var(--bg3);border-radius:6px;border:1px solid var(--border)">' +
+           '<input type="checkbox" id="bxAsset_'+idx+'" checked style="cursor:pointer" ' +
+           'data-barcode="'+esc(a.Barcode)+'" onchange="updateBxSelectedCount()"/>' +
+           '<label for="bxAsset_'+idx+'" style="flex:1;cursor:pointer;display:flex;gap:8px;align-items:center;margin:0">' +
+           '<span class="mono-bc" style="font-size:.75rem">'+esc(a.Barcode)+'</span>' +
+           '<span style="font-size:.75rem;color:var(--text3)">'+esc(a.Brand)+' '+esc(a.Type)+'</span>' +
+           '<span class="cond-'+(a.Condition||'good').toLowerCase()+'" style="font-size:.7rem;margin-left:auto">' +
+           (esc(a.Condition)||'—')+'</span>' +
+           '</label></div>';
+  }).join('');
+  
+  document.getElementById('bxAssetList').innerHTML = listHtml || '<div style="color:var(--text3);font-size:.78rem">No assets to transfer</div>';
+  
+  // Clear form fields
+  document.getElementById('bxType').value = 'Permanent';
+  document.getElementById('bxEffDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('bxToEmpId').value = '';
+  document.getElementById('bxToStaff').value = '';
+  document.getElementById('bxToDesig').value = '';
+  document.getElementById('bxToDiv').value = '';
+  document.getElementById('bxToDist').value = '';
+  document.getElementById('bxToArea').value = '';
+  document.getElementById('bxToBranch').value = '';
+  document.getElementById('bxLookupMsg').style.display = 'none';
+  
+  updateBxSelectedCount();
+  openModal('bulkTransferModal');
+}
+
+function updateBxSelectedCount() {
+  var checkboxes = document.querySelectorAll('#bxAssetList input[type="checkbox"]');
+  var selected = Array.from(checkboxes).filter(function(cb) { return cb.checked; });
+  window._bxSelectedAssets = selected.map(function(cb) { return cb.dataset.barcode; });
+  document.getElementById('bxSelectedCount').textContent = selected.length + ' selected';
+}
+
+function onBxToEmpInput() {
+  var empId = document.getElementById('bxToEmpId').value.trim();
+  var msgEl = document.getElementById('bxLookupMsg');
+  
+  if (!empId) {
+    msgEl.style.display = 'none';
+    document.getElementById('bxToStaff').value = '';
+    document.getElementById('bxToDesig').value = '';
+    document.getElementById('bxToDiv').value = '';
+    document.getElementById('bxToDist').value = '';
+    document.getElementById('bxToArea').value = '';
+    document.getElementById('bxToBranch').value = '';
+    return;
+  }
+  
+  var spinner = document.getElementById('bxToEmpSpinner');
+  spinner.style.display = 'block';
+  msgEl.style.display = 'none';
+  
+  // Lookup in masterlist
+  var found = null;
+  if (window.MASTERLIST && window.MASTERLIST.length > 0) {
+    found = MASTERLIST.find(function(row) {
+      return String(row[2] || '').trim().toLowerCase() === String(empId).trim().toLowerCase();
+    });
+  }
+  
+  spinner.style.display = 'none';
+  
+  if (!found) {
+    msgEl.textContent = '❌ Employee not found in Masterlist';
+    msgEl.className = 'msg-error';
+    msgEl.style.background = 'rgba(239,68,68,.08)';
+    msgEl.style.borderColor = 'rgba(239,68,68,.25)';
+    msgEl.style.color = '#ef4444';
+    msgEl.style.display = 'block';
+    document.getElementById('bxToStaff').value = '';
+    document.getElementById('bxToDesig').value = '';
+    document.getElementById('bxToDiv').value = '';
+    document.getElementById('bxToDist').value = '';
+    document.getElementById('bxToArea').value = '';
+    document.getElementById('bxToBranch').value = '';
+    return;
+  }
+  
+  // Populate fields (masterlist typically has: Role, Name, ID, Desig, Dept, BaseOffice, Division, District, Area, Branch...)
+  var name = String(found[1] || '').trim();
+  var desig = String(found[3] || '').trim();
+  var div = String(found[6] || '').trim();
+  var dist = String(found[7] || '').trim();
+  var area = String(found[8] || '').trim();
+  var branch = String(found[9] || '').trim();
+  
+  document.getElementById('bxToStaff').value = name;
+  document.getElementById('bxToDesig').value = desig;
+  document.getElementById('bxToDiv').value = _normDiv(div);
+  document.getElementById('bxToDist').value = _normDist(dist);
+  document.getElementById('bxToArea').value = area;
+  document.getElementById('bxToBranch').value = branch;
+  
+  msgEl.textContent = '✓ Found: ' + name;
+  msgEl.className = 'msg-success';
+  msgEl.style.background = 'rgba(34,197,94,.08)';
+  msgEl.style.borderColor = 'rgba(34,197,94,.25)';
+  msgEl.style.color = '#22c55e';
+  msgEl.style.display = 'block';
+}
+
+function submitBulkTransfer() {
+  var fromEmp = window._bxFromEmp;
+  var selectedBarcodes = window._bxSelectedAssets || [];
+  var toEmpId = document.getElementById('bxToEmpId').value.trim();
+  var toStaff = document.getElementById('bxToStaff').value.trim();
+  var xferType = document.getElementById('bxType').value;
+  var effDate = document.getElementById('bxEffDate').value;
+  
+  if (!selectedBarcodes || selectedBarcodes.length === 0) {
+    toast('Select at least one asset to transfer.', 'err');
+    return;
+  }
+  if (!toEmpId || !toStaff) {
+    toast('Receiving employee ID and name are required.', 'err');
+    return;
+  }
+  if (!effDate) {
+    toast('Effectivity date is required.', 'err');
+    return;
+  }
+  
+  var btn = document.getElementById('bxSubmitBtn');
+  btn.disabled = true;
+  var origText = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner" style="width:13px;height:13px;border-width:2px;display:inline-block"></span> Processing...';
+  
+  var payload = {
+    fromEmpId: fromEmp.empId,
+    toEmpId: toEmpId,
+    toName: toStaff,
+    barcodes: selectedBarcodes,
+    type: xferType,
+    effDate: effDate
+  };
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+      if (result && result.success) {
+        toast('Bulk transfer submitted successfully!', 'ok');
+        closeModal('bulkTransferModal');
+        refreshAssets();
+      } else {
+        toast('Error: ' + (result.error || 'Unknown error'), 'err');
+      }
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+      toast('Error: ' + err.message, 'err');
+    })
+    .submitBulkTransfer(payload);
+}
 </script>

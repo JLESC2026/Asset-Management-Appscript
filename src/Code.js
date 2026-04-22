@@ -1,69 +1,55 @@
 // ═══════════════════════════════════════════════════════════
-//  ASSET MANAGEMENT SYSTEM — Code.gs  (v6.0 — Restructured)
-//
-//  Key changes vs v5.x:
-//    • Auth reads from Users sheet (not Masterlist)
-//    • Scope reads from Org Structure sheet (not Eng. List V2)
-//    • Asset Entry is now the writable Copy (31 clean columns)
-//    • NO inline borrow/transfer fields in Asset Entry
-//    • Borrow details merged from Borrows sheet in getInitialData()
-//    • Disposal PRESERVES location data (user requirement)
-//    • Deallocate PRESERVES Division/District/Area/Branch
-//    • Event sheets (Borrows/Disposals/Transfers/Log): data at row 4
-//    • Spare sheet now writes pool entry log
+//  ASSET MANAGEMENT SYSTEM — Code.gs  (v6.1 — Bulk Transfer + Accountability Forms)
 // ═══════════════════════════════════════════════════════════
 
 const SHEET_ID    = '18tuYQKH2OLLu1NqPJiA28n8n7GNN6XR_SSZXUO4XEe8';
-const SH_ENTRY    = 'Asset Entry';     // The writable master registry
-const SH_USERS    = 'Users';           // Auth source (row 1=headers, data row 2)
-const SH_ORG      = 'Org Structure';   // FE/SFE scope (row 1=headers, data row 2)
-const SH_MASTER   = 'Masterlist';      // Employee autofill only
-const SH_XFER     = 'Transfers';       // Event log (data row 4)
-const SH_BORROW   = 'Borrows';         // Event log (data row 4)
-const SH_DISPOSE  = 'Disposals';       // Event log (data row 4)
-const SH_LOG      = 'ActivityLog';     // Event log (data row 4)
+const SH_ENTRY    = 'Asset Entry';
+const SH_USERS    = 'Users';
+const SH_ORG      = 'Org Structure';
+const SH_MASTER   = 'Masterlist';
+const SH_XFER     = 'Transfers';
+const SH_BORROW   = 'Borrows';
+const SH_DISPOSE  = 'Disposals';
+const SH_LOG      = 'ActivityLog';
 const SH_DROPDOWN = 'Drop down';
-const SH_ALLOC    = 'Allocated';       // Allocation log (data row 2)
-const SH_SPARE    = 'Spare';           // Spare pool log (data row 4)
+const SH_ALLOC    = 'Allocated';
+const SH_SPARE    = 'Spare';
 
-// Asset Entry layout: Row 1=title, Row 2=blank, Row 3=headers, Data row 4
 const AE_DATA_START  = 4;
-// Event sheets layout: Rows 1-2=branding, Row 3=headers, Data row 4
 const EVT_DATA_START = 4;
 
-// ─── 31-COLUMN MAP (Asset Entry / Copy of Asset Entry) ──────────────────────
 const C = {
-  ENTRY_EMP_ID:  1,   // A - Inputter ID
-  ENTRY_NAME:    2,   // B - Inputter Name
-  EMP_ID:        3,   // C - Accountable Employee ID
-  STAFF:         4,   // D - Accountable Staff
-  DESIGNATION:   5,   // E - Designation
-  DEPARTMENT:    6,   // F - Department
-  BASE_OFFICE:   7,   // G - Base Office
-  DIVISION:      8,   // H - Division
-  DISTRICT:      9,   // I - District
-  AREA:          10,  // J - Area
-  BRANCH:        11,  // K - Branch
-  ASSIGNMENT:    12,  // L - Assignment (Field Office / Central Office)
-  EFF_DATE:      13,  // M - Effectivity Date
-  BARCODE:       14,  // N - Barcode ← PRIMARY KEY
-  TYPE:          15,  // O - Category
-  BRAND:         16,  // P - Brand
-  SERIAL:        17,  // Q - Serial
-  SPECS:         18,  // R - Specification
-  SUPPLIER:      19,  // S - Supplier
-  CONDITION:     20,  // T - Condition
-  ASSET_LOCATION:21,  // U - Asset Location (col T in doc = physical location)
-  LIFECYCLE:     22,  // V - Lifecycle Status
-  STATUS_LABEL:  23,  // W - Status Label
-  ASSET_STATUS:  24,  // X - Assignment Status
-  PURCH_DATE:    25,  // Y - Date of Purchase
-  WARRANTY_TERM: 26,  // Z - Warranty Term
-  WARRANTY_VAL:  27,  // AA - Warranty Validity
-  REMARKS:       28,  // AB - Remarks
-  NOTES:         29,  // AC - Notes
-  CREATED_AT:    30,  // AD - Timestamp (created)
-  LAST_UPDATED:  31,  // AE - Last Updated
+  ENTRY_EMP_ID:  1,
+  ENTRY_NAME:    2,
+  EMP_ID:        3,
+  STAFF:         4,
+  DESIGNATION:   5,
+  DEPARTMENT:    6,
+  BASE_OFFICE:   7,
+  DIVISION:      8,
+  DISTRICT:      9,
+  AREA:          10,
+  BRANCH:        11,
+  ASSIGNMENT:    12,
+  EFF_DATE:      13,
+  BARCODE:       14,
+  TYPE:          15,
+  BRAND:         16,
+  SERIAL:        17,
+  SPECS:         18,
+  SUPPLIER:      19,
+  CONDITION:     20,
+  ASSET_LOCATION:21,
+  LIFECYCLE:     22,
+  STATUS_LABEL:  23,
+  ASSET_STATUS:  24,
+  PURCH_DATE:    25,
+  WARRANTY_TERM: 26,
+  WARRANTY_VAL:  27,
+  REMARKS:       28,
+  NOTES:         29,
+  CREATED_AT:    30,
+  LAST_UPDATED:  31,
 };
 
 const TOTAL_COLS = 31;
@@ -80,6 +66,16 @@ const AE_HEADERS = [
   'Date of Purchase','Warranty Term','Warranty Validity','Remarks',
   'Notes','Timestamp','Last Updated'
 ];
+
+// ─── APPROVAL COLUMNS (32-37) ─────────────────────────────────────────────────
+const CAE = {
+  APPROVAL_STATUS:    32,
+  FORM_ID:            33,
+  DRAFTED_BY:         34,
+  DRAFTED_AT:         35,
+  REJECTION_COMMENT:  36,
+  GRANDFATHERED:      37
+};
 
 // ─── UTILITY ─────────────────────────────────────────────────────────────────
 function _sanitize(val, maxLen) {
@@ -106,6 +102,11 @@ function _numSort(a, b) {
   return na !== nb ? na - nb : a.localeCompare(b);
 }
 
+function _blankOrDash(val) {
+  const s = String(val || '').trim();
+  return s || ' - ';
+}
+
 // ─── STATUS COMPUTATION ───────────────────────────────────────────────────────
 function _computeStatus(lifecycle, assetStatus, empId) {
   const lc  = String(lifecycle    || '').trim().toLowerCase();
@@ -121,7 +122,6 @@ function _computeStatus(lifecycle, assetStatus, empId) {
   if (lc === 'transfer')                          return 'transfer';
   if (lc === 'allocated' || as === 'assigned')    return 'allocated';
   if (lc === 'spare')                             return 'spare';
-  // 'active' or empty — check whether an employee is assigned
   return hasEmp ? 'allocated' : 'spare';
 }
 
@@ -144,9 +144,7 @@ function _getOrCreate(name, headers) {
   return sh;
 }
 
-function _entrySheet() {
-  return _getOrCreate(SH_ENTRY, AE_HEADERS);
-}
+function _entrySheet() { return _getOrCreate(SH_ENTRY, AE_HEADERS); }
 function _xferSheet() {
   return _getOrCreate(SH_XFER, [
     'Barcode','TransferType','FromStaff','FromEmpID','FromDesig',
@@ -243,7 +241,6 @@ function _hashPwd(pwd) {
 function _isHashed(str) { return /^[0-9a-f]{64}$/.test(String(str)); }
 
 // ─── ROLE CLASSIFICATION ──────────────────────────────────────────────────────
-// Users sheet roles: User | Supervisor | Super User | Admin | Super Admin
 function _mapRoleTier(role) {
   const r = String(role || '').trim().toLowerCase();
   const HO_ROLES = [
@@ -263,13 +260,9 @@ function _mapRoleTier(role) {
   return 'fe';
 }
 
-// Defaults: Admin = full access incl. delete. Supervisor & FE = full actions, NO delete.
-// Scope (_filterByScope) controls WHAT they see. Perms control WHAT they can do.
-// Remarks column (Col I of Users sheet) can override any default.
 function _parseRemarks(remarks, roleTier) {
   const r = String(remarks || '').toLowerCase().trim();
 
-  // Scope type detection
   var scopeType = null;
   if ([
     'dual scope','all scope','both scope','full visibility','all data',
@@ -319,10 +312,15 @@ function _parseRemarks(remarks, roleTier) {
   return Object.assign({}, perms, { scopeType: scopeType });
 }
 
-// ─── MASTERLIST LOOKUP (autofill only) ───────────────────────────────────────
-// Masterlist: row 1=headers, data row 2
-// Col 0=EmpID, Col 2=Name, Col 4=Division, Col 5=District,
-// Col 6=Area, Col 7=BaseOffice, Col 11=Position
+// ─── MASTERLIST LOOKUP ────────────────────────────────────────────────────────
+// Masterlist columns:
+//   Col A (0) = EmpID
+//   Col C (2) = Name
+//   Col E (4) = Division
+//   Col F (5) = District
+//   Col G (6) = Area
+//   Col H (7) = Base Office / Branch
+//   Col L (11) = Position / Designation
 function _getMasterlistEntry(empId) {
   try {
     const sh   = _ss().getSheetByName(SH_MASTER);
@@ -336,22 +334,50 @@ function _getMasterlistEntry(empId) {
       const row = sh.getRange(i + 2, 1, 1, 15).getValues()[0];
       return {
         name:       String(row[2]  || '').trim(),
-        division:   _normDiv(String(row[4]  || '').trim()),
-        district:   _normDist(String(row[5] || '').trim()),
-        area:       String(row[6]  || '').trim(),
-        baseOffice: String(row[7]  || '').trim(),
-        position:   String(row[11] || '').trim()
+        division:   _normDiv(_blankOrDash(String(row[4]  || ''))),
+        district:   _normDist(_blankOrDash(String(row[5] || ''))),
+        area:       _blankOrDash(String(row[6]  || '')),
+        baseOffice: _blankOrDash(String(row[7]  || '')),
+        position:   _blankOrDash(String(row[11] || ''))
       };
     }
   } catch(e) {}
   return {};
 }
 
+// ─── EMPLOYEE LOOKUP (public, called from frontend) ───────────────────────────
+// Returns all fields needed for auto-fill in modals.
+// area is now included and all blank fields return ' - '
+function getEmployeeById(empId) {
+  try {
+    const sh = _ss().getSheetByName(SH_MASTER);
+    if (!sh) return { ok: false, error: 'Masterlist not found.' };
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: false, error: 'No employees found.' };
+    const id = String(empId).trim().toLowerCase();
+    const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || '').trim().toLowerCase() !== id) continue;
+      const row = sh.getRange(i + 2, 1, 1, 15).getValues()[0];
+      return {
+        ok:         true,
+        empId:      String(row[0]  || '').trim(),
+        name:       String(row[2]  || '').trim(),
+        // Location fields — blank → ' - '
+        division:   _normDiv(_blankOrDash(String(row[4]  || ''))),
+        district:   _normDist(_blankOrDash(String(row[5] || ''))),
+        area:       _blankOrDash(String(row[6]  || '')),
+        branch:     _blankOrDash(String(row[7]  || '')),  // Base Office
+        baseOffice: _blankOrDash(String(row[7]  || '')),
+        // Designation from Position column
+        position:   _blankOrDash(String(row[11] || ''))
+      };
+    }
+    return { ok: false, error: 'Employee ID not found: ' + empId };
+  } catch(e) { return { ok: false, error: e.message }; }
+}
+
 // ─── ORG STRUCTURE SCOPE ──────────────────────────────────────────────────────
-// Org Structure: row 1=headers, data row 2
-// Col D(3)=FE_ID | Col E(4)=FE_Name | Col F(5)=FE_Desig
-// Col G(6)=Sup_ID | Col H(7)=Sup_Name | Col I(8)=Sup_Desig
-// Col K(10)=Division | Col L(11)=District
 function _parseOrgStructure(empId, roleTier) {
   const DEFAULT = {
     userDivisions: [], userDistricts: [],
@@ -364,7 +390,6 @@ function _parseOrgStructure(empId, roleTier) {
     const data = sh.getRange(2, 1, last - 1, 12).getValues();
     const id   = String(empId || '').trim().toLowerCase();
 
-    // HO (admin/superuser): scope = everything in Org Structure
     if (roleTier === 'ho') {
       const divSet = new Set(), distSet = new Set(), divMap = {};
       data.forEach(r => {
@@ -386,7 +411,6 @@ function _parseOrgStructure(empId, roleTier) {
       };
     }
 
-    // Supervisor (Senior FE): rows where Sup_ID (col G, index 6) matches
     if (roleTier === 'senior') {
       const divSet = new Set(), distSet = new Set(), divMap = {};
       data.forEach(r => {
@@ -410,7 +434,6 @@ function _parseOrgStructure(empId, roleTier) {
       };
     }
 
-    // FE (User): rows where FE_ID (col D, index 3) matches
     const divSet = new Set(), distSet = new Set(), divMap = {};
     data.forEach(r => {
       const feId = String(r[3] || '').trim().toLowerCase();
@@ -459,11 +482,6 @@ function _buildFullDivDistrictMap() {
 }
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
-// Users sheet: row 1=headers, data row 2
-// ColA=Role | ColB=Password | ColC=EmpID | ColD=Name | ColE=Designation
-// ColF=SupID | ColG=SupName | ColH=SupDesig | ColI=Remarks
-// Col A=Role  B=Password  C=ID Number  D=Emp Name  E=Designation
-// Col F=Supervisor ID  G=Supervisor Name  H=Sup Desig  I=Remarks
 function loginUser(empId, password) {
   try {
     const sh = _ss().getSheetByName(SH_USERS);
@@ -587,13 +605,12 @@ function getAllAssets() {
     const last = sh.getLastRow();
     if (last < AE_DATA_START) return { success: true, data: [] };
 
-    const data   = sh.getRange(AE_DATA_START, 1, last - AE_DATA_START + 1, TOTAL_COLS).getValues();
+    const data   = sh.getRange(AE_DATA_START, 1, last - AE_DATA_START + 1, 37).getValues();
     const result = data
       .filter((row, rowIdx) => {
         const bc = String(row[C.BARCODE - 1] || '').trim();
         const badBc = !bc || bc === '-' || bc === 'N/A' || bc === 'None' || bc === '#N/A';
         if (!badBc) return true;
-        // Keep rows with no barcode ONLY if they have some location/staff data
         const hasData = [C.DIVISION,C.DISTRICT,C.BRANCH,C.STAFF,C.EMP_ID,C.DEPARTMENT,C.BASE_OFFICE,C.ASSET_LOCATION]
           .some(col => String(row[col - 1] || '').trim());
         return hasData;
@@ -640,6 +657,7 @@ function getAllAssets() {
           StatusLabel:  get(C.STATUS_LABEL) || 'Unassigned',
           jsApprovalStatus: approvalStatus,
           FormID:         get(CAE.FORM_ID) || '',
+          Grandfathered:  grandfathered,
           PurchDate:    get(C.PURCH_DATE),
           WarrantyTerm: get(C.WARRANTY_TERM),
           WarrantyVal:  get(C.WARRANTY_VAL),
@@ -661,10 +679,8 @@ function getAllAssets() {
           LastUpdated:  get(C.LAST_UPDATED),
           EntryEmpId:   get(C.ENTRY_EMP_ID),
           EntryName:    get(C.ENTRY_NAME),
-          // Borrow fields populated by getInitialData() merge
           BorName:'', BorEmpID:'', BorDesig:'', BorDiv:'', BorDist:'',
           BorBranch:'', BorDate:'', ExpReturn:'', ActReturn:'', BorRemarks:'',
-          // Transfer display fields populated by getInitialData() merge
           XferType:'', ToStaff:'', ToEmpID:'', ToDiv:'', ToBranch:'', XferDate:'',
           status: effectiveStatus
         };
@@ -674,12 +690,13 @@ function getAllAssets() {
   } catch(e) { return { success: false, error: e.message }; }
 }
 
+// ─── GET ASSET BY BARCODE ─────────────────────────────────────────────────────
 function getAssetByBarcode(barcode) {
   try {
     const sh     = _entrySheet();
     const rowIdx = _findRow(sh, barcode);
     if (rowIdx < 1) return null;
-    const row    = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const row    = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
     const get    = col => String(row[col - 1] || '');
     return {
       barcode:          get(C.BARCODE), type:        get(C.TYPE),
@@ -708,141 +725,8 @@ function getAssetByBarcode(barcode) {
   } catch(e) { return null; }
 }
 
-// ─── ASSETS: CREATE ───────────────────────────────────────────────────────────
-function processAsset_legacy(obj, isAssign) {
-  const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); }
-  catch(e) { return 'Error: System busy — try again.'; }
-
-  try {
-    const sh     = _entrySheet();
-    const nowStr = new Date().toLocaleString('en-PH');
-
-    if (!isAssign) {
-      // ── ENROLL NEW ASSET ────────────────────────────────────────────────
-      if (!obj.barcode) return 'Error: Barcode is required.';
-      if (_findRow(sh, obj.barcode) > 0) return 'Error: Barcode already exists: ' + obj.barcode;
-
-      // Serial duplicate check
-      if (obj.serial) {
-        const last2 = sh.getLastRow();
-        if (last2 >= AE_DATA_START) {
-          const serials = sh.getRange(
-            AE_DATA_START, C.SERIAL, last2 - AE_DATA_START + 1, 1).getValues();
-          const dup = serials.findIndex(r => String(r[0]).trim() === String(obj.serial).trim());
-          if (dup >= 0) {
-            const existBC = String(sh.getRange(dup + AE_DATA_START, C.BARCODE).getValue());
-            return 'Error: Serial No. already registered under barcode: ' + existBC;
-          }
-        }
-      }
-
-      const statusChoice = obj.statusChoice || 'Spare';
-      const SM = {
-        'Spare':      { lc:'Active',     as:'Active',     sl:'Unassigned' },
-        'Allocated':  { lc:'Allocated',  as:'Active',     sl:'Assigned'   },
-        'Disposal':   { lc:'Dispose',    as:'Disposal',   sl:'Disposed'   },
-        'BorrowItem': { lc:'BorrowItem', as:'BorrowItem', sl:'Unassigned' }
-      };
-      const sm      = SM[statusChoice] || SM['Spare'];
-      const isSpare = (statusChoice === 'Spare' || statusChoice === 'BorrowItem');
-      const normDiv  = _normDiv(obj.division  || '');
-      const normDist = _normDist(obj.district || '');
-
-      const row = new Array(TOTAL_COLS).fill('');
-      row[C.ENTRY_EMP_ID  - 1] = obj.entryEmpId   || '';
-      row[C.ENTRY_NAME    - 1] = obj.entryName     || '';
-      row[C.EMP_ID        - 1] = isSpare ? '' : (obj.accEmpId || '');
-      row[C.STAFF         - 1] = isSpare ? '' : _sanitize(obj.accName, 100);
-      row[C.DESIGNATION   - 1] = isSpare ? '' : (obj.accRole || '');
-      row[C.DEPARTMENT    - 1] = obj.department    || '';
-      row[C.BASE_OFFICE   - 1] = obj.baseOffice    || '';
-      row[C.DIVISION      - 1] = normDiv;
-      row[C.DISTRICT      - 1] = normDist;
-      row[C.AREA          - 1] = obj.area          || '';
-      row[C.BRANCH        - 1] = _sanitize(obj.branch, 150);
-      row[C.ASSIGNMENT    - 1] = obj.assignment    || 'Field Office';
-      row[C.EFF_DATE      - 1] = obj.effDate       || '';
-      row[C.BARCODE       - 1] = obj.barcode;
-      row[C.TYPE          - 1] = obj.type          || '';
-      row[C.BRAND         - 1] = obj.brand         || '';
-      row[C.SERIAL        - 1] = obj.serial ? String(obj.serial) : '';
-      row[C.SPECS         - 1] = obj.specs         || '';
-      row[C.SUPPLIER      - 1] = obj.supplier      || '';
-      row[C.CONDITION     - 1] = obj.condition     || 'New';
-      row[C.ASSET_LOCATION- 1] = obj.location      || '';
-      row[C.LIFECYCLE     - 1] = sm.lc;
-      row[C.STATUS_LABEL  - 1] = sm.sl;
-      row[C.ASSET_STATUS  - 1] = sm.as;
-      row[C.PURCH_DATE    - 1] = obj.purchDate     || '';
-      row[C.WARRANTY_TERM - 1] = obj.wTerm         || '';
-      row[C.WARRANTY_VAL  - 1] = obj.wValidity     || '';
-      row[C.REMARKS       - 1] = _sanitize(obj.remarks, 500);
-      row[C.CREATED_AT    - 1] = nowStr;
-      row[C.LAST_UPDATED  - 1] = nowStr;
-
-      sh.appendRow(row);
-      const newRowIdx = sh.getLastRow();
-      sh.getRange(newRowIdx, C.SERIAL).setNumberFormat('@STRING@');
-      if (obj.serial) sh.getRange(newRowIdx, C.SERIAL).setValue(String(obj.serial));
-
-      // Write to Spare log sheet if applicable
-      if (statusChoice === 'Spare') {
-        _spareSheet().appendRow([
-          obj.barcode, obj.type, obj.brand, obj.serial || '', obj.condition || 'New',
-          obj.purchDate || '', obj.wValidity || '', obj.supplier || '',
-          normDiv, normDist, obj.area || '', _sanitize(obj.branch, 150),
-          obj.location || '', obj.enrolledBy || obj.entryEmpId || '',
-          nowStr, 'Available'
-        ]);
-      }
-
-      _log('CREATE', obj.barcode,
-        obj.type + ' | ' + obj.brand + ' | ' + statusChoice,
-        obj.entryEmpId || '');
-      return 'Asset created: ' + obj.barcode;
-    }
-
-    // ── isAssign = true (update lifecycle from elsewhere) ──────────────────
-    const lc    = obj.lifecycle || 'Allocated';
-    const asSt  = lc === 'Transfer' ? 'Transfer' :
-                  lc === 'Dispose'  ? 'Disposal' : 'Active';
-    const staff = _sanitize((obj.staff || '').trim(), 100);
-    const stLbl = (staff && staff !== 'Unassigned') ? 'Assigned' : 'Unassigned';
-    let rowIdx  = _findRow(sh, obj.barcode);
-
-    if (rowIdx < 1) {
-      const nr = new Array(TOTAL_COLS).fill('');
-      nr[C.BARCODE     - 1] = obj.barcode;
-      nr[C.CREATED_AT  - 1] = nowStr;
-      nr[C.LAST_UPDATED- 1] = nowStr;
-      sh.appendRow(nr);
-      rowIdx = sh.getLastRow();
-    }
-
-    _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,   lc],  [C.ASSET_STATUS, asSt], [C.STATUS_LABEL, stLbl],
-      [C.EMP_ID,      obj.employeeId  || ''],
-      [C.STAFF,       staff           || ''],
-      [C.DESIGNATION, obj.designation || ''],
-      [C.DEPARTMENT,  obj.department  || ''],
-      [C.BASE_OFFICE, obj.baseOffice  || ''],
-      [C.DIVISION,    _normDiv(obj.division   || '')],
-      [C.DISTRICT,    _normDist(obj.district  || '')],
-      [C.AREA,        obj.area        || ''],
-      [C.BRANCH,      _sanitize(obj.branch, 150)],
-      [C.EFF_DATE,    obj.effDate     || '']
-    ]);
-    _log('ASSIGN', obj.barcode, staff + ' | ' + lc, obj.employeeId || '');
-    return 'Asset assigned successfully';
-
-  } catch(e) { return 'Error: ' + e.message; }
-  finally    { lock.releaseLock(); }
-}
-
 // ─── DELETE ASSETS ────────────────────────────────────────────────────────────
 function deleteAssets(barcodes, callerEmpId) {
-  // Security: verify caller role from Users sheet
   try {
     const userSh = _ss().getSheetByName(SH_USERS);
     if (!userSh || !callerEmpId) return 'Error: Unauthorized — caller ID required.';
@@ -893,29 +777,30 @@ function deleteAssets(barcodes, callerEmpId) {
 }
 
 // ─── ALLOCATE ─────────────────────────────────────────────────────────────────
+// Now drafts an accountability form after successful allocation
 function allocateAsset(obj) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(8000); }
-  catch(e) { return 'Error: System busy — try again.'; }
+  catch(e) { return { result: 'Error: System busy — try again.', formId: null }; }
   try {
-    if (!obj.barcode)   return 'Error: Barcode is required.';
-    if (!obj.empId)     return 'Error: Employee ID is required.';
-    if (!obj.staffName) return 'Error: Staff name is required.';
+    if (!obj.barcode)   return { result: 'Error: Barcode is required.', formId: null };
+    if (!obj.empId)     return { result: 'Error: Employee ID is required.', formId: null };
+    if (!obj.staffName) return { result: 'Error: Staff name is required.', formId: null };
 
     const sh     = _entrySheet();
     const rowIdx = _findRow(sh, obj.barcode);
-    if (rowIdx < 1) return 'Error: Asset not found: ' + obj.barcode;
+    if (rowIdx < 1) return { result: 'Error: Asset not found: ' + obj.barcode, formId: null };
 
-    const curRow = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const curRow = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
     const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
     const curAS  = String(curRow[C.ASSET_STATUS - 1] || '').toLowerCase();
 
-    if (curLC === 'borrow')    return 'Error: Asset is currently borrowed. Return it first.';
+    if (curLC === 'borrow')    return { result: 'Error: Asset is currently borrowed. Return it first.', formId: null };
     if (curLC === 'dispose' || curLC === 'disposal')
-                               return 'Error: Disposed assets cannot be allocated.';
-    if (curLC === 'transfer')  return 'Error: Asset is in an active transfer.';
+                               return { result: 'Error: Disposed assets cannot be allocated.', formId: null };
+    if (curLC === 'transfer')  return { result: 'Error: Asset is in an active transfer.', formId: null };
     if (curAS === 'borrowitem')
-      return 'Error: This asset is in the Borrow Pool. Change its status first.';
+      return { result: 'Error: This asset is in the Borrow Pool. Change its status first.', formId: null };
 
     if (curLC === 'allocated') {
       const prevStaff = String(curRow[C.STAFF - 1] || '');
@@ -959,14 +844,52 @@ function allocateAsset(obj) {
     _log('ALLOCATE', obj.barcode,
       _sanitize(obj.staffName, 100) + ' | ' + (_sanitize(obj.branch, 150) || normDiv || ''),
       obj.allocatedBy || obj.empId || '');
-    return 'Asset allocated to ' + _sanitize(obj.staffName, 100);
-  } catch(e) { return 'Error: ' + e.message; }
+
+    // Draft accountability form for the newly allocated asset
+    const assetForForm = [{
+      Barcode:     obj.barcode,
+      Type:        obj.type        || String(curRow[C.TYPE      - 1] || ''),
+      Brand:       obj.brand       || String(curRow[C.BRAND     - 1] || ''),
+      Serial:      obj.serial      || String(curRow[C.SERIAL    - 1] || ''),
+      Specs:       obj.specs       || String(curRow[C.SPECS     - 1] || ''),
+      Condition:   obj.condition   || String(curRow[C.CONDITION - 1] || 'Good'),
+      Staff:       _sanitize(obj.staffName, 100),
+      EmpID:       obj.empId,
+      Designation: obj.designation || '',
+      Department:  obj.department  || '',
+      BaseOffice:  obj.baseOffice  || '',
+      Branch:      _sanitize(obj.branch, 150),
+      Division:    normDiv,
+      District:    normDist,
+      Area:        obj.area        || ''
+    }];
+
+    const drafterId = obj.allocatedBy || obj.empId || '';
+    const formId = draftAccountabilityForm(
+      obj.empId,
+      assetForForm,
+      'Enrollment',
+      '',
+      drafterId
+    );
+
+    // Link formId back to the asset row
+    if (!formId.startsWith('Error')) {
+      sh.getRange(rowIdx, CAE.APPROVAL_STATUS).setValue('Draft');
+      sh.getRange(rowIdx, CAE.FORM_ID).setValue(formId);
+      sh.getRange(rowIdx, CAE.DRAFTED_BY).setValue(drafterId);
+      sh.getRange(rowIdx, CAE.DRAFTED_AT).setValue(nowStr);
+    }
+
+    return {
+      result: 'Asset allocated to ' + _sanitize(obj.staffName, 100),
+      formId: formId.startsWith('Error') ? null : formId
+    };
+  } catch(e) { return { result: 'Error: ' + e.message, formId: null }; }
   finally    { lock.releaseLock(); }
 }
 
-// ─── DEALLOCATE (return to spare) ─────────────────────────────────────────────
-// NOTE: Division/District/Area/Branch are PRESERVED so you know where the
-//       spare asset is physically located.
+// ─── DEALLOCATE ───────────────────────────────────────────────────────────────
 function deallocateAsset(barcode, remarks) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(8000); }
@@ -976,7 +899,7 @@ function deallocateAsset(barcode, remarks) {
     const rowIdx = _findRow(sh, barcode);
     if (rowIdx < 1) return 'Error: Asset not found: ' + barcode;
 
-    const curRow = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const curRow = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
     const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
     if (curLC === 'borrow')  return 'Error: Return the borrow record first.';
     if (curLC === 'dispose' || curLC === 'disposal')
@@ -990,12 +913,10 @@ function deallocateAsset(barcode, remarks) {
       [C.STATUS_LABEL,'Unassigned'],
       [C.EMP_ID,      ''],         [C.STAFF,         ''],
       [C.DESIGNATION, ''],         [C.EFF_DATE,      '']
-      // Division/District/Area/Branch intentionally kept — shows where spare is stored
     ];
     if (remarks) updates.push([C.REMARKS, _sanitize(remarks, 500)]);
     _setRow(sh, rowIdx, updates);
 
-    // Write to Spare log
     _spareSheet().appendRow([
       barcode,
       String(curRow[C.TYPE          - 1] || ''),
@@ -1056,33 +977,34 @@ function updateAssetDetails(barcode, updates) {
   } catch(e) { return 'Error: ' + e.message; }
 }
 
-// ─── TRANSFERS ────────────────────────────────────────────────────────────────
-function saveTransfer_legacy(t) {
+// ─── SINGLE TRANSFER ─────────────────────────────────────────────────────────
+function saveTransfer(t) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(8000); }
-  catch(e) { return 'Error: System busy — try again.'; }
+  catch(e) { return { result: 'Error: System busy — try again.', fromFormId: null, toFormId: null }; }
+
   try {
-    if (!t.barcode)      return 'Error: Barcode is required.';
-    if (!t.toEmpId)      return 'Error: Destination Employee ID is required.';
-    if (!t.toStaff)      return 'Error: Destination Staff Name is required.';
-    if (!t.effDate)      return 'Error: Transfer Date is required.';
-    if (!t.transferType) return 'Error: Transfer Type is required.';
+    if (!t.barcode)      return { result: 'Error: Barcode is required.', fromFormId: null, toFormId: null };
+    if (!t.toEmpId)      return { result: 'Error: Destination Employee ID is required.', fromFormId: null, toFormId: null };
+    if (!t.toStaff)      return { result: 'Error: Destination Staff Name is required.', fromFormId: null, toFormId: null };
+    if (!t.effDate)      return { result: 'Error: Transfer Date is required.', fromFormId: null, toFormId: null };
+    if (!t.transferType) return { result: 'Error: Transfer Type is required.', fromFormId: null, toFormId: null };
 
     const sh     = _entrySheet();
     const rowIdx = _findRow(sh, t.barcode);
-    if (rowIdx < 1) return 'Error: Asset not found: ' + t.barcode;
+    if (rowIdx < 1) return { result: 'Error: Asset not found: ' + t.barcode, fromFormId: null, toFormId: null };
 
-    const curLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
+    const curRow = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
+    const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
     if (curLC === 'dispose' || curLC === 'disposal')
-      return 'Error: Cannot transfer a disposed asset.';
+      return { result: 'Error: Cannot transfer a disposed asset.', fromFormId: null, toFormId: null };
     if (curLC === 'borrow')
-      return 'Error: Return the asset first before transferring.';
+      return { result: 'Error: Return the asset first before transferring.', fromFormId: null, toFormId: null };
 
-    const nowStr   = new Date().toLocaleString('en-PH');
+    const nowStr     = new Date().toLocaleString('en-PH');
     const normToDiv  = _normDiv(t.toDiv   || '');
     const normToDist = _normDist(t.toDist || '');
 
-    // Write full record to Transfers sheet (21 columns — unchanged structure)
     _xferSheet().appendRow([
       t.barcode, t.transferType,
       _sanitize(t.fromStaff, 100), t.fromEmpId, t.fromDesig,
@@ -1092,7 +1014,6 @@ function saveTransfer_legacy(t) {
       t.effDate, t.status || 'Completed', nowStr
     ]);
 
-    // Update Asset Entry with new holder (no inline transfer fields in 31-col layout)
     _setRow(sh, rowIdx, [
       [C.LIFECYCLE,    'Allocated'],  [C.ASSET_STATUS, 'Active'],
       [C.STATUS_LABEL, 'Assigned'],   [C.EMP_ID,       t.toEmpId   || ''],
@@ -1101,15 +1022,180 @@ function saveTransfer_legacy(t) {
       [C.DIVISION,     normToDiv],    [C.DISTRICT,     normToDist],
       [C.AREA,         t.toArea    || ''],
       [C.BRANCH,       _sanitize(t.toBranch, 150)],
-      [C.EFF_DATE,     t.effDate]
+      [C.EFF_DATE,     t.effDate],
+      [CAE.APPROVAL_STATUS, 'Draft'],
+      [CAE.REJECTION_COMMENT, '']
     ]);
+
+    const assetObj = {
+      Barcode:   t.barcode,
+      Type:      String(curRow[C.TYPE      - 1] || ''),
+      Brand:     String(curRow[C.BRAND     - 1] || ''),
+      Serial:    String(curRow[C.SERIAL    - 1] || ''),
+      Specs:     String(curRow[C.SPECS     - 1] || ''),
+      Condition: String(curRow[C.CONDITION - 1] || '')
+    };
+
+    const fromAsset = Object.assign({}, assetObj, {
+      Staff:       t.fromStaff  || '', EmpID:    t.fromEmpId  || '',
+      Designation: t.fromDesig  || '', Division: t.fromDiv    || '',
+      District:    t.fromDist   || '', Branch:   t.fromBranch || ''
+    });
+    const toAsset = Object.assign({}, assetObj, {
+      Staff:       t.toStaff || '', EmpID:    t.toEmpId  || '',
+      Designation: t.toDesig || '', Division: normToDiv,
+      District:    normToDist,      Branch:   t.toBranch || ''
+    });
+
+    const drafterId  = t.fromEmpId || '';
+    const fromFormId = draftAccountabilityForm(t.fromEmpId || '', [fromAsset], 'Transfer-From', '', drafterId);
+    const toFormId   = draftAccountabilityForm(t.toEmpId   || '', [toAsset],   'Transfer-To',   fromFormId.startsWith('Error') ? '' : fromFormId, drafterId);
+
+    if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
+      const afSh     = _afSheet();
+      const fromRowI = _findAFRow(fromFormId);
+      if (fromRowI > 0) afSh.getRange(fromRowI, AF.LINKED_FORM_ID).setValue(toFormId);
+      // Link formId to asset row
+      sh.getRange(rowIdx, CAE.FORM_ID).setValue(toFormId);
+      sh.getRange(rowIdx, CAE.DRAFTED_BY).setValue(drafterId);
+      sh.getRange(rowIdx, CAE.DRAFTED_AT).setValue(nowStr);
+    }
 
     _log('TRANSFER', t.barcode,
       (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100),
       t.fromEmpId || '');
-    return 'Transfer saved';
-  } catch(e) { return 'Error: ' + e.message; }
-  finally    { lock.releaseLock(); }
+
+    return {
+      result:     'Transfer saved',
+      fromFormId: fromFormId.startsWith('Error') ? null : fromFormId,
+      toFormId:   toFormId.startsWith('Error')   ? null : toFormId
+    };
+  } catch(e) {
+    return { result: 'Error: ' + e.message, fromFormId: null, toFormId: null };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ─── BULK TRANSFER ────────────────────────────────────────────────────────────
+// All barcodes come from 1 from-person, going to 1 to-person.
+// Creates 1 Transfer-From form + 1 Transfer-To form covering all assets.
+function saveBulkTransfer(barcodes, t) {
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); }
+  catch(e) { return { result: 'Error: System busy — try again.', fromFormId: null, toFormId: null }; }
+
+  try {
+    if (!barcodes || !barcodes.length) return { result: 'Error: No assets selected.', fromFormId: null, toFormId: null };
+    if (!t.toEmpId)      return { result: 'Error: Destination Employee ID is required.', fromFormId: null, toFormId: null };
+    if (!t.toStaff)      return { result: 'Error: Destination Staff Name is required.', fromFormId: null, toFormId: null };
+    if (!t.effDate)      return { result: 'Error: Transfer Date is required.', fromFormId: null, toFormId: null };
+    if (!t.transferType) return { result: 'Error: Transfer Type is required.', fromFormId: null, toFormId: null };
+
+    const sh        = _entrySheet();
+    const nowStr    = new Date().toLocaleString('en-PH');
+    const normToDiv = _normDiv(t.toDiv   || '');
+    const normToDist= _normDist(t.toDist || '');
+    const fromAssets = [], toAssets = [];
+    const failed = [];
+
+    barcodes.forEach(bc => {
+      const rowIdx = _findRow(sh, bc);
+      if (rowIdx < 1) { failed.push(bc + ' (not found)'); return; }
+
+      const curRow = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
+      const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
+      if (curLC === 'dispose' || curLC === 'disposal') { failed.push(bc + ' (disposed)'); return; }
+      if (curLC === 'borrow')  { failed.push(bc + ' (on borrow)'); return; }
+
+      const assetObj = {
+        Barcode:   bc,
+        Type:      String(curRow[C.TYPE      - 1] || ''),
+        Brand:     String(curRow[C.BRAND     - 1] || ''),
+        Serial:    String(curRow[C.SERIAL    - 1] || ''),
+        Specs:     String(curRow[C.SPECS     - 1] || ''),
+        Condition: String(curRow[C.CONDITION - 1] || '')
+      };
+
+      fromAssets.push(Object.assign({}, assetObj, {
+        Staff:       t.fromStaff  || '', EmpID:    t.fromEmpId  || '',
+        Designation: t.fromDesig  || '', Division: t.fromDiv    || '',
+        District:    t.fromDist   || '', Branch:   t.fromBranch || ''
+      }));
+
+      toAssets.push(Object.assign({}, assetObj, {
+        Staff:       t.toStaff || '', EmpID:    t.toEmpId  || '',
+        Designation: t.toDesig || '', Division: normToDiv,
+        District:    normToDist,      Branch:   t.toBranch || ''
+      }));
+
+      // Write individual transfer record to Transfers sheet
+      _xferSheet().appendRow([
+        bc, t.transferType,
+        _sanitize(t.fromStaff, 100), t.fromEmpId, t.fromDesig,
+        t.fromDiv, t.fromDist, t.fromArea, _sanitize(t.fromBranch, 150), _sanitize(t.fromRemarks, 500),
+        _sanitize(t.toStaff, 100), t.toEmpId, t.toDesig,
+        normToDiv, normToDist, t.toArea, _sanitize(t.toBranch, 150), _sanitize(t.toRemarks, 500),
+        t.effDate, 'Completed', nowStr
+      ]);
+
+      // Update asset row
+      _setRow(sh, rowIdx, [
+        [C.LIFECYCLE,    'Allocated'],  [C.ASSET_STATUS, 'Active'],
+        [C.STATUS_LABEL, 'Assigned'],   [C.EMP_ID,       t.toEmpId   || ''],
+        [C.STAFF,        _sanitize(t.toStaff, 100)],
+        [C.DESIGNATION,  t.toDesig   || ''],
+        [C.DIVISION,     normToDiv],    [C.DISTRICT,     normToDist],
+        [C.AREA,         t.toArea    || ''],
+        [C.BRANCH,       _sanitize(t.toBranch, 150)],
+        [C.EFF_DATE,     t.effDate],
+        [CAE.APPROVAL_STATUS, 'Draft'],
+        [CAE.REJECTION_COMMENT, '']
+      ]);
+    });
+
+    if (!fromAssets.length) {
+      return { result: 'Error: No valid assets to transfer. Skipped: ' + failed.join(', '), fromFormId: null, toFormId: null };
+    }
+
+    // One shared form pair for all assets
+    const drafterId  = t.fromEmpId || '';
+    const fromFormId = draftAccountabilityForm(t.fromEmpId || '', fromAssets, 'Transfer-From', '', drafterId);
+    const toFormId   = draftAccountabilityForm(t.toEmpId   || '', toAssets,   'Transfer-To',
+      fromFormId.startsWith('Error') ? '' : fromFormId, drafterId);
+
+    if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
+      const afSh     = _afSheet();
+      const fromRowI = _findAFRow(fromFormId);
+      if (fromRowI > 0) afSh.getRange(fromRowI, AF.LINKED_FORM_ID).setValue(toFormId);
+
+      // Link toFormId to all affected asset rows
+      barcodes.forEach(bc => {
+        const rowIdx = _findRow(sh, bc);
+        if (rowIdx < 1) return;
+        sh.getRange(rowIdx, CAE.FORM_ID).setValue(toFormId);
+        sh.getRange(rowIdx, CAE.DRAFTED_BY).setValue(drafterId);
+        sh.getRange(rowIdx, CAE.DRAFTED_AT).setValue(nowStr);
+      });
+    }
+
+    _log('BULK_TRANSFER', barcodes.join(','),
+      fromAssets.length + ' assets | ' + (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100),
+      t.fromEmpId || '');
+
+    let msg = 'Bulk transfer saved: ' + fromAssets.length + ' asset(s).';
+    if (failed.length) msg += ' Skipped: ' + failed.join(', ');
+
+    return {
+      result:     msg,
+      fromFormId: fromFormId.startsWith('Error') ? null : fromFormId,
+      toFormId:   toFormId.startsWith('Error')   ? null : toFormId
+    };
+  } catch(e) {
+    return { result: 'Error: ' + e.message, fromFormId: null, toFormId: null };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function getTransferData() {
@@ -1124,8 +1210,6 @@ function getTransferData() {
 }
 
 // ─── BORROWS ──────────────────────────────────────────────────────────────────
-// saveBorrow: ONLY updates Lifecycle in Asset Entry.
-// All borrower details go to the Borrows sheet only.
 function saveBorrow(b) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(8000); }
@@ -1137,7 +1221,7 @@ function saveBorrow(b) {
     const rowIdx = _findRow(sh, b.barcode);
     if (rowIdx < 1) return 'Error: Asset not found: ' + b.barcode;
 
-    const curRow  = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+    const curRow  = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
     const curLC   = String(curRow[C.LIFECYCLE    - 1] || '').toLowerCase();
     const curAS   = String(curRow[C.ASSET_STATUS - 1] || '').toLowerCase();
     const isBItem = curAS === 'borrowitem';
@@ -1151,7 +1235,6 @@ function saveBorrow(b) {
       return 'Error: Cannot borrow. Status: ' + (labels[curLC] || curLC);
     }
 
-    // Write to Borrows sheet (13 columns matching fixed headers)
     bSh.appendRow([
       b.barcode, _sanitize(b.borrowerName, 100), b.empId || '', b.designation || '',
       b.division || '', b.district || '', _sanitize(b.branch, 150),
@@ -1159,7 +1242,6 @@ function saveBorrow(b) {
       'Borrow', _sanitize(b.remarks, 500), nowStr
     ]);
 
-    // Update Asset Entry — only Lifecycle; keep staff/location intact
     _setRow(sh, rowIdx, [
       [C.LIFECYCLE,    'Borrow'],
       [C.ASSET_STATUS, isBItem ? 'BorrowItem' : 'Active'],
@@ -1206,23 +1288,21 @@ function returnAsset(barcode, returnDate) {
     const retDate = returnDate || new Date().toLocaleDateString('en-PH');
     const last    = bSh.getLastRow();
 
-    // Update Borrows sheet — find the active borrow row
     if (last >= EVT_DATA_START) {
       const data = bSh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 13).getValues();
       for (let i = data.length - 1; i >= 0; i--) {
         if (String(data[i][0]) === String(barcode) && String(data[i][10]) === 'Borrow') {
           const sheetRow = i + EVT_DATA_START;
-          bSh.getRange(sheetRow, 10).setValue(retDate);  // Col J = ActualReturn
-          bSh.getRange(sheetRow, 11).setValue('Returned'); // Col K = Status
+          bSh.getRange(sheetRow, 10).setValue(retDate);
+          bSh.getRange(sheetRow, 11).setValue('Returned');
           break;
         }
       }
     }
 
-    // Update Asset Entry — restore previous lifecycle
     const rowIdx = _findRow(sh, barcode);
     if (rowIdx > 0) {
-      const curRow   = sh.getRange(rowIdx, 1, 1, TOTAL_COLS).getValues()[0];
+      const curRow   = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
       const curAS    = String(curRow[C.ASSET_STATUS - 1] || '');
       const curStaff = String(curRow[C.STAFF - 1] || '').trim();
       const curEmpId = String(curRow[C.EMP_ID - 1] || '').trim();
@@ -1247,8 +1327,6 @@ function returnAsset(barcode, returnDate) {
 }
 
 // ─── DISPOSALS ────────────────────────────────────────────────────────────────
-// NOTE: Location data (Division/District/Area/Branch/Staff) is PRESERVED
-//       in Asset Entry so you can see WHERE the disposed asset was/is.
 function saveDisposal(d) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(8000); }
@@ -1265,19 +1343,16 @@ function saveDisposal(d) {
       if (curLC === 'transfer') return 'Error: Cannot dispose an asset in active transfer.';
     }
 
-    // Write disposal record (6 columns matching fixed headers)
     dSh.appendRow([
       d.barcode, _sanitize(d.reason, 200), _sanitize(d.disposedBy, 100),
       d.disposeDate, _sanitize(d.remarks, 500), nowStr
     ]);
 
     if (rowIdx > 0) {
-      // Only update lifecycle/status — ALL location & staff info is preserved
       _setRow(sh, rowIdx, [
         [C.LIFECYCLE,    'Dispose'],
         [C.ASSET_STATUS, 'Disposal'],
         [C.STATUS_LABEL, 'Disposed']
-        // Division, District, Area, Branch, Staff, EmpID all KEPT intact
       ]);
     }
 
@@ -1298,45 +1373,6 @@ function getDisposalData() {
       .filter(r => r[0])
       .map(r => r.map(v => String(v || '')));
   } catch(e) { return []; }
-}
-
-// ─── USERS ────────────────────────────────────────────────────────────────────
-function getUserList() {
-  try {
-    const sh   = _ss().getSheetByName(SH_USERS);
-    if (!sh) return [];
-    const last = sh.getLastRow();
-    if (last < 2) return [];
-    return sh.getRange(2, 1, last - 1, 9)
-      .getValues().filter(r => String(r[2] || '').trim())
-      .map(r => r.map(v => String(v || '')));
-  } catch(e) { return []; }
-}
-
-function getEmployeeById(empId) {
-  try {
-    const sh = _ss().getSheetByName(SH_MASTER);
-    if (!sh) return { ok: false, error: 'Masterlist not found.' };
-    const last = sh.getLastRow();
-    if (last < 2) return { ok: false, error: 'No employees found.' };
-    const id = String(empId).trim().toLowerCase();
-    const ids = sh.getRange(2, 1, last - 1, 1).getValues();
-    for (let i = 0; i < ids.length; i++) {
-      if (String(ids[i][0] || '').trim().toLowerCase() !== id) continue;
-      const row = sh.getRange(i + 2, 1, 1, 15).getValues()[0];
-      return {
-        ok:       true,
-        empId:    String(row[0]  || '').trim(),
-        name:     String(row[2]  || '').trim(),
-        division: _normDiv(String(row[4]  || '').trim()),
-        district: _normDist(String(row[5] || '').trim()),
-        area:     String(row[6]  || '').trim(),
-        branch:   String(row[7]  || '').trim(),
-        position: String(row[11] || '').trim()
-      };
-    }
-    return { ok: false, error: 'Employee ID not found: ' + empId };
-  } catch(e) { return { ok: false, error: e.message }; }
 }
 
 // ─── DROPDOWN DATA ────────────────────────────────────────────────────────────
@@ -1460,12 +1496,10 @@ function getHeadOfficeDepts() {
 }
 
 // ─── LOCATION DATA ────────────────────────────────────────────────────────────
-// Now reads from Org Structure instead of Eng. List V2
 function getLocationData(empId) {
   try {
     let scopeData;
     if (empId) {
-      // Determine role tier from Users sheet
       let roleTier = 'fe';
       try {
         const uSh = _ss().getSheetByName(SH_USERS);
@@ -1504,9 +1538,6 @@ function getLocationData(empId) {
 
 function getEngineerLocationData() { return getLocationData(null); }
 
-// ─── ENGINEER LOOKUP (for Accountability Form) ────────────────────────────────
-// Reads from Org Structure: Col E (index 4) = FE Name, Col H (index 7) = Sup Name
-// Col L (index 11) = District
 function getEngineersByLocation(district, branch) {
   try {
     const sh     = _ss().getSheetByName(SH_ORG);
@@ -1517,16 +1548,16 @@ function getEngineersByLocation(district, branch) {
     const result = { fe:'', senior:'' };
 
     data.forEach(r => {
-      const rowDist = String(r[11] || '').trim().toLowerCase(); // Col L
+      const rowDist = String(r[11] || '').trim().toLowerCase();
       if (!normDist || rowDist !== normDist) return;
-      if (!result.fe)     result.fe     = String(r[4] || '').trim(); // Col E = FE Name
-      if (!result.senior) result.senior = String(r[7] || '').trim(); // Col H = Sup Name
+      if (!result.fe)     result.fe     = String(r[4] || '').trim();
+      if (!result.senior) result.senior = String(r[7] || '').trim();
     });
     return result;
   } catch(e) { return { fe:'', senior:'' }; }
 }
 
-// ─── ORG LOOKUP (for resolving Asset Location column back to Div/Dist) ────────
+// ─── ORG LOOKUP ───────────────────────────────────────────────────────────────
 function _buildOrgLookup() {
   const lookup = {};
   try {
@@ -1536,20 +1567,15 @@ function _buildOrgLookup() {
     const data = sh.getRange(2, 1, last - 1, 12).getValues();
 
     data.forEach(r => {
-      const div  = _normDiv(String(r[10] || '').trim());   // Col K
-      const dist = _normDist(String(r[11] || '').trim());  // Col L
+      const div  = _normDiv(String(r[10] || '').trim());
+      const dist = _normDist(String(r[11] || '').trim());
       if (!div || !dist) return;
-
-      // District → Division mapping (first occurrence wins)
       if (!lookup[dist.toLowerCase()])
         lookup[dist.toLowerCase()] = { division:div, district:dist, area:'', branch:'' };
-
-      // Division → mapping
       if (!lookup[div.toLowerCase()])
         lookup[div.toLowerCase()] = { division:div, district:'', area:'', branch:'' };
     });
 
-    // Also try to read from Org Structure-FO if it exists (branch-level data)
     const foSh = _ss().getSheetByName('Org Structure-FO');
     if (foSh && foSh.getLastRow() >= 4) {
       const foLast = foSh.getLastRow();
@@ -1632,7 +1658,6 @@ function getInitialData() {
   const borrows   = getBorrowData()     || [];
   const transfers = getTransferData()   || [];
 
-  // ── Merge active borrow details into asset objects ─────────────────────────
   const activeBorrowMap = {};
   borrows.filter(b => b.status === 'Borrow').forEach(b => {
     if (!activeBorrowMap[b.barcode]) activeBorrowMap[b.barcode] = b;
@@ -1655,13 +1680,10 @@ function getInitialData() {
     }
   });
 
-  // ── Merge latest transfer details for assets in transfer state ────────────
-  // Transfers sheet columns: 0=Barcode, 1=Type, 10=ToStaff, 11=ToEmpID,
-  //                          13=ToDiv, 16=ToBranch, 18=EffDate, 19=Status
   const xferMap = {};
   transfers.forEach(r => {
     if (!xferMap[r[0]] || r[20] > (xferMap[r[0]][20] || ''))
-      xferMap[r[0]] = r; // keep latest by timestamp
+      xferMap[r[0]] = r;
   });
   assets.forEach(a => {
     if (a.status === 'transfer' && xferMap[a.Barcode]) {
@@ -1697,7 +1719,7 @@ function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
     if (last < AE_DATA_START) return 'Error: No assets found.';
 
     const count   = last - AE_DATA_START + 1;
-    const allData = sh.getRange(AE_DATA_START, 1, count, TOTAL_COLS).getValues();
+    const allData = sh.getRange(AE_DATA_START, 1, count, 37).getValues();
     const nowStr  = new Date().toLocaleString('en-PH');
     const id      = String(empId).trim().toLowerCase();
     const normDiv  = _normDiv(newDiv   || '');
@@ -1735,7 +1757,7 @@ function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
     }
 
     rowsToWrite.forEach(({ rowIdx, rowData }) => {
-      sh.getRange(rowIdx, 1, 1, TOTAL_COLS).setValues([rowData]);
+      sh.getRange(rowIdx, 1, 1, 37).setValues([rowData]);
     });
 
     _log('MOVE_STAFF', empId,
@@ -1757,7 +1779,7 @@ function moveOrgUnit(unitType, currentDiv, currentDist, currentArea, currentBran
     if (last < AE_DATA_START) return 'Error: No assets found.';
 
     const count  = last - AE_DATA_START + 1;
-    const data   = sh.getRange(AE_DATA_START, 1, count, TOTAL_COLS).getValues();
+    const data   = sh.getRange(AE_DATA_START, 1, count, 37).getValues();
     const nowStr = new Date().toLocaleString('en-PH');
     const normCurDiv  = _normDiv(currentDiv   || '');
     const normCurDist = _normDist(currentDist || '');
@@ -1814,101 +1836,42 @@ function moveOrgUnit(unitType, currentDiv, currentDist, currentArea, currentBran
   } catch(e) { return 'Error: ' + e.message; }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  ACCOUNTABILITY FORM WORKFLOW — Parts 1 & 2
-//  Append this entire block to the bottom of Code.gs
-//
-//  DEPENDENCIES (already in Code.gs):
-//    _ss(), _sanitize(), _log(), SHEET_ID, SH_USERS, SH_ORG, SH_MASTER
-//    C (column map), AE_DATA_START, EVT_DATA_START, _findRow(), _setRow()
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 1A — SHEET NAME CONSTANTS & COLUMN MAPS
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  ACCOUNTABILITY FORM WORKFLOW
+// ═══════════════════════════════════════════════════════════
 
 const SH_AF  = 'AccountabilityForms';
 const SH_FS  = 'FormSnapshots';
 const SH_RL  = 'FormRateLimits';
 const SH_CFG = 'ApprovalConfig';
 
-// New Asset Entry columns (32–37) — append to existing C map
-// NOTE: Do not redefine C. Reference these directly in functions below.
-const CAE = {
-  APPROVAL_STATUS:    32,  // Draft | Pending | Confirmed | Rejected
-  FORM_ID:            33,  // FK to AccountabilityForms
-  DRAFTED_BY:         34,  // Employee ID of drafter
-  DRAFTED_AT:         35,  // Timestamp
-  REJECTION_COMMENT:  36,  // Rejection reason shown to drafter
-  GRANDFATHERED:      37   // TRUE for all pre-existing assets
-};
-
-// AccountabilityForms sheet column positions (data starts row 4)
 const AF = {
-  FORM_ID:        1,   // A
-  FORM_TYPE:      2,   // B  Enrollment | Transfer-From | Transfer-To
-  LINKED_FORM_ID: 3,   // C  Transfer pair partner FormID
-  CONTEXT_TYPE:   4,   // D  Field | HO
-  EMP_ID:         5,   // E
-  STAFF_NAME:     6,   // F
-  DESIGNATION:    7,   // G
-  DEPARTMENT:     8,   // H
-  BRANCH:         9,   // I  Branch / Base Office
-  DIVISION:       10,  // J
-  DISTRICT:       11,  // K
-  ASSETS_JSON:    12,  // L  JSON snapshot of asset rows
-  STATUS:         13,  // M  Draft | Pending | Confirmed | Rejected
-  DRAFTED_BY:     14,  // N  Employee ID
-  DRAFTED_AT:     15,  // O  Timestamp
-  SUBMITTED_AT:   16,  // P  Timestamp
-  SUPERVISOR_ID:  17,  // Q  Employee ID of reviewer
-  REVIEWED_AT:    18,  // R  Timestamp
-  REJECTION_COMMENT: 19  // S
+  FORM_ID:        1, FORM_TYPE:      2, LINKED_FORM_ID: 3, CONTEXT_TYPE:   4,
+  EMP_ID:         5, STAFF_NAME:     6, DESIGNATION:    7, DEPARTMENT:     8,
+  BRANCH:         9, DIVISION:       10, DISTRICT:      11, ASSETS_JSON:   12,
+  STATUS:         13, DRAFTED_BY:    14, DRAFTED_AT:    15, SUBMITTED_AT:  16,
+  SUPERVISOR_ID:  17, REVIEWED_AT:   18, REJECTION_COMMENT: 19
 };
 const AF_TOTAL_COLS = 19;
 const AF_DATA_START = 4;
 
-// FormRateLimits sheet column positions (data starts row 4)
 const RL = {
-  FORM_ID:          1,  // A
-  DRAFTED_BY:       2,  // B
-  RESUBMIT_COUNT:   3,  // C
-  WINDOW_START:     4,  // D
-  COOLDOWN_UNTIL:   5,  // E
-  LAST_SUBMITTED:   6,  // F
-  STATUS:           7   // G  Active | Cooldown | Clear
+  FORM_ID: 1, DRAFTED_BY: 2, RESUBMIT_COUNT: 3,
+  WINDOW_START: 4, COOLDOWN_UNTIL: 5, LAST_SUBMITTED: 6, STATUS: 7
 };
 const RL_DATA_START = 4;
 
-// FormSnapshots sheet column positions (data starts row 4)
 const FS = {
-  FORM_ID:          1,  // A
-  FORM_TYPE:        2,  // B
-  LINKED_FORM_ID:   3,  // C
-  CONTEXT_TYPE:     4,  // D
-  EMP_ID:           5,  // E
-  STAFF_NAME:       6,  // F
-  DESIGNATION:      7,  // G
-  DEPARTMENT:       8,  // H
-  BRANCH:           9,  // I
-  ASSETS_JSON:      10, // J
-  CONFIRMED_BY:     11, // K
-  CONFIRMED_AT:     12, // L
-  SUPERSEDED_AT:    13, // M
-  SUPERSEDED_BY:    14  // N
+  FORM_ID: 1, FORM_TYPE: 2, LINKED_FORM_ID: 3, CONTEXT_TYPE: 4,
+  EMP_ID: 5, STAFF_NAME: 6, DESIGNATION: 7, DEPARTMENT: 8,
+  BRANCH: 9, ASSETS_JSON: 10, CONFIRMED_BY: 11, CONFIRMED_AT: 12,
+  SUPERSEDED_AT: 13, SUPERSEDED_BY: 14
 };
 const FS_DATA_START = 4;
 
-// Rate limit constants (must match ApprovalConfig sheet)
 const RL_MAX_RESUBMITS    = 5;
 const RL_WINDOW_MINUTES   = 30;
 const RL_COOLDOWN_MINUTES = 120;
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 1A — SHEET HELPER FUNCTIONS
-// ─────────────────────────────────────────────────────────────────────────────
 
 function _afSheet() {
   return _getOrCreate(SH_AF, [
@@ -1935,25 +1898,15 @@ function _rlSheet() {
   ]);
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 1B — READ HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Returns signatory config for a given context type ('Field' or 'HO').
- * Reads from ApprovalConfig sheet rows 5-6 (signatory rules section).
- */
 function getApprovalConfig(contextType) {
   try {
     const sh   = _ss().getSheetByName(SH_CFG);
     if (!sh) return _defaultApprovalConfig(contextType);
     const last = sh.getLastRow();
     if (last < 5) return _defaultApprovalConfig(contextType);
-
     const data = sh.getRange(5, 1, 2, 4).getValues();
     for (let i = 0; i < data.length; i++) {
-      if (String(data[i][0]).trim().toLowerCase() === contextType.toLowerCase()) {
+      if (String(data[i][0]).trim().toLowerCase() === (contextType || '').toLowerCase()) {
         return {
           contextType:      String(data[i][0]).trim(),
           processedByLabel: String(data[i][1]).trim(),
@@ -1965,193 +1918,94 @@ function getApprovalConfig(contextType) {
       }
     }
     return _defaultApprovalConfig(contextType);
-  } catch(e) {
-    return _defaultApprovalConfig(contextType);
-  }
+  } catch(e) { return _defaultApprovalConfig(contextType); }
 }
 
 function _defaultApprovalConfig(contextType) {
   if ((contextType || '').toLowerCase() === 'ho') {
     return {
-      contextType:      'HO',
-      processedByLabel: 'Technical Support Engineer',
-      checkedByLabel:   'Senior Technical Support Engineer',
-      verifiedByName:   'Sandylee Dela Cruz Paris',
-      notedByName:      'Patrick Gerard G. Reyes',
-      notedByTitle:     'Department Head'
+      contextType: 'HO', processedByLabel: 'Technical Support Engineer',
+      checkedByLabel: 'Senior Technical Support Engineer',
+      verifiedByName: 'Sandylee Dela Cruz Paris',
+      notedByName: 'Patrick Gerard G. Reyes', notedByTitle: 'Department Head'
     };
   }
   return {
-    contextType:      'Field',
-    processedByLabel: 'Field Engineer',
-    checkedByLabel:   'Senior Field Engineer',
-    verifiedByName:   'Maricon B. Jaropillo',
-    notedByName:      'Patrick Gerard G. Reyes',
-    notedByTitle:     'Department Head'
+    contextType: 'Field', processedByLabel: 'Field Engineer',
+    checkedByLabel: 'Senior Field Engineer',
+    verifiedByName: 'Maricon B. Jaropillo',
+    notedByName: 'Patrick Gerard G. Reyes', notedByTitle: 'Department Head'
   };
 }
 
-/**
- * Returns all forms drafted by a specific employee.
- * Used by the "My Forms" tab on the For Approval page.
- */
 function getMyForms(drafterId) {
   try {
     const sh   = _afSheet();
     const last = sh.getLastRow();
     if (last < AF_DATA_START) return [];
-
     const id   = String(drafterId || '').trim().toLowerCase();
     const data = sh.getRange(AF_DATA_START, 1, last - AF_DATA_START + 1, AF_TOTAL_COLS).getValues();
-
     return data
       .filter(r => r[AF.FORM_ID - 1] && String(r[AF.DRAFTED_BY - 1]).trim().toLowerCase() === id)
       .map(r => _mapAfRow(r));
-  } catch(e) {
-    return [];
-  }
+  } catch(e) { return []; }
 }
 
-/**
- * Returns all Pending forms visible to a supervisor.
- * Scoped strictly: only forms where the drafter is supervised by supervisorId
- * in the Org Structure sheet.
- */
 function getPendingForms(supervisorId, roleTier) {
   try {
     const sh   = _afSheet();
     const last = sh.getLastRow();
     if (last < AF_DATA_START) return [];
-
     const data = sh.getRange(AF_DATA_START, 1, last - AF_DATA_START + 1, AF_TOTAL_COLS).getValues();
     let pending = data
       .filter(r => r[AF.FORM_ID - 1] && String(r[AF.STATUS - 1]).trim() === 'Pending')
       .map(r => _mapAfRow(r));
-
-    // HO admin sees all pending forms
     if (roleTier === 'ho') return pending;
-
-    // Supervisor sees only forms from their directly supervised staff
     const supervisedIds = _getSupervisedEmpIds(supervisorId);
     return pending.filter(f => supervisedIds.indexOf(f.draftedBy.toLowerCase()) >= 0);
-  } catch(e) {
-    return [];
-  }
+  } catch(e) { return []; }
 }
 
-/**
- * Returns a single form record by FormID.
- */
 function getFormDetail(formId) {
   try {
     const sh   = _afSheet();
     const last = sh.getLastRow();
     if (last < AF_DATA_START) return null;
-
     const data = sh.getRange(AF_DATA_START, 1, last - AF_DATA_START + 1, AF_TOTAL_COLS).getValues();
     for (let i = 0; i < data.length; i++) {
-      if (String(data[i][AF.FORM_ID - 1]).trim() === String(formId).trim()) {
+      if (String(data[i][AF.FORM_ID - 1]).trim() === String(formId).trim())
         return _mapAfRow(data[i]);
-      }
     }
     return null;
-  } catch(e) {
-    return null;
-  }
+  } catch(e) { return null; }
 }
 
-/**
- * Returns badge counts for the For Approval page nav item.
- * Drafters: count of their Draft + Rejected forms.
- * Supervisors: count of Pending forms in their scope.
- * Admins: count of all Pending forms.
- */
-function getPendingCounts(userId, roleTier) {
-  try {
-    const sh   = _afSheet();
-    const last = sh.getLastRow();
-    if (last < AF_DATA_START) return { myForms: 0, pendingReview: 0 };
-
-    const data = sh.getRange(AF_DATA_START, 1, last - AF_DATA_START + 1, AF_TOTAL_COLS).getValues();
-    const id   = String(userId || '').trim().toLowerCase();
-
-    const myForms = data.filter(r =>
-      r[AF.FORM_ID - 1] &&
-      String(r[AF.DRAFTED_BY - 1]).trim().toLowerCase() === id &&
-      ['Draft','Rejected'].indexOf(String(r[AF.STATUS - 1]).trim()) >= 0
-    ).length;
-
-    let pendingReview = 0;
-    if (roleTier === 'ho') {
-      pendingReview = data.filter(r =>
-        r[AF.FORM_ID - 1] && String(r[AF.STATUS - 1]).trim() === 'Pending'
-      ).length;
-    } else if (roleTier === 'senior') {
-      const supervisedIds = _getSupervisedEmpIds(userId);
-      pendingReview = data.filter(r =>
-        r[AF.FORM_ID - 1] &&
-        String(r[AF.STATUS - 1]).trim() === 'Pending' &&
-        supervisedIds.indexOf(String(r[AF.DRAFTED_BY - 1]).trim().toLowerCase()) >= 0
-      ).length;
-    }
-
-    return { myForms, pendingReview, total: myForms + pendingReview };
-  } catch(e) {
-    return { myForms: 0, pendingReview: 0, total: 0 };
-  }
-}
-
-/**
- * Returns the rate limit status for a given formId + drafter.
- * Called by frontend before showing the Resubmit button.
- */
 function getRateLimitStatus(formId, drafterId) {
   try {
     const row = _findRLRow(formId, drafterId);
     if (!row) return { allowed: true, remaining: RL_MAX_RESUBMITS, cooldownUntil: null };
-
-    const now          = new Date();
-    const cooldownUntil= row[RL.COOLDOWN_UNTIL - 1] ? new Date(row[RL.COOLDOWN_UNTIL - 1]) : null;
-
-    if (cooldownUntil && now < cooldownUntil) {
+    const now           = new Date();
+    const cooldownUntil = row[RL.COOLDOWN_UNTIL - 1] ? new Date(row[RL.COOLDOWN_UNTIL - 1]) : null;
+    if (cooldownUntil && now < cooldownUntil)
       return { allowed: false, remaining: 0, cooldownUntil: cooldownUntil.toISOString() };
-    }
-
-    const windowStart = row[RL.WINDOW_START - 1] ? new Date(row[RL.WINDOW_START - 1]) : null;
-    const windowExpired = !windowStart ||
-      ((now - windowStart) / 60000) > RL_WINDOW_MINUTES;
-
-    if (windowExpired) {
-      return { allowed: true, remaining: RL_MAX_RESUBMITS, cooldownUntil: null };
-    }
-
+    const windowStart   = row[RL.WINDOW_START - 1] ? new Date(row[RL.WINDOW_START - 1]) : null;
+    const windowExpired = !windowStart || ((now - windowStart) / 60000) > RL_WINDOW_MINUTES;
+    if (windowExpired) return { allowed: true, remaining: RL_MAX_RESUBMITS, cooldownUntil: null };
     const count     = parseInt(row[RL.RESUBMIT_COUNT - 1] || 0, 10);
     const remaining = Math.max(0, RL_MAX_RESUBMITS - count);
     return { allowed: remaining > 0, remaining, cooldownUntil: null };
-  } catch(e) {
-    return { allowed: true, remaining: RL_MAX_RESUBMITS, cooldownUntil: null };
-  }
+  } catch(e) { return { allowed: true, remaining: RL_MAX_RESUBMITS, cooldownUntil: null }; }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 1C — FORM ID GENERATOR
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Generates next sequential FormID in format FORM-YYYY-NNN.
- * Uses a script lock to prevent duplicate IDs.
- */
 function generateFormID() {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(8000); }
   catch(e) { return 'Error: System busy — try again.'; }
-
   try {
     const sh   = _afSheet();
     const last = sh.getLastRow();
     const yr   = new Date().getFullYear();
     let   max  = 0;
-
     if (last >= AF_DATA_START) {
       const ids     = sh.getRange(AF_DATA_START, AF.FORM_ID, last - AF_DATA_START + 1, 1).getValues();
       const pattern = new RegExp('^FORM-' + yr + '-(\\d+)$');
@@ -2160,109 +2014,52 @@ function generateFormID() {
         if (m) { const n = parseInt(m[1], 10); if (!isNaN(n) && n > max) max = n; }
       });
     }
-
-    const seq  = max + 1;
-    return 'FORM-' + yr + '-' + String(seq).padStart(3, '0');
-  } finally {
-    lock.releaseLock();
-  }
+    return 'FORM-' + yr + '-' + String(max + 1).padStart(3, '0');
+  } finally { lock.releaseLock(); }
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 1D — RATE LIMIT ENGINE
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Checks and updates the rate limit for a form resubmission.
- * Returns { allowed, remaining, cooldownUntil, message }
- * Writes to FormRateLimits sheet as a side effect when allowed.
- */
 function checkRateLimit(formId, drafterId) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(6000); }
   catch(e) { return { allowed: false, message: 'System busy — try again.' }; }
-
   try {
     const sh  = _rlSheet();
     const now = new Date();
     const rowIdx = _findRLRowIdx(formId, drafterId);
-
-    // No record yet — first submission is always allowed
     if (rowIdx < 0) {
-      sh.appendRow([
-        formId, drafterId, 1,
-        now.toLocaleString('en-PH'),  // window start
-        '',                            // no cooldown
-        now.toLocaleString('en-PH'),  // last submitted
-        'Active'
-      ]);
+      sh.appendRow([formId, drafterId, 1, now.toLocaleString('en-PH'), '', now.toLocaleString('en-PH'), 'Active']);
       return { allowed: true, remaining: RL_MAX_RESUBMITS - 1, cooldownUntil: null };
     }
-
     const data = sh.getRange(rowIdx, 1, 1, 7).getValues()[0];
-    const cooldownRaw = data[RL.COOLDOWN_UNTIL - 1];
+    const cooldownRaw   = data[RL.COOLDOWN_UNTIL - 1];
     const cooldownUntil = cooldownRaw ? new Date(cooldownRaw) : null;
-
-    // Blocked by cooldown
     if (cooldownUntil && now < cooldownUntil) {
       const mins = Math.ceil((cooldownUntil - now) / 60000);
-      return {
-        allowed:       false,
-        remaining:     0,
-        cooldownUntil: cooldownUntil.toISOString(),
-        message:       'Rate limit reached. Try again in ' + mins + ' minute(s).'
-      };
+      return { allowed: false, remaining: 0, cooldownUntil: cooldownUntil.toISOString(), message: 'Rate limit reached. Try again in ' + mins + ' minute(s).' };
     }
-
     const windowStart   = data[RL.WINDOW_START - 1] ? new Date(data[RL.WINDOW_START - 1]) : null;
-    const windowExpired = !windowStart ||
-      ((now - windowStart) / 60000) > RL_WINDOW_MINUTES;
-
+    const windowExpired = !windowStart || ((now - windowStart) / 60000) > RL_WINDOW_MINUTES;
     let count = parseInt(data[RL.RESUBMIT_COUNT - 1] || 0, 10);
-
-    // Reset window if expired
     if (windowExpired) {
       count = 0;
       sh.getRange(rowIdx, RL.WINDOW_START).setValue(now.toLocaleString('en-PH'));
       sh.getRange(rowIdx, RL.COOLDOWN_UNTIL).setValue('');
       sh.getRange(rowIdx, RL.STATUS).setValue('Active');
     }
-
     count++;
-
     if (count > RL_MAX_RESUBMITS) {
       const cooldownEnd = new Date(now.getTime() + RL_COOLDOWN_MINUTES * 60000);
       sh.getRange(rowIdx, RL.RESUBMIT_COUNT).setValue(count);
       sh.getRange(rowIdx, RL.COOLDOWN_UNTIL).setValue(cooldownEnd.toLocaleString('en-PH'));
       sh.getRange(rowIdx, RL.STATUS).setValue('Cooldown');
-      return {
-        allowed:       false,
-        remaining:     0,
-        cooldownUntil: cooldownEnd.toISOString(),
-        message:       'Submission limit reached. You can resubmit after 2 hours.'
-      };
+      return { allowed: false, remaining: 0, cooldownUntil: cooldownEnd.toISOString(), message: 'Submission limit reached. You can resubmit after 2 hours.' };
     }
-
     sh.getRange(rowIdx, RL.RESUBMIT_COUNT).setValue(count);
     sh.getRange(rowIdx, RL.LAST_SUBMITTED).setValue(now.toLocaleString('en-PH'));
-
-    return {
-      allowed:       true,
-      remaining:     RL_MAX_RESUBMITS - count,
-      cooldownUntil: null,
-      message:       'Submitted. ' + (RL_MAX_RESUBMITS - count) + ' attempt(s) remaining in this window.'
-    };
-
-  } finally {
-    lock.releaseLock();
-  }
+    return { allowed: true, remaining: RL_MAX_RESUBMITS - count, cooldownUntil: null, message: 'Submitted. ' + (RL_MAX_RESUBMITS - count) + ' attempt(s) remaining.' };
+  } finally { lock.releaseLock(); }
 }
 
-/**
- * Clears the rate limit record for a form after successful confirmation.
- * Prevents old counts from carrying over if the form is ever re-used.
- */
 function _clearRateLimit(formId, drafterId) {
   try {
     const rowIdx = _findRLRowIdx(formId, drafterId);
@@ -2274,46 +2071,28 @@ function _clearRateLimit(formId, drafterId) {
   } catch(e) {}
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 2A — DRAFT CREATION
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Creates a new Draft accountability form in AccountabilityForms sheet.
- *
- * @param {string} empId        - Accountable staff Employee ID
- * @param {Array}  assets       - Array of asset objects (from ASSETS state)
- * @param {string} formType     - 'Enrollment' | 'Transfer-From' | 'Transfer-To'
- * @param {string} linkedFormId - Partner FormID for transfer pairs ('' for enrollment)
- * @param {string} draftedBy    - Employee ID of the person creating the draft
- * @returns {string} FormID on success, or 'Error: ...' string
- */
 function draftAccountabilityForm(empId, assets, formType, linkedFormId, draftedBy) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(10000); }
   catch(e) { return 'Error: System busy — try again.'; }
-
   try {
     if (!empId)     return 'Error: Employee ID is required.';
     if (!formType)  return 'Error: Form type is required.';
     if (!draftedBy) return 'Error: Drafter ID is required.';
 
-    const formId    = generateFormID();
+    const formId  = generateFormID();
     if (formId.startsWith('Error')) return formId;
 
-    const nowStr    = new Date().toLocaleString('en-PH');
+    const nowStr      = new Date().toLocaleString('en-PH');
     const contextType = _getContextType(empId);
     const assetsJson  = _buildAssetsSnapshot(assets || []);
-
-    // Resolve staff info from first asset or masterlist
-    const refAsset  = (assets && assets.length) ? assets[0] : {};
-    const staffName = refAsset.Staff       || '';
-    const desig     = refAsset.Designation || '';
-    const dept      = refAsset.Department  || '';
-    const branch    = refAsset.Branch      || refAsset.BaseOffice || '';
-    const division  = refAsset.Division    || '';
-    const district  = refAsset.District    || '';
+    const refAsset    = (assets && assets.length) ? assets[0] : {};
+    const staffName   = refAsset.Staff       || '';
+    const desig       = refAsset.Designation || '';
+    const dept        = refAsset.Department  || '';
+    const branch      = refAsset.Branch      || refAsset.BaseOffice || '';
+    const division    = refAsset.Division    || '';
+    const district    = refAsset.District    || '';
 
     const row = new Array(AF_TOTAL_COLS).fill('');
     row[AF.FORM_ID        - 1] = formId;
@@ -2334,7 +2113,6 @@ function draftAccountabilityForm(empId, assets, formType, linkedFormId, draftedB
 
     _afSheet().appendRow(row);
 
-    // Link FormID back to each asset row in Asset Entry
     if (assets && assets.length) {
       const sh = _entrySheet();
       assets.forEach(function(asset) {
@@ -2350,86 +2128,49 @@ function draftAccountabilityForm(empId, assets, formType, linkedFormId, draftedB
 
     _log('DRAFT_FORM', formId, formType + ' | ' + empId + ' | ' + (assets ? assets.length : 0) + ' assets', draftedBy);
     return formId;
-
-  } catch(e) {
-    return 'Error: ' + e.message;
-  } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return 'Error: ' + e.message; }
+  finally    { lock.releaseLock(); }
 }
 
-/**
- * Serializes an array of asset objects to a compact JSON string for storage.
- * Stores only the fields needed to render the accountability form.
- */
 function _buildAssetsSnapshot(assets) {
   if (!assets || !assets.length) return '[]';
-  const snapshot = assets.map(function(a) {
-    return {
-      barcode:   a.Barcode   || '',
-      type:      a.Type      || '',
-      brand:     a.Brand     || '',
-      serial:    a.Serial    || '',
-      specs:     a.Specs     || '',
-      condition: a.Condition || ''
-    };
-  });
-  return JSON.stringify(snapshot);
+  return JSON.stringify(assets.map(function(a) {
+    return { barcode:a.Barcode||'', type:a.Type||'', brand:a.Brand||'', serial:a.Serial||'', specs:a.Specs||'', condition:a.Condition||'' };
+  }));
 }
 
-/**
- * Determines if an employee belongs to a Field or HO context.
- * Reads from Org Structure sheet — Field if found there, HO otherwise.
- */
 function _getContextType(empId) {
   try {
     const sh   = _ss().getSheetByName(SH_ORG);
     if (!sh || sh.getLastRow() < 2) return 'HO';
     const last = sh.getLastRow();
     const id   = String(empId || '').trim().toLowerCase();
-    const ids  = sh.getRange(2, 4, last - 1, 1).getValues(); // col D = FE ID
+    const ids  = sh.getRange(2, 4, last - 1, 1).getValues();
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0] || '').trim().toLowerCase() === id) return 'Field';
     }
-    // Also check supervisor column (col G)
     const supIds = sh.getRange(2, 7, last - 1, 1).getValues();
     for (let i = 0; i < supIds.length; i++) {
       if (String(supIds[i][0] || '').trim().toLowerCase() === id) return 'Field';
     }
     return 'HO';
-  } catch(e) {
-    return 'HO';
-  }
+  } catch(e) { return 'HO'; }
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 2B — SUBMIT FOR REVIEW
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Moves a Draft or Rejected form to Pending status.
- * Enforces rate limiting. Only the original drafter can submit.
- *
- * @returns {Object} { ok, formId, message, rateLimitStatus }
- */
 function submitFormForReview(formId, drafterId) {
   try {
     const form = getFormDetail(formId);
-    if (!form)                              return { ok: false, message: 'Form not found: ' + formId };
-    if (form.status === 'Confirmed')        return { ok: false, message: 'This form is already confirmed.' };
-    if (form.status === 'Pending')          return { ok: false, message: 'This form is already pending review.' };
+    if (!form)                      return { ok: false, message: 'Form not found: ' + formId };
+    if (form.status === 'Confirmed') return { ok: false, message: 'This form is already confirmed.' };
+    if (form.status === 'Pending')   return { ok: false, message: 'This form is already pending review.' };
     if (form.draftedBy.toLowerCase() !== String(drafterId).trim().toLowerCase())
-                                            return { ok: false, message: 'Only the original drafter can submit this form.' };
+                                    return { ok: false, message: 'Only the original drafter can submit this form.' };
     if (form.status !== 'Draft' && form.status !== 'Rejected')
-                                            return { ok: false, message: 'Form status "' + form.status + '" cannot be submitted.' };
+                                    return { ok: false, message: 'Form status "' + form.status + '" cannot be submitted.' };
 
-    // Rate limit check (only applies to Rejected resubmissions; first submit is always free)
     if (form.status === 'Rejected') {
       const rlResult = checkRateLimit(formId, drafterId);
-      if (!rlResult.allowed) {
-        return { ok: false, message: rlResult.message, rateLimitStatus: rlResult };
-      }
+      if (!rlResult.allowed) return { ok: false, message: rlResult.message, rateLimitStatus: rlResult };
     }
 
     const sh     = _afSheet();
@@ -2440,206 +2181,121 @@ function submitFormForReview(formId, drafterId) {
     sh.getRange(rowIdx, AF.STATUS).setValue('Pending');
     sh.getRange(rowIdx, AF.SUBMITTED_AT).setValue(nowStr);
     sh.getRange(rowIdx, AF.REJECTION_COMMENT).setValue('');
-
-    // Update approval status on all linked asset rows
     _updateAssetApprovalStatus(formId, 'Pending', '');
 
     _log('SUBMIT_FORM', formId, 'Submitted for review | ' + form.formType + ' | ' + form.empId, drafterId);
     return { ok: true, formId, message: 'Form submitted for supervisor review.' };
-
-  } catch(e) {
-    return { ok: false, message: 'Error: ' + e.message };
-  }
+  } catch(e) { return { ok: false, message: 'Error: ' + e.message }; }
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 2C — SUPERVISOR ACTIONS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Confirms a single enrollment form.
- * Validates that supervisorId supervises the drafter (or is admin).
- * Writes confirmed snapshot to FormSnapshots. Updates Asset Entry rows.
- *
- * @returns {Object} { ok, message }
- */
 function confirmForm(formId, supervisorId, roleTier) {
   try {
     const form = getFormDetail(formId);
-    if (!form)                       return { ok: false, message: 'Form not found.' };
-    if (form.status !== 'Pending')   return { ok: false, message: 'Form is not pending review.' };
-
-    // Scope check — admin bypasses, supervisor must own the drafter
+    if (!form)                     return { ok: false, message: 'Form not found.' };
+    if (form.status !== 'Pending') return { ok: false, message: 'Form is not pending review.' };
     if (roleTier !== 'ho') {
       const supervised = _getSupervisedEmpIds(supervisorId);
-      if (supervised.indexOf(form.draftedBy.toLowerCase()) < 0) {
+      if (supervised.indexOf(form.draftedBy.toLowerCase()) < 0)
         return { ok: false, message: 'You do not supervise the drafter of this form.' };
-      }
     }
-
     const sh     = _afSheet();
     const rowIdx = _findAFRow(formId);
     if (rowIdx < 0) return { ok: false, message: 'Form record not found in sheet.' };
-
     const nowStr = new Date().toLocaleString('en-PH');
     sh.getRange(rowIdx, AF.STATUS).setValue('Confirmed');
     sh.getRange(rowIdx, AF.SUPERVISOR_ID).setValue(supervisorId);
     sh.getRange(rowIdx, AF.REVIEWED_AT).setValue(nowStr);
-
-    // Archive to FormSnapshots
     _archiveForm(formId, supervisorId, nowStr);
-
-    // Update all linked asset rows to Confirmed
     _updateAssetApprovalStatus(formId, 'Confirmed', '');
-
-    // Clear rate limit record
     _clearRateLimit(formId, form.draftedBy);
-
     _log('CONFIRM_FORM', formId, form.formType + ' | ' + form.empId + ' | confirmed', supervisorId);
     return { ok: true, message: 'Form confirmed. Asset(s) are now live in inventory.' };
-
-  } catch(e) {
-    return { ok: false, message: 'Error: ' + e.message };
-  }
+  } catch(e) { return { ok: false, message: 'Error: ' + e.message }; }
 }
 
-/**
- * Confirms both Transfer-From and Transfer-To forms atomically.
- * Both must be Pending. If either check fails, neither is confirmed.
- *
- * @returns {Object} { ok, message }
- */
 function confirmTransferPair(fromFormId, toFormId, supervisorId, roleTier) {
   try {
     const fromForm = getFormDetail(fromFormId);
     const toForm   = getFormDetail(toFormId);
-
     if (!fromForm) return { ok: false, message: 'From-form not found: ' + fromFormId };
     if (!toForm)   return { ok: false, message: 'To-form not found: ' + toFormId };
     if (fromForm.status !== 'Pending') return { ok: false, message: 'From-form is not pending review.' };
     if (toForm.status   !== 'Pending') return { ok: false, message: 'To-form is not pending review.' };
-
     if (roleTier !== 'ho') {
       const supervised = _getSupervisedEmpIds(supervisorId);
       if (supervised.indexOf(fromForm.draftedBy.toLowerCase()) < 0 &&
-          supervised.indexOf(toForm.draftedBy.toLowerCase()) < 0) {
+          supervised.indexOf(toForm.draftedBy.toLowerCase()) < 0)
         return { ok: false, message: 'You do not supervise the drafter(s) of this transfer.' };
-      }
     }
-
     const nowStr = new Date().toLocaleString('en-PH');
     const sh     = _afSheet();
-
-    // Confirm FROM form
     const fromRowIdx = _findAFRow(fromFormId);
     if (fromRowIdx > 0) {
       sh.getRange(fromRowIdx, AF.STATUS).setValue('Confirmed');
       sh.getRange(fromRowIdx, AF.SUPERVISOR_ID).setValue(supervisorId);
       sh.getRange(fromRowIdx, AF.REVIEWED_AT).setValue(nowStr);
     }
-
-    // Confirm TO form
     const toRowIdx = _findAFRow(toFormId);
     if (toRowIdx > 0) {
       sh.getRange(toRowIdx, AF.STATUS).setValue('Confirmed');
       sh.getRange(toRowIdx, AF.SUPERVISOR_ID).setValue(supervisorId);
       sh.getRange(toRowIdx, AF.REVIEWED_AT).setValue(nowStr);
     }
-
-    // Archive both — supersede the FROM (old holder) form
     _archiveForm(toFormId, supervisorId, nowStr);
     _archiveForm(fromFormId, supervisorId, nowStr);
     _supersedeForms(fromFormId, toFormId, nowStr);
-
-    // Update asset approval status to Confirmed
     _updateAssetApprovalStatus(fromFormId, 'Confirmed', '');
     _updateAssetApprovalStatus(toFormId,   'Confirmed', '');
-
     _clearRateLimit(fromFormId, fromForm.draftedBy);
     _clearRateLimit(toFormId,   toForm.draftedBy);
-
     _log('CONFIRM_TRANSFER', fromFormId + '+' + toFormId,
-      'Transfer pair confirmed | From: ' + fromForm.empId + ' → To: ' + toForm.empId,
-      supervisorId);
+      'Transfer pair confirmed | From: ' + fromForm.empId + ' → To: ' + toForm.empId, supervisorId);
     return { ok: true, message: 'Transfer confirmed. Both forms are now live.' };
-
-  } catch(e) {
-    return { ok: false, message: 'Error: ' + e.message };
-  }
+  } catch(e) { return { ok: false, message: 'Error: ' + e.message }; }
 }
 
-/**
- * Rejects a single pending form with a mandatory comment.
- * Flips status back to Rejected. Updates asset rows.
- *
- * @returns {Object} { ok, message }
- */
 function rejectForm(formId, supervisorId, comment, roleTier) {
   try {
     if (!comment || !comment.trim()) return { ok: false, message: 'A rejection comment is required.' };
-
     const form = getFormDetail(formId);
     if (!form)                     return { ok: false, message: 'Form not found.' };
     if (form.status !== 'Pending') return { ok: false, message: 'Only Pending forms can be rejected.' };
-
     if (roleTier !== 'ho') {
       const supervised = _getSupervisedEmpIds(supervisorId);
-      if (supervised.indexOf(form.draftedBy.toLowerCase()) < 0) {
+      if (supervised.indexOf(form.draftedBy.toLowerCase()) < 0)
         return { ok: false, message: 'You do not supervise the drafter of this form.' };
-      }
     }
-
     const sh     = _afSheet();
     const rowIdx = _findAFRow(formId);
     if (rowIdx < 0) return { ok: false, message: 'Form record not found in sheet.' };
-
     const nowStr  = new Date().toLocaleString('en-PH');
     const trimmed = _sanitize(comment, 500);
     sh.getRange(rowIdx, AF.STATUS).setValue('Rejected');
     sh.getRange(rowIdx, AF.SUPERVISOR_ID).setValue(supervisorId);
     sh.getRange(rowIdx, AF.REVIEWED_AT).setValue(nowStr);
     sh.getRange(rowIdx, AF.REJECTION_COMMENT).setValue(trimmed);
-
-    // Push rejection comment to all linked asset rows so drafter sees it
     _updateAssetApprovalStatus(formId, 'Rejected', trimmed);
-
     _log('REJECT_FORM', formId, form.formType + ' | ' + form.empId + ' | ' + trimmed, supervisorId);
     return { ok: true, message: 'Form rejected. The drafter has been notified.' };
-
-  } catch(e) {
-    return { ok: false, message: 'Error: ' + e.message };
-  }
+  } catch(e) { return { ok: false, message: 'Error: ' + e.message }; }
 }
 
-/**
- * Rejects both forms in a transfer pair.
- * Either form can carry the primary comment; per-form comments are optional.
- * On rejection the transfer is cancelled — the asset stays with current holder.
- *
- * @returns {Object} { ok, message }
- */
 function rejectTransferPair(fromFormId, toFormId, supervisorId, fromComment, toComment, roleTier) {
   try {
     const comment = (fromComment || toComment || '').trim();
     if (!comment) return { ok: false, message: 'A rejection comment is required for at least one form.' };
-
     const fromForm = getFormDetail(fromFormId);
     const toForm   = getFormDetail(toFormId);
     if (!fromForm) return { ok: false, message: 'From-form not found.' };
     if (!toForm)   return { ok: false, message: 'To-form not found.' };
-
     if (roleTier !== 'ho') {
       const supervised = _getSupervisedEmpIds(supervisorId);
       if (supervised.indexOf(fromForm.draftedBy.toLowerCase()) < 0 &&
-          supervised.indexOf(toForm.draftedBy.toLowerCase()) < 0) {
+          supervised.indexOf(toForm.draftedBy.toLowerCase()) < 0)
         return { ok: false, message: 'You do not supervise the drafter(s) of this transfer.' };
-      }
     }
-
     const sh     = _afSheet();
     const nowStr = new Date().toLocaleString('en-PH');
-
     const fromRowIdx = _findAFRow(fromFormId);
     if (fromRowIdx > 0) {
       sh.getRange(fromRowIdx, AF.STATUS).setValue('Rejected');
@@ -2647,7 +2303,6 @@ function rejectTransferPair(fromFormId, toFormId, supervisorId, fromComment, toC
       sh.getRange(fromRowIdx, AF.REVIEWED_AT).setValue(nowStr);
       sh.getRange(fromRowIdx, AF.REJECTION_COMMENT).setValue(_sanitize(fromComment || comment, 500));
     }
-
     const toRowIdx = _findAFRow(toFormId);
     if (toRowIdx > 0) {
       sh.getRange(toRowIdx, AF.STATUS).setValue('Rejected');
@@ -2655,63 +2310,30 @@ function rejectTransferPair(fromFormId, toFormId, supervisorId, fromComment, toC
       sh.getRange(toRowIdx, AF.REVIEWED_AT).setValue(nowStr);
       sh.getRange(toRowIdx, AF.REJECTION_COMMENT).setValue(_sanitize(toComment || comment, 500));
     }
-
     _updateAssetApprovalStatus(fromFormId, 'Rejected', _sanitize(fromComment || comment, 500));
     _updateAssetApprovalStatus(toFormId,   'Rejected', _sanitize(toComment   || comment, 500));
-
-    _log('REJECT_TRANSFER', fromFormId + '+' + toFormId,
-      'Transfer pair rejected | ' + comment, supervisorId);
+    _log('REJECT_TRANSFER', fromFormId + '+' + toFormId, 'Transfer pair rejected | ' + comment, supervisorId);
     return { ok: true, message: 'Transfer rejected. Both forms returned to drafters.' };
-
-  } catch(e) {
-    return { ok: false, message: 'Error: ' + e.message };
-  }
+  } catch(e) { return { ok: false, message: 'Error: ' + e.message }; }
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 2D — ARCHIVE HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Copies a confirmed form row to FormSnapshots for permanent archiving.
- */
 function _archiveForm(formId, confirmedBy, confirmedAt) {
   try {
     const form = getFormDetail(formId);
     if (!form) return;
-
     _fsSheet().appendRow([
-      form.formId,
-      form.formType,
-      form.linkedFormId || '',
-      form.contextType,
-      form.empId,
-      form.staffName,
-      form.designation,
-      form.department,
-      form.branch,
-      form.assetsJson,
-      confirmedBy,
-      confirmedAt,
-      '',  // supersededAt — filled later if needed
-      ''   // supersededBy — filled later if needed
+      form.formId, form.formType, form.linkedFormId || '', form.contextType,
+      form.empId, form.staffName, form.designation, form.department, form.branch,
+      form.assetsJson, confirmedBy, confirmedAt, '', ''
     ]);
-  } catch(e) {
-    Logger.log('_archiveForm error: ' + e.message);
-  }
+  } catch(e) { Logger.log('_archiveForm error: ' + e.message); }
 }
 
-/**
- * Marks an archived FROM-form as superseded by a TO-form.
- * Called after a transfer pair is confirmed.
- */
 function _supersedeForms(oldFormId, newFormId, nowStr) {
   try {
     const sh   = _fsSheet();
     const last = sh.getLastRow();
     if (last < FS_DATA_START) return;
-
     const ids = sh.getRange(FS_DATA_START, FS.FORM_ID, last - FS_DATA_START + 1, 1).getValues();
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0]).trim() === String(oldFormId).trim()) {
@@ -2721,27 +2343,10 @@ function _supersedeForms(oldFormId, newFormId, nowStr) {
         break;
       }
     }
-  } catch(e) {
-    Logger.log('_supersedeForms error: ' + e.message);
-  }
+  } catch(e) { Logger.log('_supersedeForms error: ' + e.message); }
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PART 2E — MODIFICATIONS TO EXISTING FUNCTIONS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * REPLACE the existing processAsset() function with this version.
- *
- * Changes from original:
- *  - After writing the new asset row, sets ApprovalStatus = 'Draft' (col 32)
- *  - Calls draftAccountabilityForm() for all staff assets if this is an enrollment
- *  - Returns { result, formId } instead of just a string
- *    so the frontend can open the form preview
- *
- * NOTE: The isAssign=true branch (legacy update path) is unchanged.
- */
+// UPDATED processAsset — supports accEmpId/accName for accountable person separate from inputter
 function processAsset(obj, isAssign) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(10000); }
@@ -2752,7 +2357,6 @@ function processAsset(obj, isAssign) {
     const nowStr = new Date().toLocaleString('en-PH');
 
     if (!isAssign) {
-      // ── ENROLL NEW ASSET ──────────────────────────────────────────────
       if (!obj.barcode) return { result: 'Error: Barcode is required.', formId: null };
       if (_findRow(sh, obj.barcode) > 0)
         return { result: 'Error: Barcode already exists: ' + obj.barcode, formId: null };
@@ -2777,44 +2381,47 @@ function processAsset(obj, isAssign) {
         'BorrowItem': { lc:'BorrowItem', as:'BorrowItem', sl:'Unassigned' }
       };
       const sm      = SM[statusChoice] || SM['Spare'];
-      const isSpare = (statusChoice === 'Spare' || statusChoice === 'BorrowItem');
       const normDiv  = _normDiv(obj.division  || '');
       const normDist = _normDist(obj.district || '');
 
-      const row = new Array(37).fill('');  // 37 cols now (was 31)
-      row[C.ENTRY_EMP_ID   - 1] = obj.entryEmpId   || '';
-      row[C.ENTRY_NAME     - 1] = obj.entryName     || '';
-      row[C.EMP_ID         - 1] = isSpare ? '' : (obj.accEmpId || '');
-      row[C.STAFF          - 1] = isSpare ? '' : _sanitize(obj.accName, 100);
-      row[C.DESIGNATION    - 1] = isSpare ? '' : (obj.accRole || '');
-      row[C.DEPARTMENT     - 1] = obj.department    || '';
-      row[C.BASE_OFFICE    - 1] = obj.baseOffice    || '';
+      // Accountable person: use accEmpId/accName if provided, else fall back to entryEmpId/entryName
+      const accEmpId = obj.accEmpId || obj.entryEmpId || '';
+      const accName  = obj.accName  || obj.entryName  || '';
+      const accDesig = obj.accDesig || '';
+
+      const row = new Array(37).fill('');
+      row[C.ENTRY_EMP_ID   - 1] = obj.entryEmpId  || '';
+      row[C.ENTRY_NAME     - 1] = obj.entryName   || '';
+      row[C.EMP_ID         - 1] = accEmpId;
+      row[C.STAFF          - 1] = _sanitize(accName, 100);
+      row[C.DESIGNATION    - 1] = accDesig;
+      row[C.DEPARTMENT     - 1] = obj.department  || '';
+      row[C.BASE_OFFICE    - 1] = obj.baseOffice  || '';
       row[C.DIVISION       - 1] = normDiv;
       row[C.DISTRICT       - 1] = normDist;
-      row[C.AREA           - 1] = obj.area          || '';
+      row[C.AREA           - 1] = obj.area        || '';
       row[C.BRANCH         - 1] = _sanitize(obj.branch, 150);
-      row[C.ASSIGNMENT     - 1] = obj.assignment    || 'Field Office';
-      row[C.EFF_DATE       - 1] = obj.effDate       || '';
+      row[C.ASSIGNMENT     - 1] = obj.assignment  || (obj.fieldType === 'Central Office' ? 'Central Office' : 'Field Office');
+      row[C.EFF_DATE       - 1] = obj.effDate     || '';
       row[C.BARCODE        - 1] = obj.barcode;
-      row[C.TYPE           - 1] = obj.type          || '';
-      row[C.BRAND          - 1] = obj.brand         || '';
+      row[C.TYPE           - 1] = obj.type        || '';
+      row[C.BRAND          - 1] = obj.brand       || '';
       row[C.SERIAL         - 1] = obj.serial ? String(obj.serial) : '';
-      row[C.SPECS          - 1] = obj.specs         || '';
-      row[C.SUPPLIER       - 1] = obj.supplier      || '';
-      row[C.CONDITION      - 1] = obj.condition     || 'New';
-      row[C.ASSET_LOCATION - 1] = obj.location      || '';
+      row[C.SPECS          - 1] = obj.specs       || '';
+      row[C.SUPPLIER       - 1] = obj.supplier    || '';
+      row[C.CONDITION      - 1] = obj.condition   || 'New';
+      row[C.ASSET_LOCATION - 1] = obj.location    || '';
       row[C.LIFECYCLE      - 1] = sm.lc;
       row[C.STATUS_LABEL   - 1] = sm.sl;
       row[C.ASSET_STATUS   - 1] = sm.as;
-      row[C.PURCH_DATE     - 1] = obj.purchDate     || '';
-      row[C.WARRANTY_TERM  - 1] = obj.wTerm         || '';
-      row[C.WARRANTY_VAL   - 1] = obj.wValidity     || '';
+      row[C.PURCH_DATE     - 1] = obj.purchDate   || '';
+      row[C.WARRANTY_TERM  - 1] = obj.wTerm       || '';
+      row[C.WARRANTY_VAL   - 1] = obj.wValidity   || '';
       row[C.REMARKS        - 1] = _sanitize(obj.remarks, 500);
       row[C.CREATED_AT     - 1] = nowStr;
       row[C.LAST_UPDATED   - 1] = nowStr;
-      // New approval columns
       row[CAE.APPROVAL_STATUS - 1] = 'Draft';
-      row[CAE.FORM_ID         - 1] = '';  // filled after draftAccountabilityForm
+      row[CAE.FORM_ID         - 1] = '';
       row[CAE.DRAFTED_BY      - 1] = obj.enrolledBy || obj.entryEmpId || '';
       row[CAE.DRAFTED_AT      - 1] = nowStr;
       row[CAE.REJECTION_COMMENT-1] = '';
@@ -2825,7 +2432,6 @@ function processAsset(obj, isAssign) {
       sh.getRange(newRowIdx, C.SERIAL).setNumberFormat('@STRING@');
       if (obj.serial) sh.getRange(newRowIdx, C.SERIAL).setValue(String(obj.serial));
 
-      // Write to Spare log if applicable
       if (statusChoice === 'Spare') {
         _spareSheet().appendRow([
           obj.barcode, obj.type, obj.brand, obj.serial || '', obj.condition || 'New',
@@ -2838,33 +2444,28 @@ function processAsset(obj, isAssign) {
 
       _log('CREATE', obj.barcode, obj.type + ' | ' + obj.brand + ' | ' + statusChoice, obj.entryEmpId || '');
 
-      // Draft the accountability form for this new asset
-      // We pass a minimal asset object — the drafter will have full context on frontend
+      // Draft form — use accountable person's EmpID (not necessarily the inputter)
       const assetForForm = [{
-        Barcode:    obj.barcode,
-        Type:       obj.type      || '',
-        Brand:      obj.brand     || '',
-        Serial:     obj.serial    || '',
-        Specs:      obj.specs     || '',
-        Condition:  obj.condition || 'New',
-        Staff:      obj.accName   || '',
-        Designation:obj.accRole   || '',
-        Department: obj.department|| '',
-        BaseOffice: obj.baseOffice|| '',
-        Branch:     obj.branch    || '',
-        Division:   normDiv,
-        District:   normDist
+        Barcode:     obj.barcode,
+        Type:        obj.type      || '',
+        Brand:       obj.brand     || '',
+        Serial:      obj.serial    || '',
+        Specs:       obj.specs     || '',
+        Condition:   obj.condition || 'New',
+        Staff:       _sanitize(accName, 100),
+        Designation: accDesig,
+        Department:  obj.department || '',
+        BaseOffice:  obj.baseOffice || '',
+        Branch:      _sanitize(obj.branch, 150),
+        Division:    normDiv,
+        District:    normDist,
+        Area:        obj.area      || ''
       }];
 
-      const drafterId = obj.enrolledBy || obj.entryEmpId || '';
-      const empIdForForm = (isSpare ? drafterId : (obj.accEmpId || drafterId));
-      const formId = draftAccountabilityForm(
-        empIdForForm,
-        assetForForm,
-        'Enrollment',
-        '',
-        drafterId
-      );
+      const drafterId   = obj.enrolledBy || obj.entryEmpId || '';
+      const empIdForForm = accEmpId || drafterId;
+
+      const formId = draftAccountabilityForm(empIdForForm, assetForForm, 'Enrollment', '', drafterId);
 
       if (!formId.startsWith('Error')) {
         sh.getRange(newRowIdx, CAE.FORM_ID).setValue(formId);
@@ -2876,13 +2477,12 @@ function processAsset(obj, isAssign) {
       };
     }
 
-    // ── isAssign = true — unchanged from original processAsset() ─────────
+    // isAssign=true path (unchanged)
     const lc    = obj.lifecycle || 'Allocated';
     const asSt  = lc === 'Transfer' ? 'Transfer' : lc === 'Dispose' ? 'Disposal' : 'Active';
     const staff = _sanitize((obj.staff || '').trim(), 100);
     const stLbl = (staff && staff !== 'Unassigned') ? 'Assigned' : 'Unassigned';
     let rowIdx  = _findRow(sh, obj.barcode);
-
     if (rowIdx < 1) {
       const nr = new Array(37).fill('');
       nr[C.BARCODE      - 1] = obj.barcode;
@@ -2892,7 +2492,6 @@ function processAsset(obj, isAssign) {
       sh.appendRow(nr);
       rowIdx = sh.getLastRow();
     }
-
     _setRow(sh, rowIdx, [
       [C.LIFECYCLE,   lc],  [C.ASSET_STATUS, asSt], [C.STATUS_LABEL, stLbl],
       [C.EMP_ID,      obj.employeeId  || ''],
@@ -2909,205 +2508,49 @@ function processAsset(obj, isAssign) {
     _log('ASSIGN', obj.barcode, staff + ' | ' + lc, obj.employeeId || '');
     return { result: 'Asset assigned successfully', formId: null };
 
-  } catch(e) {
-    return { result: 'Error: ' + e.message, formId: null };
-  } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return { result: 'Error: ' + e.message, formId: null }; }
+  finally    { lock.releaseLock(); }
 }
 
-/**
- * REPLACE the existing saveTransfer() function with this version.
- *
- * Changes from original:
- *  - After writing the transfer record, creates two Draft accountability forms
- *    (Transfer-From for old holder, Transfer-To for new holder)
- *  - Returns { result, fromFormId, toFormId } so frontend can open the
- *    paired transfer review preview
- */
-function saveTransfer(t) {
-  const lock = LockService.getScriptLock();
-  try { lock.waitLock(8000); }
-  catch(e) { return { result: 'Error: System busy — try again.', fromFormId: null, toFormId: null }; }
-
+function getPendingCounts(userId, roleTier) {
   try {
-    if (!t.barcode)      return { result: 'Error: Barcode is required.', fromFormId: null, toFormId: null };
-    if (!t.toEmpId)      return { result: 'Error: Destination Employee ID is required.', fromFormId: null, toFormId: null };
-    if (!t.toStaff)      return { result: 'Error: Destination Staff Name is required.', fromFormId: null, toFormId: null };
-    if (!t.effDate)      return { result: 'Error: Transfer Date is required.', fromFormId: null, toFormId: null };
-    if (!t.transferType) return { result: 'Error: Transfer Type is required.', fromFormId: null, toFormId: null };
-
-    const sh     = _entrySheet();
-    const rowIdx = _findRow(sh, t.barcode);
-    if (rowIdx < 1) return { result: 'Error: Asset not found: ' + t.barcode, fromFormId: null, toFormId: null };
-
-    const curRow = sh.getRange(rowIdx, 1, 1, 37).getValues()[0];
-    const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
-    if (curLC === 'dispose' || curLC === 'disposal')
-      return { result: 'Error: Cannot transfer a disposed asset.', fromFormId: null, toFormId: null };
-    if (curLC === 'borrow')
-      return { result: 'Error: Return the asset first before transferring.', fromFormId: null, toFormId: null };
-
-    const nowStr     = new Date().toLocaleString('en-PH');
-    const normToDiv  = _normDiv(t.toDiv   || '');
-    const normToDist = _normDist(t.toDist || '');
-
-    // Write transfer record (unchanged)
-    _xferSheet().appendRow([
-      t.barcode, t.transferType,
-      _sanitize(t.fromStaff, 100), t.fromEmpId, t.fromDesig,
-      t.fromDiv, t.fromDist, t.fromArea, _sanitize(t.fromBranch, 150), _sanitize(t.fromRemarks, 500),
-      _sanitize(t.toStaff, 100), t.toEmpId, t.toDesig,
-      normToDiv, normToDist, t.toArea, _sanitize(t.toBranch, 150), _sanitize(t.toRemarks, 500),
-      t.effDate, t.status || 'Pending', nowStr
-    ]);
-
-    // Update Asset Entry — new holder (unchanged fields)
-    _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,    'Allocated'],  [C.ASSET_STATUS, 'Active'],
-      [C.STATUS_LABEL, 'Assigned'],   [C.EMP_ID,       t.toEmpId   || ''],
-      [C.STAFF,        _sanitize(t.toStaff, 100)],
-      [C.DESIGNATION,  t.toDesig   || ''],
-      [C.DIVISION,     normToDiv],    [C.DISTRICT,     normToDist],
-      [C.AREA,         t.toArea    || ''],
-      [C.BRANCH,       _sanitize(t.toBranch, 150)],
-      [C.EFF_DATE,     t.effDate],
-      // Reset approval to Draft pending transfer form confirmation
-      [CAE.APPROVAL_STATUS, 'Draft'],
-      [CAE.REJECTION_COMMENT, '']
-    ]);
-
-    // Build asset snapshot for both forms
-    const assetObj = {
-      Barcode:     t.barcode,
-      Type:        String(curRow[C.TYPE      - 1] || ''),
-      Brand:       String(curRow[C.BRAND     - 1] || ''),
-      Serial:      String(curRow[C.SERIAL    - 1] || ''),
-      Specs:       String(curRow[C.SPECS     - 1] || ''),
-      Condition:   String(curRow[C.CONDITION - 1] || '')
-    };
-
-    // FROM form — old holder turning over the asset
-    const fromAsset = Object.assign({}, assetObj, {
-      Staff:       t.fromStaff   || '',
-      EmpID:       t.fromEmpId   || '',
-      Designation: t.fromDesig   || '',
-      Division:    t.fromDiv     || '',
-      District:    t.fromDist    || '',
-      Branch:      t.fromBranch  || ''
-    });
-
-    // TO form — new holder receiving the asset
-    const toAsset = Object.assign({}, assetObj, {
-      Staff:       t.toStaff    || '',
-      EmpID:       t.toEmpId    || '',
-      Designation: t.toDesig    || '',
-      Division:    normToDiv,
-      District:    normToDist,
-      Branch:      t.toBranch   || ''
-    });
-
-    const drafterId = t.fromEmpId || '';
-
-    // Create From form first to get its ID for the linked pair
-    const fromFormId = draftAccountabilityForm(
-      t.fromEmpId  || '',
-      [fromAsset],
-      'Transfer-From',
-      '',           // linkedFormId — will update after To is created
-      drafterId
-    );
-
-    const toFormId = draftAccountabilityForm(
-      t.toEmpId    || '',
-      [toAsset],
-      'Transfer-To',
-      fromFormId.startsWith('Error') ? '' : fromFormId,
-      drafterId
-    );
-
-    // Update FROM form with its linked pair
-    if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
-      const afSh      = _afSheet();
-      const fromRowI  = _findAFRow(fromFormId);
-      if (fromRowI > 0) {
-        afSh.getRange(fromRowI, AF.LINKED_FORM_ID).setValue(toFormId);
-      }
+    const sh   = _afSheet();
+    const last = sh.getLastRow();
+    if (last < AF_DATA_START) return { myForms: 0, pendingReview: 0 };
+    const data = sh.getRange(AF_DATA_START, 1, last - AF_DATA_START + 1, AF_TOTAL_COLS).getValues();
+    const id   = String(userId || '').trim().toLowerCase();
+    const myForms = data.filter(r =>
+      r[AF.FORM_ID - 1] &&
+      String(r[AF.DRAFTED_BY - 1]).trim().toLowerCase() === id &&
+      ['Draft','Rejected'].indexOf(String(r[AF.STATUS - 1]).trim()) >= 0
+    ).length;
+    let pendingReview = 0;
+    if (roleTier === 'ho') {
+      pendingReview = data.filter(r => r[AF.FORM_ID - 1] && String(r[AF.STATUS - 1]).trim() === 'Pending').length;
+    } else if (roleTier === 'senior') {
+      const supervisedIds = _getSupervisedEmpIds(userId);
+      pendingReview = data.filter(r =>
+        r[AF.FORM_ID - 1] &&
+        String(r[AF.STATUS - 1]).trim() === 'Pending' &&
+        supervisedIds.indexOf(String(r[AF.DRAFTED_BY - 1]).trim().toLowerCase()) >= 0
+      ).length;
     }
+    return { myForms, pendingReview, total: myForms + pendingReview };
+  } catch(e) { return { myForms: 0, pendingReview: 0, total: 0 }; }
+}
 
-    _log('TRANSFER', t.barcode,
-      (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100),
-      t.fromEmpId || '');
-
+function getApprovalDashboardData(userId, roleTier) {
+  try {
     return {
-      result:     'Transfer saved',
-      fromFormId: fromFormId.startsWith('Error') ? null : fromFormId,
-      toFormId:   toFormId.startsWith('Error')   ? null : toFormId
+      myForms:      getMyForms(userId),
+      pendingForms: canReviewForms_server(userId, roleTier) ? getPendingForms(userId, roleTier) : [],
+      config:       getApprovalConfig()
     };
-
-  } catch(e) {
-    return { result: 'Error: ' + e.message, fromFormId: null, toFormId: null };
-  } finally {
-    lock.releaseLock();
-  }
+  } catch(e) { return { myForms: [], pendingForms: [], config: {} }; }
 }
 
-/**
- * Add ApprovalStatus to the getAllAssets() return object and
- * exclude non-Confirmed assets from normal pool status computation.
- *
- * INSTRUCTION: In the existing getAllAssets() function, inside the .map() callback,
- * find the return object and ADD these two lines:
- *
- *   ApprovalStatus: get(CAE.APPROVAL_STATUS) || 'Confirmed',
- *   FormID:         get(CAE.FORM_ID)         || '',
- *
- * AND modify the _computeStatus call to exclude draft/pending/rejected:
- *
- *   const approvalStatus = get(CAE.APPROVAL_STATUS) || 'Confirmed';
- *   const grandfathered  = String(get(CAE.GRANDFATHERED)).toLowerCase() === 'true';
- *   // Non-confirmed assets are invisible to normal pools
- *   const effectiveStatus = (approvalStatus === 'Confirmed' || grandfathered)
- *     ? _computeStatus(get(C.LIFECYCLE), get(C.ASSET_STATUS), get(C.EMP_ID))
- *     : 'pending-approval';
- *
- * Then use effectiveStatus instead of the direct _computeStatus call.
- *
- * This function documents the change — actual edit is in getAllAssets().
- */
-function _getAllAssetsApprovalPatch() {
-  // Documentation only — see instructions above for exact edit location
-}
+function canReviewForms_server(userId, roleTier) { return roleTier === 'senior' || roleTier === 'ho'; }
 
-/**
- * Add pendingCounts to the getInitialData() return object.
- *
- * INSTRUCTION: In the existing getInitialData() function, add:
- *
- *   pendingCounts: getPendingCounts(
- *     <pass in userId from session>,
- *     <pass in roleTier from session>
- *   )
- *
- * Since getInitialData() doesn't receive user params currently,
- * the frontend should call getPendingCounts() separately on login:
- *   google.script.run.getPendingCounts(SESSION.username, SESSION.roleTier)
- *
- * This function documents the change.
- */
-function _getInitialDataApprovalPatch() {
-  // Documentation only — see instructions above
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  INTERNAL UTILITY FUNCTIONS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Finds the row index of a form in AccountabilityForms by FormID.
- * Returns -1 if not found.
- */
 function _findAFRow(formId) {
   try {
     const sh   = _afSheet();
@@ -3118,15 +2561,9 @@ function _findAFRow(formId) {
       if (String(ids[i][0]).trim() === String(formId).trim()) return i + AF_DATA_START;
     }
     return -1;
-  } catch(e) {
-    return -1;
-  }
+  } catch(e) { return -1; }
 }
 
-/**
- * Finds the row in FormRateLimits matching formId + drafterId.
- * Returns the data array or null.
- */
 function _findRLRow(formId, drafterId) {
   try {
     const sh   = _rlSheet();
@@ -3136,20 +2573,12 @@ function _findRLRow(formId, drafterId) {
     const fid  = String(formId || '').trim();
     const did  = String(drafterId || '').trim().toLowerCase();
     for (let i = 0; i < data.length; i++) {
-      if (String(data[i][0]).trim() === fid &&
-          String(data[i][1]).trim().toLowerCase() === did) {
-        return data[i];
-      }
+      if (String(data[i][0]).trim() === fid && String(data[i][1]).trim().toLowerCase() === did) return data[i];
     }
     return null;
-  } catch(e) {
-    return null;
-  }
+  } catch(e) { return null; }
 }
 
-/**
- * Returns the sheet row index of a rate limit record.
- */
 function _findRLRowIdx(formId, drafterId) {
   try {
     const sh   = _rlSheet();
@@ -3159,20 +2588,12 @@ function _findRLRowIdx(formId, drafterId) {
     const fid = String(formId || '').trim();
     const did = String(drafterId || '').trim().toLowerCase();
     for (let i = 0; i < ids.length; i++) {
-      if (String(ids[i][0]).trim() === fid &&
-          String(ids[i][1]).trim().toLowerCase() === did) {
-        return i + RL_DATA_START;
-      }
+      if (String(ids[i][0]).trim() === fid && String(ids[i][1]).trim().toLowerCase() === did) return i + RL_DATA_START;
     }
     return -1;
-  } catch(e) {
-    return -1;
-  }
+  } catch(e) { return -1; }
 }
 
-/**
- * Maps a raw AccountabilityForms sheet row array to a clean JS object.
- */
 function _mapAfRow(row) {
   return {
     formId:           String(row[AF.FORM_ID        - 1] || ''),
@@ -3197,19 +2618,13 @@ function _mapAfRow(row) {
   };
 }
 
-/**
- * Updates ApprovalStatus and RejectionComment on all Asset Entry rows
- * linked to a given FormID.
- */
 function _updateAssetApprovalStatus(formId, newStatus, rejectionComment) {
   try {
     const sh   = _entrySheet();
     const last = sh.getLastRow();
     if (last < AE_DATA_START) return;
-
     const formIds = sh.getRange(AE_DATA_START, CAE.FORM_ID, last - AE_DATA_START + 1, 1).getValues();
     const fid     = String(formId).trim();
-
     for (let i = 0; i < formIds.length; i++) {
       if (String(formIds[i][0]).trim() === fid) {
         const row = i + AE_DATA_START;
@@ -3217,52 +2632,35 @@ function _updateAssetApprovalStatus(formId, newStatus, rejectionComment) {
         sh.getRange(row, CAE.REJECTION_COMMENT).setValue(rejectionComment || '');
       }
     }
-  } catch(e) {
-    Logger.log('_updateAssetApprovalStatus error: ' + e.message);
-  }
+  } catch(e) { Logger.log('_updateAssetApprovalStatus error: ' + e.message); }
 }
 
-/**
- * Returns an array of Employee IDs directly supervised by supervisorId.
- * Reads from Org Structure sheet — col D (FE ID), col G (Supervisor ID).
- */
 function _getSupervisedEmpIds(supervisorId) {
   try {
     const sh   = _ss().getSheetByName(SH_ORG);
     if (!sh || sh.getLastRow() < 2) return [];
     const last  = sh.getLastRow();
-    const data  = sh.getRange(2, 4, last - 1, 4).getValues(); // cols D-G
+    const data  = sh.getRange(2, 4, last - 1, 4).getValues();
     const supId = String(supervisorId || '').trim().toLowerCase();
     const ids   = [];
-
     data.forEach(r => {
-      // col G (index 3 in this range) is Supervisor ID
       if (String(r[3] || '').trim().toLowerCase() === supId) {
         const feId = String(r[0] || '').trim().toLowerCase();
         if (feId && ids.indexOf(feId) < 0) ids.push(feId);
       }
     });
     return ids;
-  } catch(e) {
-    return [];
-  }
+  } catch(e) { return []; }
 }
 
-/**
- * Convenience wrapper to fetch approval dashboard data in one call.
- */
-function getApprovalDashboardData(userId, roleTier) {
+function getUserList() {
   try {
-    return {
-      myForms:      getMyForms(userId),
-      pendingForms: canReviewForms_server(userId, roleTier) ? getPendingForms(userId, roleTier) : [],
-      config:       getApprovalConfig()
-    };
-  } catch(e) {
-    return { myForms: [], pendingForms: [], config: {} };
-  }
-}
-
-function canReviewForms_server(userId, roleTier) {
-  return roleTier === 'senior' || roleTier === 'ho';
+    const sh   = _ss().getSheetByName(SH_USERS);
+    if (!sh) return [];
+    const last = sh.getLastRow();
+    if (last < 2) return [];
+    return sh.getRange(2, 1, last - 1, 9)
+      .getValues().filter(r => String(r[2] || '').trim())
+      .map(r => r.map(v => String(v || '')));
+  } catch(e) { return []; }
 }

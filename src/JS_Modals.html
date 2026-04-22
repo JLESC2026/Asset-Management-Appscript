@@ -1,7 +1,36 @@
 <script>
 // ═══════════════════════════════════════════════════════════
-//  JS_Modals.html  — All modal open / submit / action logic
+//  JS_Modals.html  (v6.1) — All modal open / submit / action logic
+//  Changes:
+//    • getEmployeeById now returns area — all lookup modals use it
+//    • All auto-filled fields are read-only (except EmpID)
+//    • Enrollment Step 2 has Accountable Person section (separate from inputter)
+//    • allocateAsset() backend now returns { result, formId } — handled here
+//    • saveTransfer() returns { result, fromFormId, toFormId } — handled here
+//    • openBulkTransferModal() called from Staff Assets modal footer
 // ═══════════════════════════════════════════════════════════
+
+// ─── SHARED LOOKUP HELPER ────────────────────────────────────────────────────
+// Makes an input read-only after lookup. Pass '' to clear/unlock.
+function _setReadOnly(id, value) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.value    = (value !== undefined && value !== null) ? String(value) : '';
+  el.readOnly = true;
+  el.style.opacity    = '0.65';
+  el.style.cursor     = 'not-allowed';
+  el.style.background = 'var(--bg4)';
+}
+
+function _clearReadOnly(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.value    = '';
+  el.readOnly = false;
+  el.style.opacity    = '';
+  el.style.cursor     = '';
+  el.style.background = '';
+}
 
 // ─── VIEW ASSET ──────────────────────────────────────────────────────────────
 function viewAsset(barcode) {
@@ -58,7 +87,6 @@ function viewAsset(barcode) {
       ${_vf('Remarks', a.Remarks, true)}
     </div>`;
 
-  // Footer actions
   const footer = document.getElementById('viewModalFooter');
   if (!a.hasRealBarcode) {
     footer.innerHTML = `
@@ -112,53 +140,26 @@ function viewAsset(barcode) {
 function openEditAssetModal(barcode) {
   const a = ASSETS.find(x => x.Barcode === barcode);
   if (!a) { toast('Asset not found', 'err'); return; }
-
   document.getElementById('viewModalBody').innerHTML = `
-    <div style="padding:10px 14px;background:rgba(59,130,246,.06);
-      border:1px solid rgba(59,130,246,.2);border-radius:8px;
-      font-size:.8rem;color:#60a5fa;margin-bottom:16px">
-      ✏ Editing: <strong>${esc(a.Barcode)}</strong> — 
-      only basic details can be changed here. 
-      Lifecycle changes use the action buttons.
+    <div style="padding:10px 14px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:8px;font-size:.8rem;color:#60a5fa;margin-bottom:16px">
+      ✏ Editing: <strong>${esc(a.Barcode)}</strong> — only basic details can be changed here.
     </div>
     <div class="form-grid" style="gap:12px">
-      <div class="field">
-        <label>Brand</label>
-        <input type="text" id="editBrand" value="${esc(a.Brand || '')}"/>
-      </div>
-      <div class="field">
-        <label>Serial No.</label>
-        <input type="text" id="editSerial" value="${esc(a.Serial || '')}"/>
-      </div>
-      <div class="field">
-        <label>Condition</label>
+      <div class="field"><label>Brand</label><input type="text" id="editBrand" value="${esc(a.Brand || '')}"/></div>
+      <div class="field"><label>Serial No.</label><input type="text" id="editSerial" value="${esc(a.Serial || '')}"/></div>
+      <div class="field"><label>Condition</label>
         <select id="editCondition">
-          ${['New','Good','Damage','Repair'].map(c =>
-            `<option value="${c}"${a.Condition===c?' selected':''}>${c}</option>`
-          ).join('')}
+          ${['New','Good','Damage','Repair'].map(c=>`<option value="${c}"${a.Condition===c?' selected':''}>${c}</option>`).join('')}
         </select>
       </div>
-      <div class="field">
-        <label>Purchase Date</label>
-        <input type="date" id="editPurchDate" value="${a.PurchDate || ''}"/>
-      </div>
-      <div class="field form-span2">
-        <label>Specifications / Model</label>
-        <input type="text" id="editSpecs" value="${esc(a.Specs || '')}"/>
-      </div>
-      <div class="field form-span2">
-        <label>Remarks</label>
-        <textarea id="editRemarks" style="min-height:60px">${esc(a.Remarks || '')}</textarea>
-      </div>
+      <div class="field"><label>Purchase Date</label><input type="date" id="editPurchDate" value="${a.PurchDate || ''}"/></div>
+      <div class="field form-span2"><label>Specifications / Model</label><input type="text" id="editSpecs" value="${esc(a.Specs || '')}"/></div>
+      <div class="field form-span2"><label>Remarks</label><textarea id="editRemarks" style="min-height:60px">${esc(a.Remarks || '')}</textarea></div>
     </div>`;
-
   document.getElementById('viewModalFooter').innerHTML = `
-    <button class="btn btn-secondary" 
-      onclick="viewAsset('${esc(barcode)}')">← Cancel Edit</button>
+    <button class="btn btn-secondary" onclick="viewAsset('${esc(barcode)}')">← Cancel Edit</button>
     <div style="flex:1"></div>
-    <button class="btn btn-primary" onclick="submitEditAsset('${esc(barcode)}')">
-      Save Changes
-    </button>`;
+    <button class="btn btn-primary" onclick="submitEditAsset('${esc(barcode)}')">Save Changes</button>`;
 }
 
 function submitEditAsset(barcode) {
@@ -168,15 +169,9 @@ function submitEditAsset(barcode) {
     .withSuccessHandler(function(r) {
       _unlockBtn(btn);
       toast(r, r.startsWith('Error') ? 'err' : 'ok');
-      if (!r.startsWith('Error')) {
-        loadData();
-        setTimeout(() => viewAsset(barcode), 800);
-      }
+      if (!r.startsWith('Error')) { loadData(); setTimeout(() => viewAsset(barcode), 800); }
     })
-    .withFailureHandler(function(err) {
-      _unlockBtn(btn);
-      toast(err.message, 'err');
-    })
+    .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
     .updateAssetDetails(barcode, {
       brand:     document.getElementById('editBrand').value.trim(),
       serial:    document.getElementById('editSerial').value.trim(),
@@ -200,14 +195,10 @@ function switchViewTab(tab) {
   document.getElementById('vmt-xfer').classList.toggle('active', tab === 'xfer');
   document.getElementById('viewModalBody').style.display     = tab === 'details' ? '' : 'none';
   document.getElementById('viewModalXferBody').style.display = tab === 'xfer'    ? '' : 'none';
-
   if (tab === 'xfer') {
     const history = XFERS.filter(r => String(r[0]) === _viewBarcode);
     const body = document.getElementById('viewModalXferBody');
-    if (!history.length) {
-      body.innerHTML = '<div class="xfer-empty">No transfer history for this asset.</div>';
-      return;
-    }
+    if (!history.length) { body.innerHTML = '<div class="xfer-empty">No transfer history for this asset.</div>'; return; }
     body.innerHTML = '<div class="xfer-tl">' + history.map((r, i) => `
       <div class="xfer-item">
         <div class="xfer-dot ${i===0?'xd-start':''}"></div>
@@ -217,8 +208,7 @@ function switchViewTab(tab) {
           <span class="xfer-to">${esc(r[10]||'—')}</span>
         </div>
         <div class="xfer-meta">
-          <span>📋 ${esc(r[1]||'—')}</span>
-          <span>📅 ${fmtDate(r[18])||'—'}</span>
+          <span>📋 ${esc(r[1]||'—')}</span><span>📅 ${fmtDate(r[18])||'—'}</span>
           <span class="badge badge-${r[19]==='Completed'?'returned':'transfer'}" style="font-size:.68rem">${esc(r[19]||'Pending')}</span>
         </div>
       </div>`).join('') + '</div>';
@@ -237,11 +227,8 @@ function showBarcode(barcode) {
   lbl.textContent = barcode;
   lbl.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:.9rem;font-weight:600;letter-spacing:.05em;color:var(--text);margin-top:8px';
   body.appendChild(lbl);
-  try {
-    JsBarcode('#bcSvg', barcode, { format:'CODE128', displayValue:false, width:2, height:60, margin:10, background:'#ffffff' });
-  } catch(e) {
-    body.innerHTML = '<div style="color:var(--text3);padding:24px">Could not render barcode</div>';
-  }
+  try { JsBarcode('#bcSvg', barcode, { format:'CODE128', displayValue:false, width:2, height:60, margin:10, background:'#ffffff' }); }
+  catch(e) { body.innerHTML = '<div style="color:var(--text3);padding:24px">Could not render barcode</div>'; }
   openModal('barcodeModal');
 }
 
@@ -260,8 +247,7 @@ function openAddAssetModal() {
   enrollStep = 1;
   _syncEnrollStepper();
 
-  const ids = ['fSerial','fRemarks'];
-  ids.forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  ['fSerial','fRemarks'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   const bcField = document.getElementById('fBarcode');
   if (bcField) { bcField.value = ''; bcField.dataset.autoGenerated = 'false'; }
   document.getElementById('fCondition').value = 'New';
@@ -272,11 +258,15 @@ function openAddAssetModal() {
   document.getElementById('fFieldDetails').style.display = 'none';
   document.getElementById('laptopSpecsSection').style.display = 'none';
   document.getElementById('laptopSpecsRows').innerHTML = '';
+
+  // Inputter (read-only)
   document.getElementById('fEntryEmpId').value = SESSION ? SESSION.username : '';
   document.getElementById('fEntryName').value  = SESSION ? SESSION.name     : '';
   document.getElementById('enrolledByLabel').textContent = SESSION ? SESSION.name : '—';
 
-  // Reset category/brand/model
+  // Accountable person — reset to empty, unlocked
+  _clearAccountablePerson();
+
   onCategoryChange && onCategoryChange();
   document.getElementById('fCategory').value = '';
   document.getElementById('fBrand').value    = '';
@@ -284,11 +274,54 @@ function openAddAssetModal() {
   document.getElementById('fModel').value    = '';
   document.getElementById('fModel').disabled = true;
 
-  // Populate division
   _fillDivSelect('fDivision');
   document.getElementById('fDistrict').innerHTML = '<option value="">Select…</option>';
 
   openModal('addAssetModal');
+}
+
+// Clear the accountable person lookup fields to editable/empty
+function _clearAccountablePerson() {
+  _clearReadOnly('fAccName');
+  _clearReadOnly('fAccDesig');
+  var empIdEl = document.getElementById('fAccEmpId');
+  if (empIdEl) empIdEl.value = '';
+  var msgEl = document.getElementById('accLookupMsg');
+  if (msgEl) msgEl.style.display = 'none';
+}
+
+var _accEmpTimer = null;
+function onAccEmpInput() {
+  clearTimeout(_accEmpTimer);
+  var id = (document.getElementById('fAccEmpId') || {}).value || '';
+  id = id.trim();
+  if (id.length < 3) { _clearAccountablePerson(); document.getElementById('fAccEmpId').value = id; return; }
+  _accEmpTimer = setTimeout(function() { _lookupAccountablePerson(id); }, 420);
+}
+
+function _lookupAccountablePerson(id) {
+  var spin = document.getElementById('accLookupSpinner');
+  if (spin) spin.style.display = 'block';
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (spin) spin.style.display = 'none';
+      var msg = document.getElementById('accLookupMsg');
+      if (!r.ok) {
+        _clearAccountablePerson();
+        document.getElementById('fAccEmpId').value = id;
+        if (msg) { msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent = r.error; }
+        return;
+      }
+      if (msg) msg.style.display = 'none';
+      // Only fill Name and Designation — location stays manual
+      _setReadOnly('fAccName',  r.name     || ' - ');
+      _setReadOnly('fAccDesig', r.position || ' - ');
+    })
+    .withFailureHandler(function(err) {
+      if (spin) spin.style.display = 'none';
+      toast(err.message, 'err');
+    })
+    .getEmployeeById(id);
 }
 
 function _syncEnrollStepper() {
@@ -299,14 +332,9 @@ function _syncEnrollStepper() {
     if (i < enrollStep)  ind.classList.add('done');
     if (i === enrollStep) ind.classList.add('active');
   });
-  const labels = [
-    'Step 1 of 3 — Asset Information',
-    'Step 2 of 3 — Location & Purchase',
-    'Step 3 of 3 — Confirm & Enroll'
-  ];
+  const labels = ['Step 1 of 3 — Asset Information','Step 2 of 3 — Location & Purchase','Step 3 of 3 — Confirm & Enroll'];
   const lbl = document.getElementById('enrollStepLabel');
   if (lbl) lbl.textContent = labels[enrollStep-1] || '';
-
   document.getElementById('enrollStep1').style.display = enrollStep===1 ? '' : 'none';
   document.getElementById('enrollStep2').style.display = enrollStep===2 ? '' : 'none';
   document.getElementById('enrollStep3').style.display = enrollStep===3 ? '' : 'none';
@@ -314,64 +342,32 @@ function _syncEnrollStepper() {
   document.getElementById('enrollNextBtn').textContent = enrollStep===3 ? 'Enroll Asset' : 'Next →';
 }
 
-function enrollBack() {
-  if (enrollStep > 1) { enrollStep--; _syncEnrollStepper(); }
-}
+function enrollBack() { if (enrollStep > 1) { enrollStep--; _syncEnrollStepper(); } }
 
 function enrollNext() {
   if (enrollStep === 1) {
     if (!document.getElementById('fCategory').value) { toast('Category is required', 'warn'); return; }
     const bcVal = document.getElementById('fBarcode').value.trim();
-    if (!bcVal || bcVal === 'Generating…') { 
-      toast('Please wait — barcode is being generated, or click Auto to retry', 'warn'); 
-      return; 
-    }
-    // Also check it matches expected format
+    if (!bcVal || bcVal === 'Generating…') { toast('Please wait — barcode is being generated, or click Auto to retry', 'warn'); return; }
     if (!/^[A-Z]{2,4}-\d{4}-\d{3,4}$/.test(bcVal)) {
-      const proceed = confirm(
-        'The barcode "' + bcVal + '" does not match the standard format (e.g. LTP-2025-001).\n\n'
-        + 'Proceed anyway? (Only do this if you are entering a custom barcode.)'
-      );
+      const proceed = confirm('The barcode "' + bcVal + '" does not match the standard format.\n\nProceed anyway?');
       if (!proceed) return;
     }
     enrollStep = 2; _syncEnrollStepper();
   } else if (enrollStep === 2) {
     const fieldType = document.getElementById('fFieldType').value;
-    if (!fieldType) {
-      toast('Please select Field / Office type', 'warn');
-      return;
-    }
-
+    if (!fieldType) { toast('Please select Field / Office type', 'warn'); return; }
     if (fieldType === 'Field') {
-      const div  = document.getElementById('fDivision').value;
-      const dist = document.getElementById('fDistrict').value;
-      if (!div) {
-        toast('Division is required for Field assets', 'warn');
-        return;
-      }
-      if (!dist) {
-        toast('District is required for Field assets', 'warn');
-        return;
-      }
+      if (!document.getElementById('fDivision').value) { toast('Division is required for Field assets', 'warn'); return; }
+      if (!document.getElementById('fDistrict').value) { toast('District is required for Field assets', 'warn'); return; }
     }
-
     const wTerm = parseInt(document.getElementById('fWTerm').value, 10);
-    if (isNaN(wTerm) || wTerm < 0 || wTerm > 10) {
-      toast('Warranty term must be between 0 and 10 years', 'warn');
-      return;
-    }
-
-    const purchDate = document.getElementById('fPurchDate').value;
-    if (!purchDate) {
-      const proceed = confirm(
-        'No Purchase Date entered. Assets without a purchase date ' +
-        'cannot have warranty tracking. Continue anyway?'
-      );
+    if (isNaN(wTerm) || wTerm < 0 || wTerm > 10) { toast('Warranty term must be between 0 and 10 years', 'warn'); return; }
+    if (!document.getElementById('fPurchDate').value) {
+      const proceed = confirm('No Purchase Date entered. Assets without a purchase date cannot have warranty tracking. Continue anyway?');
       if (!proceed) return;
     }
-
-    enrollStep = 3;
-    _buildEnrollConfirm(); _syncEnrollStepper();
+    enrollStep = 3; _buildEnrollConfirm(); _syncEnrollStepper();
   } else {
     _submitEnroll();
   }
@@ -381,31 +377,31 @@ function _buildEnrollConfirm() {
   function getSelectLabel(id) {
     var el = document.getElementById(id);
     if (!el) return '—';
-    return el.selectedOptions && el.selectedOptions[0]
-      ? el.selectedOptions[0].text
-      : (el.value || '—');
+    return el.selectedOptions && el.selectedOptions[0] ? el.selectedOptions[0].text : (el.value || '—');
   }
-  function getVal(id) {
-    var el = document.getElementById(id);
-    return el ? (el.value || '—') : '—';
-  }
+  function getVal(id) { var el = document.getElementById(id); return el ? (el.value || '—') : '—'; }
+
+  var accName  = getVal('fAccName');
+  var accEmpId = getVal('fAccEmpId');
+  var accDesig = getVal('fAccDesig');
 
   const rows = [
     ['Category',      getSelectLabel('fCategory')],
     ['Brand',         getSelectLabel('fBrand')],
-    ['Model / Specs', getSelectLabel('fModel') !== '—' ? getSelectLabel('fModel') : getVal('fSerial')],
     ['Serial No.',    getVal('fSerial')],
     ['Barcode',       getVal('fBarcode')],
     ['Condition',     getSelectLabel('fCondition')],
     ['Purch. Date',   getVal('fPurchDate') || '—'],
     ['Warranty',      (getVal('fWTerm') || '0') + ' year(s)'],
-    ['Warranty Exp.', getVal('fWVal') || '—'],
-    ['Supplier',      getSelectLabel('fSupplier')],
     ['Location Type', getSelectLabel('fFieldType')],
     ['Division',      getSelectLabel('fDivision')],
     ['District',      getSelectLabel('fDistrict')],
     ['Area',          getVal('fArea')],
     ['Branch',        getVal('fBranch')],
+    ['─── Accountable Person ───', ''],
+    ['Employee ID',   accEmpId !== '—' ? accEmpId : '(same as inputter)'],
+    ['Name',          accName  !== '—' ? accName  : (SESSION ? SESSION.name : '—')],
+    ['Designation',   accDesig !== '—' ? accDesig : '—'],
     ['Remarks',       getVal('fRemarks')],
   ];
   document.getElementById('enrollConfirmBody').innerHTML = `
@@ -414,10 +410,14 @@ function _buildEnrollConfirm() {
       ✓ Review details below. Asset will be added to the <strong>Spare Pool</strong>.
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      ${rows.map(([l,v])=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px">
-        <div style="font-size:.68rem;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em">${esc(l)}</div>
-        <div style="font-size:.86rem;color:var(--text);margin-top:2px">${esc(v)}</div>
-      </div>`).join('')}
+      ${rows.map(([l,v])=>
+        l.startsWith('─') ?
+        `<div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:6px;font-size:.7rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">${esc(l)}</div>` :
+        `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px">
+          <div style="font-size:.68rem;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em">${esc(l)}</div>
+          <div style="font-size:.86rem;color:var(--text);margin-top:2px">${esc(v)}</div>
+        </div>`
+      ).join('')}
     </div>`;
 }
 
@@ -432,9 +432,22 @@ function _submitEnroll() {
     if (t && v) specs.push(t + ': ' + v);
   });
 
+  var accEmpId = (document.getElementById('fAccEmpId') || {}).value || '';
+  var accName  = (document.getElementById('fAccName')  || {}).value || '';
+  var accDesig = (document.getElementById('fAccDesig') || {}).value || '';
+  // If accountable person not set, fall back to inputter
+  if (!accEmpId.trim()) {
+    accEmpId = SESSION ? SESSION.username : '';
+    accName  = SESSION ? SESSION.name     : '';
+  }
+
   var obj = {
     entryEmpId:   document.getElementById('fEntryEmpId').value,
     entryName:    document.getElementById('fEntryName').value,
+    // Accountable person (may differ from inputter)
+    accEmpId:     accEmpId.trim(),
+    accName:      accName.trim(),
+    accDesig:     accDesig.trim(),
     barcode:      document.getElementById('fBarcode').value.trim(),
     type:         document.getElementById('fCategory').value,
     brand:        document.getElementById('fBrand').value    || '',
@@ -445,6 +458,7 @@ function _submitEnroll() {
     wTerm:        document.getElementById('fWTerm').value,
     wValidity:    document.getElementById('fWVal').value,
     supplier:     document.getElementById('fSupplier').value || '',
+    fieldType:    document.getElementById('fFieldType').value || '',
     division:     document.getElementById('fDivision').value || '',
     district:     document.getElementById('fDistrict').value || '',
     area:         document.getElementById('fArea').value     || '',
@@ -457,18 +471,16 @@ function _submitEnroll() {
   google.script.run
     .withSuccessHandler(function(r) {
       _unlockBtn(btn);
-      var msg    = typeof r === 'string' ? r : (r.message || 'Asset created.');
+      var msg    = typeof r === 'string' ? r : (r.result || r.message || 'Asset created.');
       var formId = r && r.formId ? r.formId : null;
       var isErr  = typeof msg === 'string' && msg.startsWith('Error');
       toast(msg, isErr ? 'err' : 'ok');
       if (!isErr) {
         closeModal('addAssetModal');
         loadData();
-        // Navigate to For Approval page — draft card will be waiting
         _loadApprovalData(function() {
           switchPage('for-approval');
           if (formId) {
-            // Briefly highlight the new draft card after render
             setTimeout(function() {
               var card = document.getElementById('acard-' + formId);
               if (card) {
@@ -482,111 +494,44 @@ function _submitEnroll() {
         });
       }
     })
-    .withFailureHandler(function(err) {
-      _unlockBtn(btn);
-      toast(err.message, 'err');
-    })
+    .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
     .processAsset(obj, false);
-}
-
-/**
- * Called from Staff Asset Modal footer.
- * Checks that all assets for the staff member have confirmed
- * accountability forms before opening the PDF popup.
- */
-function _printAccountabilityFormGated(empId) {
-  var assets = ASSETS.filter(function(a) {
-    return (a.EmpID || '').trim().toLowerCase() === String(empId || '').trim().toLowerCase()
-      && ['allocated', 'transfer'].indexOf(a.status) >= 0;
-  });
-
-  if (!_checkPrintGate(assets)) {
-    // Gate failed — offer to navigate to For Approval page
-    if (confirm('Some assets are pending supervisor approval.\n\nGo to the For Approval page to submit and track your forms?')) {
-      closeModal('staffAssetModal');
-      _loadApprovalData(function() { switchPage('for-approval'); });
-    }
-    return;
-  }
-  openAccountabilityFormByEmp(empId);
-}
-
-/**
- * Called from Equipment Branch Modal footer.
- * Checks that all assets in the branch have confirmed forms.
- */
-function _printAccountabilityFormFromBranchGated(idx) {
-  var rec = _eqBranchReg[idx];
-  if (!rec || !rec.assets || !rec.assets.length) {
-    toast('No assets to print.', 'warn');
-    return;
-  }
-
-  if (!_checkPrintGate(rec.assets)) {
-    if (confirm('Some assets in this branch are pending supervisor approval.\n\nGo to the For Approval page?')) {
-      closeModal('equipmentBranchModal');
-      _loadApprovalData(function() { switchPage('for-approval'); });
-    }
-    return;
-  }
-  openAccountabilityFormFromBranch(idx);
 }
 
 function genBarcode() {
   const cat = document.getElementById('fCategory').value;
   if (!cat) { toast('Select a category first', 'warn'); return; }
-
   const PFX = {
-    'Laptop':'LTP','Laptop Adaptor':'LAD','CPU':'CPU',
-    'Monitor':'MTR','Printer':'PTR','Scanner':'SCN',
-    'Scansnap':'SCN','Keyboard':'KBD','Mouse':'MSE',
+    'Laptop':'LTP','Laptop Adaptor':'LAD','CPU':'CPU','Monitor':'MTR','Printer':'PTR',
+    'Scanner':'SCN','Scansnap':'SCN','Keyboard':'KBD','Mouse':'MSE',
     'UPS':'UPS','Camera':'CAM','Speaker':'SPR','External Drive':'EXD'
   };
   const pre = PFX[cat] || 'AST';
   const yr  = new Date().getFullYear();
   const bcField = document.getElementById('fBarcode');
-
-  // ── Step 1: immediately show prefix+year, animate sequence loading ──
   bcField.value = pre + '-' + yr + '-···';
-  bcField.dataset.autoGenerated = 'false'; // lock until resolved
+  bcField.dataset.autoGenerated = 'false';
   bcField.style.color = 'var(--text3)';
-
-  // Animated dots cycling while waiting
   const frames = ['···', '—··', '·—·', '··—'];
   let fi = 0;
   const tick = setInterval(() => {
     fi = (fi + 1) % frames.length;
-    // Only update if still in loading state
     if (bcField.value.endsWith(frames[(fi + frames.length - 1) % frames.length]) ||
         bcField.value.endsWith('···')) {
       bcField.value = pre + '-' + yr + '-' + frames[fi];
-    } else {
-      clearInterval(tick);
-    }
+    } else { clearInterval(tick); }
   }, 180);
-
   google.script.run
     .withSuccessHandler(bc => {
       clearInterval(tick);
-      if (bc.startsWith('Error')) {
-        bcField.value = '';
-        bcField.style.color = '';
-        toast(bc, 'err');
-        return;
-      }
-      // Animate the final value appearing
+      if (bc.startsWith('Error')) { bcField.value = ''; bcField.style.color = ''; toast(bc, 'err'); return; }
       bcField.style.transition = 'color .25s';
       bcField.style.color = 'var(--accent2)';
       bcField.value = bc;
       bcField.dataset.autoGenerated = 'true';
       setTimeout(() => { bcField.style.color = ''; bcField.style.transition = ''; }, 600);
     })
-    .withFailureHandler(err => {
-      clearInterval(tick);
-      bcField.value = '';
-      bcField.style.color = '';
-      toast(err.message, 'err');
-    })
+    .withFailureHandler(err => { clearInterval(tick); bcField.value = ''; bcField.style.color = ''; toast(err.message, 'err'); })
     .generateNextBarcode(cat);
 }
 
@@ -595,23 +540,18 @@ function onCategoryChange() {
   const brandSel = document.getElementById('fBrand');
   const modelSel = document.getElementById('fModel');
   const bcField  = document.getElementById('fBarcode');
-
   brandSel.innerHTML = '<option value="">Select brand…</option>';
   modelSel.innerHTML = '<option value="">Select model…</option>';
   brandSel.disabled  = !cat;
   modelSel.disabled  = true;
-
   if (cat) {
     const brands = (DROPDOWN_DATA.brands || {})[cat] || [];
     brands.forEach(function(b) { brandSel.appendChild(new Option(b, b)); });
-
-    // FIX: always regenerate when category changes — don't check old prefix
     genBarcode();
   } else {
     bcField.value = '';
     bcField.dataset.autoGenerated = 'false';
   }
-
   const isLaptop = (cat || '').toLowerCase() === 'laptop';
   document.getElementById('laptopSpecsSection').style.display = isLaptop ? '' : 'none';
   if (isLaptop && !document.querySelectorAll('#laptopSpecsRows .spec-row').length) addSpecRow();
@@ -657,15 +597,10 @@ function stepWarranty(delta) {
 
 function onFieldTypeChange() {
   const val = document.getElementById('fFieldType').value;
-  const detailsEl = document.getElementById('fFieldDetails');
-
-  if (val === 'Field') {
-    detailsEl.style.display = '';
-  } else {
-    detailsEl.style.display = 'none';
+  document.getElementById('fFieldDetails').style.display = val === 'Field' ? '' : 'none';
+  if (val !== 'Field') {
     ['fDivision', 'fDistrict', 'fArea', 'fBranch'].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.value = '';
+      var el = document.getElementById(id); if (el) el.value = '';
     });
     var distEl = document.getElementById('fDistrict');
     if (distEl) distEl.innerHTML = '<option value="">Select…</option>';
@@ -688,14 +623,24 @@ function openAllocateModal(barcode) {
   document.getElementById('allocAssetLabel').textContent    = (a.Type||'') + (a.Brand?' — '+a.Brand:'');
   document.getElementById('allocAssetBarcode').textContent  = barcode;
   document.getElementById('allocAssetCondition').textContent= a.Condition || '—';
-  ['alEmpId','alStaff','alDesig','alBranch','alRemarks'].forEach(id => {
-    const el = document.getElementById(id); if(el) el.value = '';
-  });
-  document.getElementById('alEffDate').value = todayISO();
 
-  _fillDivSelect('alDiv');
-  document.getElementById('alDist').innerHTML = '<option value="">Select…</option>';
-  document.getElementById('alArea').innerHTML = '<option value="">Select…</option>';
+  // Reset EmpID writable, clear read-only fields
+  var empEl = document.getElementById('alEmpId');
+  if (empEl) { empEl.value = ''; empEl.readOnly = false; empEl.style.opacity=''; empEl.style.cursor=''; empEl.style.background=''; }
+  _clearReadOnly('alStaff');
+  _clearReadOnly('alDesig');
+  _clearReadOnly('alDiv');
+  _clearReadOnly('alDist');
+  _clearReadOnly('alArea');
+  _clearReadOnly('alBranch');
+  // Make them actually clearReadOnly means unlocked — but after lookup they lock
+  ['alStaff','alDesig','alDiv','alDist','alArea','alBranch'].forEach(id => {
+    var el = document.getElementById(id);
+    if (el) { el.readOnly = false; el.style.opacity=''; el.style.cursor=''; el.style.background=''; el.value=''; }
+  });
+
+  document.getElementById('alEffDate').value = todayISO();
+  document.getElementById('alRemarks') && (document.getElementById('alRemarks').value = '');
 
   const msg = document.getElementById('allocLookupMsg');
   if (msg) msg.style.display = 'none';
@@ -722,26 +667,13 @@ function _lookupEmpAlloc(id) {
         return;
       }
       if (msg) msg.style.display = 'none';
-      document.getElementById('alStaff').value  = r.name     || '';
-      document.getElementById('alDesig').value  = r.position || '';
-      document.getElementById('alBranch').value = r.branch   || '';
-
-      const divSel = document.getElementById('alDiv');
-      if (r.division) {
-        for (let i=0;i<divSel.options.length;i++) {
-          if (divSel.options[i].value === r.division) { divSel.selectedIndex=i; break; }
-        }
-        onAllocDivisionChange();
-        setTimeout(() => {
-          const distSel = document.getElementById('alDist');
-          if (r.district) {
-            for (let i=0;i<distSel.options.length;i++) {
-              if (distSel.options[i].value === r.district) { distSel.selectedIndex=i; break; }
-            }
-            onAllocDistrictChange();
-          }
-        }, 150);
-      }
+      // All fields read-only after lookup. Display order: Division | District | Area | Base Office
+      _setReadOnly('alStaff',  r.name        || ' - ');
+      _setReadOnly('alDesig',  r.position    || ' - ');
+      _setReadOnly('alDiv',    r.division    || ' - ');
+      _setReadOnly('alDist',   r.district    || ' - ');
+      _setReadOnly('alArea',   r.area        || ' - ');
+      _setReadOnly('alBranch', r.baseOffice  || r.branch || ' - ');
     })
     .withFailureHandler(err => { if(spin) spin.style.display='none'; toast(err.message,'err'); })
     .getEmployeeById(id);
@@ -751,26 +683,23 @@ function submitAllocate() {
   const empId  = document.getElementById('alEmpId').value.trim();
   const staff  = document.getElementById('alStaff').value.trim();
   const desig  = document.getElementById('alDesig').value.trim();
-  const div    = document.getElementById('alDiv').value;
-  const dist   = document.getElementById('alDist').value;
-  const area   = document.getElementById('alArea').value;
+  const div    = document.getElementById('alDiv').value.trim();
+  const dist   = document.getElementById('alDist').value.trim();
+  const area   = document.getElementById('alArea').value.trim();
   const branch = document.getElementById('alBranch').value.trim();
   const effDate= document.getElementById('alEffDate').value;
-  const remarks= document.getElementById('alRemarks').value.trim();
+  const remarks= document.getElementById('alRemarks') ? document.getElementById('alRemarks').value.trim() : '';
   if (!empId)  { toast('Employee ID is required', 'warn'); return; }
-  if (!staff)  { toast('Staff name is required', 'warn'); return; }
+  if (!staff || staff === ' - ')  { toast('Staff name is required — look up an Employee ID first', 'warn'); return; }
   if (!effDate){ toast('Effectivity date is required', 'warn'); return; }
 
-  // Confirmation summary
   const assetLabel = document.getElementById('allocAssetLabel').textContent;
   const confirmed  = confirm(
-    'Confirm Allocation\n\n' +
-    'Asset:    ' + assetLabel + '\n' +
-    'Barcode:  ' + _allocBarcode + '\n' +
-    'Assign to: ' + staff + ' (' + empId + ')\n' +
-    'Location: ' + [div, dist, area, branch].filter(Boolean).join(' / ') + '\n' +
-    'Effective: ' + effDate + '\n\n' +
-    'This will make ' + staff + ' the accountable person for this asset. Continue?'
+    'Confirm Allocation\n\nAsset:    ' + assetLabel +
+    '\nBarcode:  ' + _allocBarcode +
+    '\nAssign to: ' + staff + ' (' + empId + ')' +
+    '\nLocation: ' + [div, dist, area, branch].filter(v => v && v !== ' - ').join(' / ') +
+    '\nEffective: ' + effDate + '\n\nContinue?'
   );
   if (!confirmed) return;
 
@@ -780,13 +709,33 @@ function submitAllocate() {
   google.script.run
     .withSuccessHandler(r => {
       _unlockBtn(_btn);
-      toast(r, r.startsWith('Error') ? 'err' : 'ok');
-      if (!r.startsWith('Error')) { closeModal('allocateModal'); loadData(); }
+      // Backend now returns { result, formId }
+      var msg    = typeof r === 'string' ? r : (r.result || r.message || 'Asset allocated.');
+      var formId = r && r.formId ? r.formId : null;
+      var isErr  = typeof msg === 'string' && msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        closeModal('allocateModal');
+        loadData();
+        if (formId) {
+          _loadApprovalData(function() {
+            switchPage('for-approval');
+            setTimeout(function() {
+              var card = document.getElementById('acard-' + formId);
+              if (card) { card.scrollIntoView({ behavior:'smooth', block:'center' }); }
+            }, 300);
+          });
+        }
+      }
     })
     .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .allocateAsset({
       barcode:_allocBarcode, empId, staffName:staff, designation:desig,
-      division:div, district:dist, area, branch, effDate, remarks,
+      division: div === ' - ' ? '' : div,
+      district: dist === ' - ' ? '' : dist,
+      area:     area === ' - ' ? '' : area,
+      branch:   branch === ' - ' ? '' : branch,
+      effDate, remarks,
       type:a.Type||'', brand:a.Brand||'', serial:a.Serial||'',
       condition:a.Condition||'', allocatedBy:SESSION?SESSION.username:''
     });
@@ -824,39 +773,36 @@ function openTransferModal(barcode) {
   document.getElementById('tBarcode').readOnly = !!barcode;
   document.getElementById('tEffDate').value    = todayISO();
 
-  ['tToEmpId','tToStaff','tToDesig','tToDiv','tToDist','tToBranch','tToArea','tToRemarks'].forEach(id => {
-    const el = document.getElementById(id); if(el) el.value = '';
+  // Reset To fields — EmpID writable, rest locked after lookup
+  var toEmpEl = document.getElementById('tToEmpId');
+  if (toEmpEl) { toEmpEl.value=''; toEmpEl.readOnly=false; toEmpEl.style.opacity=''; toEmpEl.style.cursor=''; toEmpEl.style.background=''; }
+  ['tToStaff','tToDesig','tToDiv','tToDist','tToBranch','tToArea'].forEach(id => {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.value=''; el.readOnly=false; el.style.opacity=''; el.style.cursor=''; el.style.background='';
   });
 
+  // From fields — always locked (pre-filled from asset)
   const fromFields = ['tFromStaff','tFromEmpId','tFromDesig','tFromDiv','tFromDist','tFromBranch','tFromArea'];
-
   if (a) {
-    fromFields.forEach(function(id) {
-      const el = document.getElementById(id);
+    fromFields.forEach(id => {
+      var el = document.getElementById(id);
       if (!el) return;
-      el.readOnly = true;
-      el.style.opacity = '0.65';
-      el.style.cursor = 'not-allowed';
-      el.style.background = 'var(--bg4)';
+      el.readOnly=true; el.style.opacity='0.65'; el.style.cursor='not-allowed'; el.style.background='var(--bg4)';
     });
-
-    document.getElementById('tFromStaff').value  = a.Staff        || '';
-    document.getElementById('tFromEmpId').value  = a.EmpID        || '';
-    document.getElementById('tFromDesig').value  = a.Designation  || '';
-    document.getElementById('tFromDiv').value    = a.Division     || '';
-    document.getElementById('tFromDist').value   = a.District     || '';
-    document.getElementById('tFromBranch').value = a.Branch       || '';
-    document.getElementById('tFromArea').value   = a.Area         || '';
+    document.getElementById('tFromStaff').value  = a.Staff       || '';
+    document.getElementById('tFromEmpId').value  = a.EmpID       || '';
+    document.getElementById('tFromDesig').value  = a.Designation || '';
+    document.getElementById('tFromDiv').value    = a.Division    || '';
+    document.getElementById('tFromDist').value   = a.District    || '';
+    document.getElementById('tFromBranch').value = a.Branch      || '';
+    document.getElementById('tFromArea').value   = a.Area        || '';
     document.getElementById('tFromRemarks').value= '';
   } else {
-    fromFields.forEach(function(id) {
-      const el = document.getElementById(id);
+    fromFields.forEach(id => {
+      var el = document.getElementById(id);
       if (!el) return;
-      el.readOnly = false;
-      el.style.opacity = '';
-      el.style.cursor = '';
-      el.style.background = '';
-      el.value = '';
+      el.readOnly=false; el.style.opacity=''; el.style.cursor=''; el.style.background=''; el.value='';
     });
     document.getElementById('tFromRemarks').value = '';
   }
@@ -870,13 +816,13 @@ function onTransferBarcodeInput() {
   const bc = document.getElementById('tBarcode').value.trim();
   const a  = bc ? ASSETS.find(x => x.Barcode === bc) : null;
   if (!a) return;
-  document.getElementById('tFromStaff').value  = a.Staff       || '';
-  document.getElementById('tFromEmpId').value  = a.EmpID       || '';
-  document.getElementById('tFromDesig').value  = a.Designation || '';
-  document.getElementById('tFromDiv').value    = a.Division    || '';
-  document.getElementById('tFromDist').value   = a.District    || '';
-  document.getElementById('tFromBranch').value = a.Branch      || '';
-  document.getElementById('tFromArea').value   = a.Area        || '';
+  _setReadOnly('tFromStaff',  a.Staff       || '');
+  _setReadOnly('tFromEmpId',  a.EmpID       || '');
+  _setReadOnly('tFromDesig',  a.Designation || '');
+  _setReadOnly('tFromDiv',    a.Division    || '');
+  _setReadOnly('tFromDist',   a.District    || '');
+  _setReadOnly('tFromBranch', a.Branch      || '');
+  _setReadOnly('tFromArea',   a.Area        || '');
 }
 
 function onTransferToInput() {
@@ -890,11 +836,13 @@ function onTransferToInput() {
       .withSuccessHandler(r => {
         if (spin) spin.style.display = 'none';
         if (!r.ok) return;
-        document.getElementById('tToStaff').value  = r.name     || '';
-        document.getElementById('tToDesig').value  = r.position || '';
-        document.getElementById('tToDiv').value    = r.division || '';
-        document.getElementById('tToDist').value   = r.district || '';
-        document.getElementById('tToBranch').value = r.branch   || '';
+        // Read-only after lookup. Display order: Division | District | Area | Base Office
+        _setReadOnly('tToStaff',  r.name        || ' - ');
+        _setReadOnly('tToDesig',  r.position    || ' - ');
+        _setReadOnly('tToDiv',    r.division    || ' - ');
+        _setReadOnly('tToDist',   r.district    || ' - ');
+        _setReadOnly('tToArea',   r.area        || ' - ');
+        _setReadOnly('tToBranch', r.baseOffice  || r.branch || ' - ');
       })
       .withFailureHandler(() => { if(spin) spin.style.display='none'; })
       .getEmployeeById(id);
@@ -909,24 +857,35 @@ function submitTransfer() {
   const tType   = document.getElementById('tType').value;
   if (!barcode) { toast('Barcode is required', 'warn'); return; }
   if (!toEmpId) { toast('Destination Employee ID is required', 'warn'); return; }
-  if (!toStaff) { toast('Destination Staff Name is required — enter Employee ID first', 'warn'); return; }
+  if (!toStaff || toStaff === ' - ') { toast('Destination Staff Name is required — look up an Employee ID first', 'warn'); return; }
   if (!effDate) { toast('Transfer Date is required', 'warn'); return; }
+
   const _btn = document.querySelector('#transferModal .modal-footer .btn-primary');
   _lockBtn(_btn);
+
+  function _cleanVal(id) {
+    var v = document.getElementById(id) ? document.getElementById(id).value.trim() : '';
+    return v === ' - ' ? '' : v;
+  }
+
   google.script.run
     .withSuccessHandler(function(r) {
       _unlockBtn(_btn);
-      var msg        = typeof r === 'string' ? r : (r.message || 'Transfer saved.');
+      var msg        = typeof r === 'string' ? r : (r.result || r.message || 'Transfer saved.');
       var fromFormId = r && r.fromFormId ? r.fromFormId : null;
       var toFormId   = r && r.toFormId   ? r.toFormId   : null;
-      var isErr      = msg.startsWith('Error');
+      var isErr      = typeof msg === 'string' && msg.startsWith('Error');
       toast(msg, isErr ? 'err' : 'ok');
       if (!isErr) {
         closeModal('transferModal');
         loadData();
         if (fromFormId && toFormId) {
           _loadApprovalData(function() {
-            openTransferReview(fromFormId, toFormId);
+            switchPage('for-approval');
+            setTimeout(function() {
+              var card = document.getElementById('acard-' + toFormId);
+              if (card) card.scrollIntoView({ behavior:'smooth', block:'center' });
+            }, 300);
           });
         }
       }
@@ -934,38 +893,234 @@ function submitTransfer() {
     .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .saveTransfer({
       barcode, transferType:tType, effDate,
-      fromStaff:   document.getElementById('tFromStaff').value,
-      fromEmpId:   document.getElementById('tFromEmpId').value,
-      fromDesig:   document.getElementById('tFromDesig').value,
-      fromDiv:     document.getElementById('tFromDiv').value,
-      fromDist:    document.getElementById('tFromDist').value,
-      fromArea:    document.getElementById('tFromArea').value,
-      fromBranch:  document.getElementById('tFromBranch').value,
-      fromRemarks: document.getElementById('tFromRemarks').value,
+      fromStaff:   _cleanVal('tFromStaff'),
+      fromEmpId:   _cleanVal('tFromEmpId'),
+      fromDesig:   _cleanVal('tFromDesig'),
+      fromDiv:     _cleanVal('tFromDiv'),
+      fromDist:    _cleanVal('tFromDist'),
+      fromArea:    _cleanVal('tFromArea'),
+      fromBranch:  _cleanVal('tFromBranch'),
+      fromRemarks: _cleanVal('tFromRemarks'),
       toStaff, toEmpId,
-      toDesig:   document.getElementById('tToDesig').value,
-      toDiv:     document.getElementById('tToDiv').value,
-      toDist:    document.getElementById('tToDist').value,
-      toArea:    document.getElementById('tToArea').value,
-      toBranch:  document.getElementById('tToBranch').value,
-      toRemarks: document.getElementById('tToRemarks').value,
+      toDesig:   _cleanVal('tToDesig'),
+      toDiv:     _cleanVal('tToDiv'),
+      toDist:    _cleanVal('tToDist'),
+      toArea:    _cleanVal('tToArea'),
+      toBranch:  _cleanVal('tToBranch'),
+      toRemarks: _cleanVal('tToRemarks'),
       status:    'Completed'
     });
+}
+
+// ─── BULK TRANSFER (from Staff Assets modal) ─────────────────────────────────
+var _bulkXferAssets = [];   // Array of asset objects for the from-party
+var _bulkXferEmpId  = '';   // From-party EmpID
+var _bulkXferStaff  = '';   // From-party name
+
+function openBulkTransferModal(empId, div, dist, area, branch, mode) {
+  _bulkXferEmpId = empId;
+
+  // Gather assets for this staff member
+  var ft     = window._stFieldTree || {};
+  var stTree = window._stTree || {};
+  var emp, assets;
+
+  if (mode === 'ho') {
+    emp    = stTree[div] && stTree[div][empId];
+    assets = emp ? (emp.assets || []) : [];
+    _bulkXferStaff = emp ? (emp.name || '') : '';
+  } else {
+    var distKey   = dist   || '(No District)';
+    var areaKey   = area   || '(No Area)';
+    var branchKey = branch || '(No Branch)';
+    var bTree = (((ft[div] || {})[distKey] || {})[areaKey] || {})[branchKey] || {};
+    emp    = bTree[empId] || null;
+    assets = emp ? (emp.assets || []) : [];
+    _bulkXferStaff = emp ? (emp.name || '') : '';
+  }
+
+  // Only allocated assets can be transferred
+  assets = assets.filter(function(a) { return ['allocated','transfer'].indexOf(a.status) >= 0; });
+  _bulkXferAssets = assets;
+
+  if (!assets.length) { toast('No allocated assets found for this staff member.', 'warn'); return; }
+
+  // Build asset checklist
+  var checklistHtml = assets.map(function(a, i) {
+    return `<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;
+      background:var(--bg3);border:1px solid var(--border);border-radius:8px;cursor:pointer;
+      font-size:.84rem;">
+      <input type="checkbox" class="cb bx-asset-cb" value="${esc(a.Barcode)}" checked
+        style="accent-color:var(--accent);width:15px;height:15px;flex-shrink:0"
+        onclick="updateBulkXferCount()"/>
+      <span class="mono-bc" style="flex-shrink:0">${esc(a.Barcode)}</span>
+      <span class="type-tag">${esc(a.Type)}</span>
+      <span style="color:var(--text2)">${esc(a.Brand) || ''}</span>
+      <span style="color:var(--text3);font-size:.76rem;margin-left:auto">${esc(a.Condition) || ''}</span>
+    </label>`;
+  }).join('');
+
+  document.getElementById('bxFromName').textContent    = _bulkXferStaff || '—';
+  document.getElementById('bxFromEmpId').textContent   = empId;
+  document.getElementById('bxFromLoc').textContent     = [div, dist, area, branch].filter(function(x){ return x && !x.startsWith('(No'); }).join(' / ') || '—';
+  document.getElementById('bxAssetList').innerHTML     = checklistHtml;
+  document.getElementById('bxSelectedCount').textContent = assets.length + ' of ' + assets.length + ' selected';
+
+  // Reset To fields
+  var toEmpEl = document.getElementById('bxToEmpId');
+  if (toEmpEl) { toEmpEl.value=''; toEmpEl.readOnly=false; toEmpEl.style.opacity=''; toEmpEl.style.cursor=''; toEmpEl.style.background=''; }
+  ['bxToStaff','bxToDesig','bxToDiv','bxToDist','bxToArea','bxToBranch'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.value=''; el.readOnly=false; el.style.opacity=''; el.style.cursor=''; el.style.background='';
+  });
+  document.getElementById('bxEffDate').value = todayISO();
+  document.getElementById('bxType').value    = 'Permanent';
+
+  var lmsg = document.getElementById('bxLookupMsg');
+  if (lmsg) lmsg.style.display = 'none';
+
+  closeModal('staffAssetModal');
+  openModal('bulkTransferModal');
+}
+
+function updateBulkXferCount() {
+  var total    = document.querySelectorAll('.bx-asset-cb').length;
+  var selected = document.querySelectorAll('.bx-asset-cb:checked').length;
+  var el = document.getElementById('bxSelectedCount');
+  if (el) el.textContent = selected + ' of ' + total + ' selected';
+}
+
+var _bxToEmpTimer = null;
+function onBxToEmpInput() {
+  clearTimeout(_bxToEmpTimer);
+  var id = (document.getElementById('bxToEmpId') || {}).value || '';
+  id = id.trim();
+  if (!id || id.length < 3) return;
+  _bxToEmpTimer = setTimeout(function() {
+    var spin = document.getElementById('bxToEmpSpinner');
+    if (spin) spin.style.display = 'block';
+    google.script.run
+      .withSuccessHandler(function(r) {
+        if (spin) spin.style.display = 'none';
+        var lmsg = document.getElementById('bxLookupMsg');
+        if (!r.ok) {
+          if (lmsg) { lmsg.style.display='block'; lmsg.style.color='var(--red)'; lmsg.textContent=r.error; }
+          return;
+        }
+        if (lmsg) lmsg.style.display='none';
+        _setReadOnly('bxToStaff',  r.name       || ' - ');
+        _setReadOnly('bxToDesig',  r.position   || ' - ');
+        _setReadOnly('bxToDiv',    r.division   || ' - ');
+        _setReadOnly('bxToDist',   r.district   || ' - ');
+        _setReadOnly('bxToArea',   r.area       || ' - ');
+        _setReadOnly('bxToBranch', r.baseOffice || r.branch || ' - ');
+      })
+      .withFailureHandler(function(err) { if(spin) spin.style.display='none'; toast(err.message,'err'); })
+      .getEmployeeById(id);
+  }, 420);
+}
+
+function submitBulkTransfer() {
+  var selectedBarcodes = [...document.querySelectorAll('.bx-asset-cb:checked')].map(function(c){ return c.value; });
+  if (!selectedBarcodes.length) { toast('Select at least one asset to transfer', 'warn'); return; }
+
+  var toEmpId = (document.getElementById('bxToEmpId') || {}).value || '';
+  var toStaff = (document.getElementById('bxToStaff') || {}).value || '';
+  var effDate = (document.getElementById('bxEffDate') || {}).value || '';
+  var tType   = (document.getElementById('bxType')    || {}).value || 'Permanent';
+
+  toEmpId = toEmpId.trim();
+  toStaff = toStaff.trim();
+
+  if (!toEmpId)                         { toast('Destination Employee ID is required', 'warn'); return; }
+  if (!toStaff || toStaff === ' - ')    { toast('Destination Staff Name is required — look up an Employee ID first', 'warn'); return; }
+  if (!effDate)                         { toast('Transfer Date is required', 'warn'); return; }
+
+  function _cleanVal2(id) {
+    var v = (document.getElementById(id) || {}).value || '';
+    return v.trim() === ' - ' ? '' : v.trim();
+  }
+
+  var fromAsset = _bulkXferAssets.length ? _bulkXferAssets[0] : {};
+
+  var confirmed = confirm(
+    'Bulk Transfer Confirmation\n\n' +
+    'Transferring ' + selectedBarcodes.length + ' asset(s) from:\n' +
+    '  ' + _bulkXferStaff + ' (' + _bulkXferEmpId + ')\n\n' +
+    'To:\n' +
+    '  ' + toStaff + ' (' + toEmpId + ')\n\n' +
+    'This will create one Transfer-From form and one Transfer-To form.\nContinue?'
+  );
+  if (!confirmed) return;
+
+  var _btn = document.getElementById('bxSubmitBtn');
+  _lockBtn(_btn);
+
+  var t = {
+    transferType: tType,
+    effDate:      effDate,
+    fromStaff:    _bulkXferStaff,
+    fromEmpId:    _bulkXferEmpId,
+    fromDesig:    fromAsset.Designation || '',
+    fromDiv:      fromAsset.Division    || '',
+    fromDist:     fromAsset.District    || '',
+    fromArea:     fromAsset.Area        || '',
+    fromBranch:   fromAsset.Branch      || '',
+    fromRemarks:  '',
+    toStaff,
+    toEmpId,
+    toDesig:   _cleanVal2('bxToDesig'),
+    toDiv:     _cleanVal2('bxToDiv'),
+    toDist:    _cleanVal2('bxToDist'),
+    toArea:    _cleanVal2('bxToArea'),
+    toBranch:  _cleanVal2('bxToBranch'),
+    toRemarks: ''
+  };
+
+  google.script.run
+    .withSuccessHandler(function(r) {
+      _unlockBtn(_btn);
+      var msg        = typeof r === 'string' ? r : (r.result || r.message || 'Bulk transfer saved.');
+      var fromFormId = r && r.fromFormId ? r.fromFormId : null;
+      var toFormId   = r && r.toFormId   ? r.toFormId   : null;
+      var isErr      = typeof msg === 'string' && msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        closeModal('bulkTransferModal');
+        loadData();
+        if (fromFormId && toFormId) {
+          _loadApprovalData(function() {
+            switchPage('for-approval');
+            setTimeout(function() {
+              var card = document.getElementById('acard-' + toFormId);
+              if (card) card.scrollIntoView({ behavior:'smooth', block:'center' });
+            }, 300);
+          });
+        }
+      }
+    })
+    .withFailureHandler(function(err) { _unlockBtn(_btn); toast(err.message,'err'); })
+    .saveBulkTransfer(selectedBarcodes, t);
 }
 
 // ─── BORROW ───────────────────────────────────────────────────────────────────
 function openBorrowModal(barcode) {
   _borrowBarcode = barcode || '';
   const a = barcode ? ASSETS.find(x => x.Barcode === barcode) : null;
-
   document.getElementById('bBarcode').value    = barcode || '';
   document.getElementById('bBarcode').readOnly = !!barcode;
-  document.getElementById('bAssetLabel').textContent =
-    a ? `${a.Type||''} — ${a.Brand||''} (${a.Condition||''})` : '—';
+  document.getElementById('bAssetLabel').textContent = a ? `${a.Type||''} — ${a.Brand||''} (${a.Condition||''})` : '—';
 
-  ['bEmpId','bName','bDesig','bDiv','bDistrict','bBranch','bRemarks','bExpReturn'].forEach(id => {
-    const el = document.getElementById(id); if(el) el.value = '';
+  var bEmpIdEl = document.getElementById('bEmpId');
+  if (bEmpIdEl) { bEmpIdEl.value=''; bEmpIdEl.readOnly=false; bEmpIdEl.style.opacity=''; bEmpIdEl.style.cursor=''; bEmpIdEl.style.background=''; }
+  ['bName','bDesig','bDiv','bDistrict','bBranch'].forEach(id => {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.value=''; el.readOnly=false; el.style.opacity=''; el.style.cursor=''; el.style.background='';
   });
+  document.getElementById('bRemarks') && (document.getElementById('bRemarks').value = '');
+  document.getElementById('bExpReturn') && (document.getElementById('bExpReturn').value = '');
   document.getElementById('bDate').value = todayISO();
   openModal('borrowModal');
 }
@@ -981,11 +1136,11 @@ function onBorrowerInput() {
       .withSuccessHandler(r => {
         if (spin) spin.style.display = 'none';
         if (!r.ok) return;
-        document.getElementById('bName').value     = r.name     || '';
-        document.getElementById('bDesig').value    = r.position || '';
-        document.getElementById('bDiv').value      = r.division || '';
-        document.getElementById('bDistrict').value = r.district || '';
-        document.getElementById('bBranch').value   = r.branch   || '';
+        _setReadOnly('bName',     r.name        || ' - ');
+        _setReadOnly('bDesig',    r.position    || ' - ');
+        _setReadOnly('bDiv',      r.division    || ' - ');
+        _setReadOnly('bDistrict', r.district    || ' - ');
+        _setReadOnly('bBranch',   r.baseOffice  || r.branch || ' - ');
       })
       .withFailureHandler(() => { if(spin) spin.style.display='none'; })
       .getEmployeeById(id);
@@ -998,9 +1153,15 @@ function submitBorrow() {
   const bDate   = document.getElementById('bDate').value;
   const expRet  = document.getElementById('bExpReturn').value;
   if (!barcode) { toast('Barcode is required', 'warn'); return; }
-  if (!name)    { toast('Borrower name is required', 'warn'); return; }
+  if (!name || name === ' - ')    { toast('Borrower name is required', 'warn'); return; }
   if (!bDate)   { toast('Borrow date is required', 'warn'); return; }
   if (!expRet)  { toast('Expected return date is required', 'warn'); return; }
+
+  function _cleanBorrowVal(id) {
+    var v = (document.getElementById(id) || {}).value || '';
+    return v.trim() === ' - ' ? '' : v.trim();
+  }
+
   const _btn = document.querySelector('#borrowModal .modal-footer .btn-primary');
   _lockBtn(_btn);
   google.script.run
@@ -1012,14 +1173,14 @@ function submitBorrow() {
     .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .saveBorrow({
       barcode, borrowerName:name,
-      empId:          document.getElementById('bEmpId').value,
-      designation:    document.getElementById('bDesig').value,
-      division:       document.getElementById('bDiv').value,
-      district:       document.getElementById('bDistrict').value,
-      branch:         document.getElementById('bBranch').value,
+      empId:          _cleanBorrowVal('bEmpId'),
+      designation:    _cleanBorrowVal('bDesig'),
+      division:       _cleanBorrowVal('bDiv'),
+      district:       _cleanBorrowVal('bDistrict'),
+      branch:         _cleanBorrowVal('bBranch'),
       borrowDate:     bDate,
       expectedReturn: expRet,
-      remarks:        document.getElementById('bRemarks').value
+      remarks:        _cleanBorrowVal('bRemarks')
     });
 }
 
@@ -1086,28 +1247,23 @@ function openMoveStaffModal(empId) {
   _moveStaffEmpId = empId;
   const assets = ASSETS.filter(a => a.EmpID === empId && ['allocated','transfer'].includes(a.status));
   const ref    = assets[0] || ASSETS.find(a => a.EmpID === empId) || {};
-
   document.getElementById('msEmpName').textContent    = ref.Staff       || '—';
   document.getElementById('msEmpId').textContent      = empId;
   document.getElementById('msDesig').textContent      = ref.Designation || '—';
-  document.getElementById('msCurLoc').textContent     =
-    [ref.Division, ref.District, ref.Branch].filter(Boolean).join(' / ') || '—';
+  document.getElementById('msCurLoc').textContent     = [ref.Division, ref.District, ref.Branch].filter(Boolean).join(' / ') || '—';
   document.getElementById('msAssetCount').textContent = assets.length + ' asset(s) will be affected';
-
   _fillDivSelect('msNewDiv');
   document.getElementById('msNewDist').innerHTML = '<option value="">Select District…</option>';
   document.getElementById('msNewArea').value    = '';
   document.getElementById('msNewBranch').value  = '';
   document.getElementById('msActionMove').checked = true;
-
   openModal('moveStaffModal');
 }
 
 function onMsDivChange() {
   const div   = document.getElementById('msNewDiv').value;
   const dists = (ENG_LOCATION_DATA.divDistrictMap || {})[div] || [];
-  document.getElementById('msNewDist').innerHTML =
-    '<option value="">Select District…</option>' +
+  document.getElementById('msNewDist').innerHTML = '<option value="">Select District…</option>' +
     dists.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
 }
 
@@ -1134,15 +1290,11 @@ function submitMoveStaff() {
 function openMoveOrgUnitModal(unitType, div, dist, area, branch) {
   _mouUnitType    = unitType;
   _mouCurrentPath = { div, dist, area, branch };
-
   const titles = { district:'Move District', area:'Move Area', branch:'Move Branch' };
   document.getElementById('mouTitle').textContent    = titles[unitType] || 'Move Unit';
   document.getElementById('mouSubtitle').textContent = 'All assets in this '+unitType+' will be updated';
   document.getElementById('mouUnitLabel').textContent = unitType;
-
-  document.getElementById('mouCurrentLoc').textContent =
-    [div, dist, area, branch].filter(x => x && !x.startsWith('(No')).join(' › ');
-
+  document.getElementById('mouCurrentLoc').textContent = [div, dist, area, branch].filter(x => x && !x.startsWith('(No')).join(' › ');
   const affected = ASSETS.filter(a => {
     if (unitType === 'district') return a.Division === div && a.District === dist;
     if (unitType === 'area')     return a.Division === div && a.District === dist && a.Area === area;
@@ -1150,16 +1302,12 @@ function openMoveOrgUnitModal(unitType, div, dist, area, branch) {
     return false;
   });
   document.getElementById('mouAssetCount').textContent = affected.length + ' asset(s) will be affected';
-
-  // Show/hide conditional fields
   document.getElementById('mouDistField').style.display = (unitType==='area'||unitType==='branch') ? '' : 'none';
   document.getElementById('mouAreaField').style.display = unitType==='branch' ? '' : 'none';
-
   _fillDivSelect('mouNewDiv');
   document.getElementById('mouNewDist').innerHTML = '<option value="">Select District…</option>';
   const areaEl = document.getElementById('mouNewArea');
   if (areaEl) areaEl.value = '';
-
   openModal('moveOrgUnitModal');
 }
 
@@ -1176,9 +1324,7 @@ function submitMoveOrgUnit() {
   const newDist = document.getElementById('mouNewDist')?.value || '';
   const newArea = document.getElementById('mouNewArea')?.value || '';
   if (!newDiv) { toast('Please select a Division', 'warn'); return; }
-  if ((_mouUnitType==='area'||_mouUnitType==='branch') && !newDist) {
-    toast('Please select a District', 'warn'); return;
-  }
+  if ((_mouUnitType==='area'||_mouUnitType==='branch') && !newDist) { toast('Please select a District', 'warn'); return; }
   const _btn = document.getElementById('mouSubmitBtn');
   _lockBtn(_btn);
   google.script.run
@@ -1188,12 +1334,7 @@ function submitMoveOrgUnit() {
       if (!r.startsWith('Error')) { closeModal('moveOrgUnitModal'); loadData(); }
     })
     .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
-    .moveOrgUnit(
-      _mouUnitType,
-      _mouCurrentPath.div,  _mouCurrentPath.dist,
-      _mouCurrentPath.area, _mouCurrentPath.branch,
-      newDiv, newDist, newArea
-    );
+    .moveOrgUnit(_mouUnitType, _mouCurrentPath.div, _mouCurrentPath.dist, _mouCurrentPath.area, _mouCurrentPath.branch, newDiv, newDist, newArea);
 }
 
 // ─── DROPDOWN POPULATION ─────────────────────────────────────────────────────
@@ -1227,84 +1368,125 @@ function _fillDivSelect(id, divs) {
     list.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
 }
 
-// ─── EDIT ASSET DETAILS (UX-5) ───────────────────────────────────────────────
-function openEditAssetModal(barcode) {
-  const a = ASSETS.find(function(x) { return x.Barcode === barcode; });
-  if (!a) { toast('Asset not found', 'err'); return; }
-
-  // Reuse the view modal body — convert to editable form
-  document.getElementById('viewModalBody').innerHTML = `
-    <div style="padding:10px 14px;background:rgba(59,130,246,.06);
-      border:1px solid rgba(59,130,246,.2);border-radius:8px;
-      font-size:.8rem;color:#60a5fa;margin-bottom:16px">
-      ✏ Editing: <strong>${esc(a.Barcode)}</strong> — 
-      only basic details can be changed here. 
-      Lifecycle changes use the action buttons.
-    </div>
-    <div class="form-grid" style="gap:12px">
-      <div class="field">
-        <label>Brand</label>
-        <input type="text" id="editBrand" value="${esc(a.Brand || '')}"/>
-      </div>
-      <div class="field">
-        <label>Serial No.</label>
-        <input type="text" id="editSerial" value="${esc(a.Serial || '')}"/>
-      </div>
-      <div class="field">
-        <label>Condition</label>
-        <select id="editCondition">
-          ${['New','Good','Damage','Repair'].map(function(c) {
-            return '<option value="'+c+'"'+(a.Condition===c?' selected':'')+'>'+c+'</option>';
-          }).join('')}
-        </select>
-      </div>
-      <div class="field">
-        <label>Purchase Date</label>
-        <input type="date" id="editPurchDate" value="${a.PurchDate || ''}"/>
-      </div>
-      <div class="field form-span2">
-        <label>Specifications / Model</label>
-        <input type="text" id="editSpecs" value="${esc(a.Specs || '')}"/>
-      </div>
-      <div class="field form-span2">
-        <label>Remarks</label>
-        <textarea id="editRemarks" style="min-height:60px">${esc(a.Remarks || '')}</textarea>
-      </div>
-    </div>`;
-
-  // Swap footer buttons
-  document.getElementById('viewModalFooter').innerHTML = `
-    <button class="btn btn-secondary" 
-      onclick="viewAsset('${esc(barcode)}')">← Cancel Edit</button>
-    <div style="flex:1"></div>
-    <button class="btn btn-primary" onclick="submitEditAsset('${esc(barcode)}')">
-      Save Changes
-    </button>`;
+function _printAccountabilityFormGated(empId) {
+  var assets = ASSETS.filter(function(a) {
+    return (a.EmpID || '').trim().toLowerCase() === String(empId || '').trim().toLowerCase()
+      && ['allocated', 'transfer'].indexOf(a.status) >= 0;
+  });
+  if (!_checkPrintGate(assets)) {
+    if (confirm('Some assets are pending supervisor approval.\n\nGo to the For Approval page to submit and track your forms?')) {
+      closeModal('staffAssetModal');
+      _loadApprovalData(function() { switchPage('for-approval'); });
+    }
+    return;
+  }
+  openAccountabilityFormByEmp(empId);
 }
 
-function submitEditAsset(barcode) {
-  const btn = document.querySelector('#viewModalFooter .btn-primary');
-  _lockBtn(btn);
-  google.script.run
-    .withSuccessHandler(function(r) {
-      _unlockBtn(btn);
-      toast(r, r.startsWith('Error') ? 'err' : 'ok');
-      if (!r.startsWith('Error')) {
-        loadData();
-        setTimeout(function() { viewAsset(barcode); }, 800);
-      }
-    })
-    .withFailureHandler(function(err) {
-      _unlockBtn(btn);
-      toast(err.message, 'err');
-    })
-    .updateAssetDetails(barcode, {
-      brand:     document.getElementById('editBrand').value.trim(),
-      serial:    document.getElementById('editSerial').value.trim(),
-      condition: document.getElementById('editCondition').value,
-      purchDate: document.getElementById('editPurchDate').value,
-      specs:     document.getElementById('editSpecs').value.trim(),
-      remarks:   document.getElementById('editRemarks').value.trim()
-    });
+function _printAccountabilityFormFromBranchGated(idx) {
+  var rec = _eqBranchReg[idx];
+  if (!rec || !rec.assets || !rec.assets.length) { toast('No assets to print.', 'warn'); return; }
+  if (!_checkPrintGate(rec.assets)) {
+    if (confirm('Some assets in this branch are pending supervisor approval.\n\nGo to the For Approval page?')) {
+      closeModal('equipmentBranchModal');
+      _loadApprovalData(function() { switchPage('for-approval'); });
+    }
+    return;
+  }
+  openAccountabilityFormFromBranch(idx);
+}
+
+function populateDistrictFilter() {
+  const sel = document.getElementById('allocFilterDistrict');
+  if (!sel) return;
+  if (isSenior()) {
+    const scope = SESSION.seniorDistrictScope || [];
+    sel.innerHTML = '<option value="">All My Division</option>' +
+      scope.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+    sel.disabled = scope.length <= 1;
+    return;
+  }
+  const feDistricts = SESSION.userDistricts || (SESSION.district ? [SESSION.district] : []);
+  if (feDistricts.length === 1) {
+    sel.innerHTML = `<option value="${esc(feDistricts[0])}">${esc(feDistricts[0])}</option>`;
+    sel.value    = feDistricts[0];
+    sel.disabled = true;
+  } else {
+    sel.innerHTML = '<option value="">All My Districts</option>' +
+      feDistricts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+    sel.disabled = false;
+  }
+}
+
+function onAllocDivisionChange() {
+  const selDiv  = (document.getElementById('alDiv')?.value || '').trim();
+  const distSel = document.getElementById('alDist');
+  if (!distSel) return;
+  const map       = ENG_LOCATION_DATA.divDistrictMap || {};
+  const userDists = ENG_LOCATION_DATA.userDistricts  || [];
+  if (!selDiv) {
+    distSel.innerHTML = '<option value="">Select…</option>' +
+      userDists.map(d => `<option>${esc(d)}</option>`).join('');
+    return;
+  }
+  const divDists = map[selDiv] || [];
+  const matched  = divDists.filter(d => userDists.some(ud => ud.toLowerCase() === d.toLowerCase()));
+  const allowed  = matched.length > 0 ? matched : (divDists.length > 0 ? divDists : userDists);
+  distSel.innerHTML = '<option value="">Select…</option>' +
+    allowed.map(d => `<option>${esc(d)}</option>`).join('');
+}
+
+function onAllocDistrictChange() {
+  const div     = (document.getElementById('alDiv')?.value || '').trim();
+  const dist    = (document.getElementById('alDist')?.value || '').trim();
+  const areaSel = document.getElementById('alArea');
+  if (!areaSel) return;
+  const areas = new Set();
+  ASSETS.forEach(function(a) {
+    if ((a.Division || '') === div && (a.District || '') === dist && (a.Area || '').trim())
+      areas.add(a.Area.trim());
+  });
+  const sorted = [...areas].sort();
+  areaSel.innerHTML = '<option value="">Select…</option>' +
+    sorted.map(function(a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('') +
+    '<option value="__custom__">+ Enter custom area…</option>';
+  areaSel.onchange = function() {
+    if (areaSel.value === '__custom__') {
+      const custom = prompt('Enter area (e.g. 1, 2, 3):');
+      if (custom && custom.trim()) {
+        const trimmed = custom.trim();
+        const opt = document.createElement('option');
+        opt.value = trimmed; opt.textContent = trimmed; opt.selected = true;
+        areaSel.insertBefore(opt, areaSel.lastElementChild);
+        areaSel.value = trimmed;
+      } else { areaSel.value = ''; }
+    }
+  };
+}
+
+function openAssetListModal(formId) {
+  _assetListFormId = formId;
+  var form = MY_FORMS.find(function(f){ return f.formId === formId; })
+          || PENDING_FORMS.find(function(f){ return f.formId === formId; });
+  if (!form) { toast('Form not found', 'err'); return; }
+  var assets = form.assets;
+  if (!assets) { try { assets = JSON.parse(form.assetsJson || '[]'); } catch(e) { assets = []; } }
+  document.getElementById('assetListModalTitle').textContent = 'Assets in ' + form.formId;
+  document.getElementById('assetListModalSubtitle').textContent = form.staffName + ' · ' + (form.formType || 'Enrollment');
+  var tbody = document.getElementById('assetListModalBody');
+  if (!tbody) return;
+  tbody.innerHTML = assets.length
+    ? assets.map(function(a) {
+        return '<tr>'
+          + '<td><span class="mono-bc">' + esc(a.barcode || a.Barcode || '—') + '</span></td>'
+          + '<td><span class="type-tag">' + esc(a.type || a.Type || '—') + '</span></td>'
+          + '<td>' + esc(a.brand || a.Brand || '—') + '</td>'
+          + '<td class="mono-sm">' + esc(a.serial || a.Serial || '—') + '</td>'
+          + '<td><span class="cond-' + (a.condition || a.Condition || 'good').toLowerCase() + '">'
+          +   esc(a.condition || a.Condition || '—') + '</span></td>'
+          + '</tr>';
+      }).join('')
+    : '<tr><td colspan="5" class="tbl-empty">No assets in this form.</td></tr>';
+  openModal('assetListModal');
 }
 </script>
