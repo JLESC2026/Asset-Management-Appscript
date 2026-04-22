@@ -67,6 +67,7 @@
         </div>
         <div class="field"><label>Warranty Validity</label><input type="date" id="fWVal" readonly style="opacity:.7;cursor:not-allowed"/></div>
       </div>
+
       <div class="enroll-section-title">Location</div>
       <div class="form-grid" style="margin-bottom:14px">
         <div class="field">
@@ -77,15 +78,19 @@
             <option value="Field">Field</option>
           </select>
         </div>
+        <div class="field"><label>Department</label><input type="text" id="fDepartment" placeholder="e.g. Operations Department"/></div>
+        <div class="field"><label>Base Office</label><input type="text" id="fBaseOffice" placeholder="e.g. 788 - Bucay"/></div>
+        <div class="field"><label>Asset Location</label><input type="text" id="fAssetLocation" placeholder="e.g. 280 - Tagudin (physical location)"/></div>
       </div>
       <div id="fFieldDetails" style="display:none">
         <div class="form-grid" style="margin-bottom:14px">
           <div class="field"><label>Division</label><select id="fDivision" onchange="onDivisionChange()"><option value="">Select…</option></select></div>
           <div class="field"><label>District</label><select id="fDistrict"><option value="">Select…</option></select></div>
-          <div class="field"><label>Area</label><input type="text" id="fArea" placeholder="e.g. 1, 2, 3…"/></div>
-          <div class="field"><label>Branch</label><input type="text" id="fBranch" placeholder="Enter Branch"/></div>
+          <div class="field"><label>Area</label><input type="text" id="fArea" placeholder="e.g. Area 3"/></div>
+          <div class="field"><label>Branch</label><input type="text" id="fBranch" placeholder="Enter Branch name"/></div>
         </div>
       </div>
+
       <div class="enroll-section-title">Accountable Person</div>
       <div style="padding:10px 14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.2);
         border-radius:8px;font-size:.78rem;color:#60a5fa;margin-bottom:12px">
@@ -94,15 +99,15 @@
           <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/>
           <line x1="12" y1="8" x2="12.01" y2="8"/>
         </svg>
-        <strong>For SPARE pool assets</strong> — leave this blank.
-        The accountability form is created automatically when you <strong>Allocate</strong> the asset to a staff member later.<br/>
-        <span style="color:var(--text3)">Only fill this in if you are enrolling an asset that is immediately assigned to someone (not going to spare first).</span>
+        <strong>For SPARE pool assets</strong> — leave blank.
+        The accountability form is created automatically when you <strong>Allocate</strong> the asset.<br/>
+        <span style="color:var(--text3)">Fill in only if enrolling an asset directly assigned to someone.</span>
       </div>
       <div class="form-grid cols3" style="margin-bottom:14px">
         <div class="field">
           <label>Accountable Employee ID</label>
           <div style="position:relative">
-            <input type="text" id="fAccEmpId" placeholder="Leave blank = inputter" oninput="onAccEmpInput()"/>
+            <input type="text" id="fAccEmpId" placeholder="Leave blank for spare" oninput="onAccEmpInput()"/>
             <div id="accLookupSpinner" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%)">
               <div class="spinner" style="width:14px;height:14px;border-width:2px"></div>
             </div>
@@ -119,6 +124,7 @@
       </div>
       <div id="accLookupMsg" style="font-size:.78rem;margin-bottom:14px;padding:6px 10px;
         border-radius:6px;display:none"></div>
+
       <div class="enroll-section-title">Entry By (Auto-filled)</div>
       <div class="form-grid" style="margin-bottom:14px">
         <div class="field"><label>Entry Employee ID</label><input type="text" id="fEntryEmpId" readonly style="opacity:.6;cursor:not-allowed;font-family:'JetBrains Mono',monospace"/></div>
@@ -126,6 +132,7 @@
       </div>
       <div class="form-grid" style="margin-bottom:14px">
         <div class="field form-span2"><label>Remarks</label><textarea id="fRemarks" placeholder="Any notes about this asset…"></textarea></div>
+        <div class="field form-span2"><label>Notes (internal)</label><textarea id="fNotes" placeholder="Additional internal notes…" style="min-height:50px"></textarea></div>
       </div>
     </div>
 
@@ -940,6 +947,34 @@
         </svg>
         Confirm Bulk Transfer
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ASSET LIST MODAL (For Approval page — view assets in a form) ══ -->
+<div class="modal-backdrop" id="assetListModal">
+  <div class="modal modal-lg" style="max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-hdr" style="flex-shrink:0">
+      <div>
+        <h3 id="assetListModalTitle">Assets in Form</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="assetListModalSubtitle"></p>
+      </div>
+      <button class="modal-close" onclick="closeModal('assetListModal')">×</button>
+    </div>
+    <div style="overflow-y:auto;flex:1">
+      <div class="tbl-wrap" style="border:none;border-radius:0;box-shadow:none">
+        <table>
+          <thead><tr>
+            <th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th><th>Condition</th>
+          </tr></thead>
+          <tbody id="assetListModalBody">
+            <tr><td colspan="5" class="tbl-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0">
+      <button class="btn btn-secondary" onclick="closeModal('assetListModal')">Close</button>
     </div>
   </div>
 </div>

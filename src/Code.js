@@ -215,9 +215,13 @@ function _findRow(sheet, barcode) {
 }
 
 function _setRow(sheet, rowIdx, updates) {
-  const range  = sheet.getRange(rowIdx, 1, 1, TOTAL_COLS);
+  // Dynamically expand to cover approval columns (32-37) when needed
+  const maxCol = updates.reduce(function(m, u) { return Math.max(m, u[0]); }, TOTAL_COLS);
+  const range  = sheet.getRange(rowIdx, 1, 1, maxCol);
   const rowVals = range.getValues()[0];
-  updates.forEach(u => { rowVals[u[0] - 1] = (u[1] != null ? u[1] : ''); });
+  // Pad the array if the row doesn't yet have those columns
+  while (rowVals.length < maxCol) rowVals.push('');
+  updates.forEach(function(u) { rowVals[u[0] - 1] = (u[1] != null ? u[1] : ''); });
   rowVals[C.LAST_UPDATED - 1] = new Date().toLocaleString('en-PH');
   range.setValues([rowVals]);
 }
@@ -2455,6 +2459,7 @@ function processAsset(obj, isAssign) {
       row[C.WARRANTY_TERM  - 1] = obj.wTerm       || '';
       row[C.WARRANTY_VAL   - 1] = obj.wValidity   || '';
       row[C.REMARKS        - 1] = _sanitize(obj.remarks, 500);
+      row[C.NOTES          - 1] = _sanitize(obj.notes || '', 500);
       row[C.CREATED_AT     - 1] = nowStr;
       row[C.LAST_UPDATED   - 1] = nowStr;
 
