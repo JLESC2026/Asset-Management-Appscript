@@ -422,17 +422,17 @@ function _buildEnrollConfirm() {
 }
 
 function _submitEnroll() {
-  const btn = document.getElementById('enrollNextBtn');
+  var btn = document.getElementById('enrollNextBtn');
   _lockBtn(btn);
 
-  const specs = [];
-  document.querySelectorAll('#laptopSpecsRows .spec-row').forEach(row => {
-    const t = row.querySelector('.spec-type')?.value || '';
-    const v = row.querySelector('.spec-val')?.value  || '';
-    if (t && v) specs.push(t+': '+v);
+  var specs = [];
+  document.querySelectorAll('#laptopSpecsRows .spec-row').forEach(function(row) {
+    var t = (row.querySelector('.spec-type') || {}).value || '';
+    var v = (row.querySelector('.spec-val')  || {}).value || '';
+    if (t && v) specs.push(t + ': ' + v);
   });
 
-  const obj = {
+  var obj = {
     entryEmpId:   document.getElementById('fEntryEmpId').value,
     entryName:    document.getElementById('fEntryName').value,
     barcode:      document.getElementById('fBarcode').value.trim(),
@@ -459,23 +459,77 @@ function _submitEnroll() {
       _unlockBtn(btn);
       var msg    = typeof r === 'string' ? r : (r.message || 'Asset created.');
       var formId = r && r.formId ? r.formId : null;
-      var isErr  = msg.startsWith('Error');
+      var isErr  = typeof msg === 'string' && msg.startsWith('Error');
       toast(msg, isErr ? 'err' : 'ok');
       if (!isErr) {
         closeModal('addAssetModal');
         loadData();
-        if (formId) {
-          _loadApprovalData(function() { openFormPreview(formId); });
-        } else {
-          _loadApprovalData();
-        }
+        // Navigate to For Approval page — draft card will be waiting
+        _loadApprovalData(function() {
+          switchPage('for-approval');
+          if (formId) {
+            // Briefly highlight the new draft card after render
+            setTimeout(function() {
+              var card = document.getElementById('acard-' + formId);
+              if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.style.transition = 'box-shadow .4s';
+                card.style.boxShadow  = '0 0 0 3px rgba(232,81,24,.4)';
+                setTimeout(function(){ card.style.boxShadow = ''; }, 2000);
+              }
+            }, 300);
+          }
+        });
       }
     })
-    .withFailureHandler(err => {
+    .withFailureHandler(function(err) {
       _unlockBtn(btn);
       toast(err.message, 'err');
     })
     .processAsset(obj, false);
+}
+
+/**
+ * Called from Staff Asset Modal footer.
+ * Checks that all assets for the staff member have confirmed
+ * accountability forms before opening the PDF popup.
+ */
+function _printAccountabilityFormGated(empId) {
+  var assets = ASSETS.filter(function(a) {
+    return (a.EmpID || '').trim().toLowerCase() === String(empId || '').trim().toLowerCase()
+      && ['allocated', 'transfer'].indexOf(a.status) >= 0;
+  });
+
+  if (!_checkPrintGate(assets)) {
+    // Gate failed — offer to navigate to For Approval page
+    if (confirm('Some assets are pending supervisor approval.\n\nGo to the For Approval page to submit and track your forms?')) {
+      closeModal('staffAssetModal');
+      _loadApprovalData(function() { switchPage('for-approval'); });
+    }
+    return;
+  }
+  openAccountabilityFormByEmp(empId);
+}
+
+/**
+ * Called from Equipment Branch Modal footer.
+ * Checks that all assets in the branch have confirmed forms.
+ */
+function _printAccountabilityFormFromBranchGated(idx) {
+  var rec = _eqBranchReg[idx];
+  if (!rec || !rec.assets || !rec.assets.length) {
+    toast('No assets to print.', 'warn');
+    return;
+  }
+
+  if (!_checkPrintGate(rec.assets)) {
+    if (confirm('Some assets in this branch are pending supervisor approval.\n\nGo to the For Approval page?')) {
+      closeModal('equipmentBranchModal');
+      _loadApprovalData(function() { switchPage('for-approval'); });
+    }
+    return;
+  }
+  openAccountabilityFormFromBranch(idx);
 }
 
 function genBarcode() {

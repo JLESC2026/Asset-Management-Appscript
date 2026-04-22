@@ -2,36 +2,30 @@
 // ═══════════════════════════════════════════════════════════
 //  JS_ForApproval.html
 //  For Approval page — My Forms + Pending Review
+//  No preview modals — PDF popup IS the form preview.
+//  Rejection is inline (expands below card, no modal).
 // ═══════════════════════════════════════════════════════════
 
-var _approvalTab      = 'mine';
-var _activeFormId     = '';       // currently open form in any modal
-var _activeFromFormId = '';       // transfer pair
-var _activeToFormId   = '';
-var _srmRejectMode    = false;
-var _trmRejectMode    = false;
+var _approvalTab = 'mine';
 
 // ─── PAGE ENTRY ───────────────────────────────────────────────────────────────
 function renderForApprovalPage() {
-  // Show/hide Pending Review tab based on role
+  // Show/hide Pending Review tab
   var reviewTab = document.getElementById('atab-review');
   if (reviewTab) {
     reviewTab.style.display = canReviewForms() ? '' : 'none';
   }
 
-  // Update subtitle
   var sub = document.getElementById('approvalPageSubtitle');
   if (sub) {
     sub.textContent = canReviewForms()
       ? 'Manage accountability forms — yours and those awaiting your review'
-      : 'Track and submit your accountability forms';
+      : 'Track and submit your accountability forms for supervisor approval';
   }
 
-  // Render the active tab
-  if (_approvalTab === 'mine')   renderMyForms();
-  else                           renderPendingReview();
+  if (_approvalTab === 'mine') renderMyForms();
+  else                         renderPendingReview();
 
-  // Update badge counts in tab headers
   _updateApprovalTabCounts();
 }
 
@@ -43,26 +37,44 @@ function switchApprovalTab(tab) {
     if (btn)  btn.classList.toggle('active', t === tab);
     if (pane) pane.style.display = t === tab ? '' : 'none';
   });
-  if (tab === 'mine')   renderMyForms();
-  else                  renderPendingReview();
+  if (tab === 'mine') renderMyForms();
+  else                renderPendingReview();
 }
 
 function _updateApprovalTabCounts() {
   var nmf = document.getElementById('nbMyForms');
   if (nmf) nmf.textContent = MY_FORMS.length;
-
   var npr = document.getElementById('nbPendingReview');
   if (npr) npr.textContent = PENDING_FORMS.length;
 }
 
+// ─── ACCOUNTABLE PERSON RESOLVER (for PDF open on spare assets) ──────────────
+// If asset is spare/borrow-item, accountable = the enroller (EntryEmpId / EntryName)
+function _resolveAccountablePerson(assets) {
+  if (!assets || !assets.length) return { empId:'', name:'', designation:'' };
+  var ref = assets[0];
+  if (ref.status === 'spare' || ref.status === 'borrow-item') {
+    return {
+      empId:       ref.EntryEmpId   || ref.entryEmpId   || (SESSION ? SESSION.username : ''),
+      name:        ref.EntryName    || ref.entryName    || (SESSION ? SESSION.name     : 'IICTD Admin'),
+      designation: ref.Designation  || ''
+    };
+  }
+  return {
+    empId:       ref.EmpID       || '',
+    name:        ref.Staff       || '',
+    designation: ref.Designation || ''
+  };
+}
+
 // ─── MY FORMS ─────────────────────────────────────────────────────────────────
 function renderMyForms() {
-  var statusFilter = document.getElementById('myFormsFilter')?.value    || '';
-  var typeFilter   = document.getElementById('myFormsTypeFilter')?.value || '';
+  var statusFilter = (document.getElementById('myFormsFilter')     || {}).value || '';
+  var typeFilter   = (document.getElementById('myFormsTypeFilter') || {}).value || '';
 
   var data = MY_FORMS.filter(function(f) {
-    if (statusFilter && f.status    !== statusFilter) return false;
-    if (typeFilter   && f.formType  !== typeFilter)   return false;
+    if (statusFilter && f.status   !== statusFilter) return false;
+    if (typeFilter   && f.formType !== typeFilter)   return false;
     return true;
   });
 
@@ -83,7 +95,6 @@ function renderMyForms() {
     return;
   }
 
-  // Sort: Rejected first, then Pending, then Draft, then Confirmed
   var order = { Rejected:0, Pending:1, Draft:2, Confirmed:3 };
   data = data.slice().sort(function(a, b) {
     return (order[a.status] || 9) - (order[b.status] || 9)
@@ -100,7 +111,7 @@ function renderMyForms() {
     }
   }).join('');
 
-  // Start cooldown timers for any rejected cards with active cooldowns
+  // Start cooldown timers for rejected cards
   data.forEach(function(f) {
     if (f.status === 'Rejected' && f.cooldownUntil) {
       _startCooldownTick(f.formId, f.cooldownUntil, 'cooldown-' + f.formId);
@@ -108,133 +119,186 @@ function renderMyForms() {
   });
 }
 
+// ─── CARD SHARED PARTS ───────────────────────────────────────────────────────
 function _cardHeader(f) {
   var typeColors = {
-    'Enrollment':    { bg:'rgba(22,163,74,.1)',  color:'var(--green)',  icon:'📋' },
-    'Transfer-From': { bg:'rgba(8,145,178,.1)',  color:'var(--cyan)',   icon:'📤' },
-    'Transfer-To':   { bg:'rgba(59,130,246,.1)', color:'var(--blue)',   icon:'📥' }
+    'Enrollment':    { bg:'rgba(22,163,74,.1)',  color:'var(--green)', icon:'📋' },
+    'Transfer-From': { bg:'rgba(8,145,178,.1)',  color:'var(--cyan)',  icon:'📤' },
+    'Transfer-To':   { bg:'rgba(59,130,246,.1)', color:'var(--blue)',  icon:'📥' }
   };
   var tc = typeColors[f.formType] || typeColors['Enrollment'];
-  return '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">'
-    + '<div style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;'
-    +   'justify-content:center;font-size:1.1rem;flex-shrink:0;background:' + tc.bg + '">'
+  return '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">'
+    + '<div style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;'
+    +   'justify-content:center;font-size:1rem;flex-shrink:0;background:' + tc.bg + '">'
     + tc.icon + '</div>'
     + '<div style="flex:1;min-width:0">'
-    + '<div style="font-weight:700;font-size:.92rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+    + '<div style="font-weight:700;font-size:.9rem;color:var(--text);overflow:hidden;'
+    +   'text-overflow:ellipsis;white-space:nowrap" title="' + esc(f.staffName || '') + '">'
     +   esc(f.staffName || 'Unknown Staff') + '</div>'
-    + '<div style="display:flex;gap:6px;align-items:center;margin-top:3px;flex-wrap:wrap">'
-    + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:.72rem;color:var(--text3)">'
+    + '<div style="display:flex;gap:5px;align-items:center;margin-top:3px;flex-wrap:wrap">'
+    + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:.7rem;color:var(--text3)">'
     +   esc(f.formId) + '</span>'
     + '<span style="background:' + tc.bg + ';color:' + tc.color + ';'
-    +   'font-size:.68rem;padding:1px 7px;border-radius:10px;font-weight:600">'
+    +   'font-size:.67rem;padding:1px 6px;border-radius:10px;font-weight:600">'
     +   esc(f.formType || 'Enrollment') + '</span>'
     + '</div>'
     + '</div>'
     + '</div>';
 }
 
-function _cardAssetSummary(f) {
+function _cardMeta(f) {
   var count = f.assetCount || 0;
-  return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
-    + '<span class="pool-pill" style="font-size:.76rem">'
+  return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+    + '<span class="pool-pill" style="font-size:.74rem">'
     +   count + ' asset' + (count !== 1 ? 's' : '') + '</span>'
-    + (f.empId ? '<span class="pool-pill" style="font-family:\'JetBrains Mono\',monospace;font-size:.72rem">'
+    + (f.empId ? '<span class="pool-pill" style="font-family:\'JetBrains Mono\',monospace;font-size:.7rem">'
     +   esc(f.empId) + '</span>' : '')
-    + (f.division || f.district
-        ? '<span class="loc-pill lp-dist" style="font-size:.7rem">'
-        +   esc(f.district || f.division) + '</span>'
-        : '')
+    + (f.district || f.division
+        ? '<span class="loc-pill lp-dist" style="font-size:.69rem">'
+        +   esc(f.district || f.division) + '</span>' : '')
     + (f.branch
-        ? '<span class="loc-pill lp-branch" style="font-size:.7rem">' + esc(f.branch) + '</span>'
-        : '')
+        ? '<span class="loc-pill lp-branch" style="font-size:.69rem">' + esc(f.branch) + '</span>' : '')
     + '</div>';
 }
 
+function _previewPDFBtn(f, label) {
+  label = label || '🖨 Preview PDF';
+  return '<button class="btn btn-secondary btn-sm" '
+    + 'onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')" '
+    + 'style="gap:5px;font-size:.76rem">' + label + '</button>';
+}
+
+// ─── CARD RENDERERS ───────────────────────────────────────────────────────────
 function _renderDraftCard(f) {
-  return '<div class="approval-card approval-card-draft">'
-    + _cardHeader(f)
-    + _cardAssetSummary(f)
-    + '<div style="font-size:.72rem;color:var(--text3);margin-bottom:12px">'
+  return '<div class="approval-card approval-card-draft" id="acard-' + esc(f.formId) + '">'
+    + _cardHeader(f) + _cardMeta(f)
+    + '<div style="font-size:.72rem;color:var(--text3);margin-bottom:10px">'
     +   'Drafted ' + esc(fmtDate(f.draftedAt) || f.draftedAt || '—') + '</div>'
-    + '<div style="display:flex;gap:6px;justify-content:flex-end">'
-    + '<button class="btn btn-secondary btn-sm" onclick="openFormPreview(\'' + esc(f.formId) + '\')">'
-    +   _ICO.view + ' Preview</button>'
-    + '<button class="btn btn-primary btn-sm" onclick="openFormPreview(\'' + esc(f.formId) + '\')">'
+    + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">'
+    + '<button class="btn btn-secondary btn-sm" onclick="openAssetListModal(\'' + esc(f.formId) + '\')" '
+    +   'style="font-size:.76rem">' + _ICO.view + ' Assets</button>'
+    + _previewPDFBtn(f)
+    + '<button class="btn btn-primary btn-sm" onclick="_submitFormForReview(\'' + esc(f.formId) + '\',this)">'
     +   'Submit for Review →</button>'
     + '</div>'
     + '</div>';
 }
 
 function _renderPendingCard(f) {
-  return '<div class="approval-card approval-card-pending">'
-    + _cardHeader(f)
-    + _cardAssetSummary(f)
-    + '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;'
-    +   'background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);'
-    +   'border-radius:6px;margin-bottom:12px">'
-    + '<div class="spinner" style="width:12px;height:12px;border-width:2px;'
+  return '<div class="approval-card approval-card-pending" id="acard-' + esc(f.formId) + '">'
+    + _cardHeader(f) + _cardMeta(f)
+    + '<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;'
+    +   'background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.18);'
+    +   'border-radius:6px;margin-bottom:10px">'
+    + '<div class="spinner" style="width:11px;height:11px;border-width:2px;'
     +   'border-top-color:var(--blue);border-color:rgba(59,130,246,.2)"></div>'
     + '<span style="font-size:.76rem;color:var(--blue);font-weight:600">Awaiting supervisor review</span>'
     + '</div>'
-    + '<div style="font-size:.72rem;color:var(--text3)">'
+    + '<div style="font-size:.72rem;color:var(--text3);margin-bottom:10px">'
     +   'Submitted ' + esc(fmtDate(f.submittedAt) || f.submittedAt || '—') + '</div>'
+    + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">'
+    + '<button class="btn btn-secondary btn-sm" onclick="openAssetListModal(\'' + esc(f.formId) + '\')" '
+    +   'style="font-size:.76rem">' + _ICO.view + ' Assets</button>'
+    + '</div>'
     + '</div>';
 }
 
 function _renderRejectedCard(f) {
   var hasCooldown = f.cooldownUntil && new Date(f.cooldownUntil) > new Date();
-  return '<div class="approval-card approval-card-rejected">'
-    + _cardHeader(f)
-    + _cardAssetSummary(f)
-    + '<div style="padding:8px 12px;background:rgba(239,68,68,.08);'
-    +   'border:1px solid rgba(239,68,68,.25);border-radius:6px;margin-bottom:10px">'
-    + '<div style="font-size:.68rem;font-weight:700;color:var(--red);text-transform:uppercase;'
-    +   'letter-spacing:.05em;margin-bottom:3px">Rejection Reason</div>'
-    + '<div style="font-size:.78rem;color:#f87171">'
+  return '<div class="approval-card approval-card-rejected" id="acard-' + esc(f.formId) + '">'
+    + _cardHeader(f) + _cardMeta(f)
+    + '<div style="padding:7px 12px;background:rgba(239,68,68,.07);'
+    +   'border:1px solid rgba(239,68,68,.22);border-radius:6px;margin-bottom:8px">'
+    + '<div style="font-size:.67rem;font-weight:700;color:var(--red);text-transform:uppercase;'
+    +   'letter-spacing:.05em;margin-bottom:2px">Rejection Reason</div>'
+    + '<div style="font-size:.78rem;color:#f87171;line-height:1.4">'
     +   esc(f.rejectionComment || 'No comment provided') + '</div>'
     + '</div>'
     + (hasCooldown
-        ? '<div id="cooldown-' + esc(f.formId) + '" class="cooldown-badge" style="margin-bottom:10px">'
-        +   '⏱ ' + _formatCooldown(f.cooldownUntil) + '</div>'
+        ? '<div id="cooldown-' + esc(f.formId) + '" class="cooldown-badge" style="margin-bottom:8px;display:inline-block">'
+        +   '⏱ ' + _formatCooldown(f.cooldownUntil) + '</div><br/>'
         : '')
-    + '<div style="display:flex;gap:6px;justify-content:flex-end">'
-    + '<button class="btn btn-secondary btn-sm" onclick="openFormPreview(\'' + esc(f.formId) + '\')">'
-    +   _ICO.view + ' View</button>'
-    + '<button class="btn btn-primary btn-sm"'
+    + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">'
+    + '<button class="btn btn-secondary btn-sm" onclick="openAssetListModal(\'' + esc(f.formId) + '\')" '
+    +   'style="font-size:.76rem">' + _ICO.view + ' Assets</button>'
+    + _previewPDFBtn(f)
+    + '<button class="btn btn-primary btn-sm" id="resubmit-' + esc(f.formId) + '"'
     + (hasCooldown ? ' disabled style="opacity:.5;cursor:not-allowed"' : '')
-    +   ' onclick="openReviseForm(\'' + esc(f.formId) + '\')">'
-    +   'Revise & Resubmit</button>'
+    + ' onclick="_submitFormForReview(\'' + esc(f.formId) + '\',this)">'
+    +   'Resubmit for Review</button>'
     + '</div>'
     + '</div>';
 }
 
 function _renderConfirmedCard(f) {
-  return '<div class="approval-card approval-card-confirmed">'
-    + _cardHeader(f)
-    + _cardAssetSummary(f)
+  return '<div class="approval-card approval-card-confirmed" id="acard-' + esc(f.formId) + '">'
+    + _cardHeader(f) + _cardMeta(f)
     + '<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;'
-    +   'background:rgba(22,163,74,.08);border:1px solid rgba(22,163,74,.22);'
+    +   'background:rgba(22,163,74,.07);border:1px solid rgba(22,163,74,.2);'
     +   'border-radius:6px;margin-bottom:10px">'
-    + '<span style="color:var(--green);font-size:1rem">✓</span>'
+    + '<span style="color:var(--green);font-size:1rem;font-weight:700">✓</span>'
     + '<span style="font-size:.76rem;color:var(--green);font-weight:600">Confirmed</span>'
-    + '<span style="font-size:.72rem;color:var(--text3);margin-left:auto">'
-    +   esc(fmtDate(f.confirmedAt) || f.confirmedAt || '') + '</span>'
+    + (f.reviewedAt
+        ? '<span style="font-size:.7rem;color:var(--text3);margin-left:auto">'
+        +   esc(fmtDate(f.reviewedAt) || f.reviewedAt) + '</span>'
+        : '')
     + '</div>'
-    + '<div style="display:flex;gap:6px;justify-content:flex-end">'
-    + '<button class="btn btn-secondary btn-sm" onclick="openFormPreview(\'' + esc(f.formId) + '\')">'
-    +   _ICO.view + ' View</button>'
+    + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">'
+    + '<button class="btn btn-secondary btn-sm" onclick="openAssetListModal(\'' + esc(f.formId) + '\')" '
+    +   'style="font-size:.76rem">' + _ICO.view + ' Assets</button>'
+    + '<button class="btn btn-sm" '
+    +   'onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')" '
+    +   'style="background:rgba(22,163,74,.1);color:var(--green);border:1px solid rgba(22,163,74,.3);'
+    +   'gap:5px;font-size:.76rem">'
+    + _ICO.print + ' Print PDF Form</button>'
     + '</div>'
     + '</div>';
+}
+
+// ─── SUBMIT HELPERS ───────────────────────────────────────────────────────────
+function _submitFormForReview(formId, btn) {
+  _lockBtn(btn);
+  google.script.run
+    .withSuccessHandler(function(r) {
+      _unlockBtn(btn);
+      var msg = typeof r === 'string' ? r : (r && r.message ? r.message : 'Form submitted.');
+      var isErr = typeof msg === 'string' && msg.startsWith('Error');
+
+      // Rate limit hit
+      if (r && r.cooldown) {
+        toast('Please wait before resubmitting. Cooldown active.', 'warn');
+        var cdEl = document.getElementById('cooldown-' + formId);
+        if (cdEl) {
+          cdEl.style.display = 'inline-block';
+          cdEl.textContent = '⏱ ' + _formatCooldown(r.cooldownUntil);
+          _startCooldownTick(formId, r.cooldownUntil, 'cooldown-' + formId);
+        }
+        var rsBtn = document.getElementById('resubmit-' + formId);
+        if (rsBtn) rsBtn.disabled = true;
+        _loadApprovalData();
+        return;
+      }
+
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        _loadApprovalData(function() { renderMyForms(); });
+      }
+    })
+    .withFailureHandler(function(err) {
+      _unlockBtn(btn);
+      toast(err.message, 'err');
+    })
+    .submitFormForReview(formId, SESSION.username);
 }
 
 // ─── PENDING REVIEW ───────────────────────────────────────────────────────────
 function renderPendingReview() {
   var enrollments = PENDING_FORMS.filter(function(f) { return f.formType === 'Enrollment'; });
-  var transfers   = _pairTransferForms(PENDING_FORMS.filter(function(f) {
+  var xferForms   = PENDING_FORMS.filter(function(f) {
     return f.formType === 'Transfer-From' || f.formType === 'Transfer-To';
-  }));
+  });
+  var transfers = _pairTransferForms(xferForms);
 
-  // Enrollment section
   var eg = document.getElementById('pendingEnrollmentGrid');
   if (eg) {
     if (!enrollments.length) {
@@ -242,12 +306,11 @@ function renderPendingReview() {
         + 'No enrollment forms pending review.</div>';
     } else {
       eg.innerHTML = enrollments.map(function(f) {
-        return _renderEnrollmentPendingCard(f);
+        return _renderEnrollmentReviewCard(f);
       }).join('');
     }
   }
 
-  // Transfer section
   var tg = document.getElementById('pendingTransferGrid');
   if (tg) {
     if (!transfers.length) {
@@ -255,7 +318,7 @@ function renderPendingReview() {
         + 'No transfer pairs pending review.</div>';
     } else {
       tg.innerHTML = transfers.map(function(pair) {
-        return _renderTransferPendingPair(pair.from, pair.to);
+        return _renderTransferReviewPair(pair.from, pair.to);
       }).join('');
     }
   }
@@ -274,7 +337,6 @@ function _pairTransferForms(forms) {
       if (match) usedIds[match.formId] = true;
     }
   });
-  // Pick up any Transfer-To without a From (orphan)
   forms.forEach(function(f) {
     if (!usedIds[f.formId] && f.formType === 'Transfer-To') {
       pairs.push({ from: null, to: f });
@@ -284,383 +346,219 @@ function _pairTransferForms(forms) {
   return pairs;
 }
 
-function _renderEnrollmentPendingCard(f) {
-  return '<div class="approval-card approval-card-pending">'
-    + _cardHeader(f)
-    + _cardAssetSummary(f)
-    + '<div style="font-size:.72rem;color:var(--text3);margin-bottom:12px">'
-    +   'Submitted ' + esc(fmtDate(f.submittedAt) || f.submittedAt || '—') + '</div>'
+// ─── ENROLLMENT REVIEW CARD (supervisor) ─────────────────────────────────────
+function _renderEnrollmentReviewCard(f) {
+  var cardId = 'rev-' + f.formId;
+  return '<div class="approval-card approval-card-pending" id="' + esc(cardId) + '">'
+    + _cardHeader(f) + _cardMeta(f)
+    + '<div style="font-size:.72rem;color:var(--text3);margin-bottom:10px">'
+    +   'Submitted ' + esc(fmtDate(f.submittedAt) || f.submittedAt || '—')
+    +   (f.draftedBy ? ' by <strong>' + esc(f.draftedBy) + '</strong>' : '')
+    + '</div>'
+    // Inline rejection panel (hidden by default)
+    + '<div id="reject-panel-' + esc(f.formId) + '" class="inline-reject-panel" style="display:none">'
+    + '<div style="font-size:.72rem;font-weight:700;color:var(--red);margin-bottom:5px">'
+    +   'Rejection Comment (required)</div>'
+    + '<textarea id="reject-comment-' + esc(f.formId) + '" '
+    +   'placeholder="Explain why this form is being rejected…" '
+    +   'style="width:100%;min-height:64px;background:var(--bg3);'
+    +   'border:1px solid rgba(239,68,68,.35);color:var(--text);'
+    +   'padding:8px 10px;border-radius:var(--radius2);'
+    +   'font-family:inherit;font-size:.82rem;outline:none;resize:vertical;'
+    +   'margin-bottom:8px"></textarea>'
     + '<div style="display:flex;gap:6px;justify-content:flex-end">'
-    + '<button class="btn btn-secondary btn-sm" onclick="openSingleReview(\'' + esc(f.formId) + '\')">'
-    +   _ICO.view + ' Review</button>'
+    + '<button class="btn btn-secondary btn-sm" '
+    +   'onclick="_toggleInlineReject(\'' + esc(f.formId) + '\')">Cancel</button>'
+    + '<button class="btn btn-danger btn-sm" '
+    +   'onclick="_submitRejectForm(\'' + esc(f.formId) + '\',this)">Submit Rejection</button>'
+    + '</div></div>'
+    // Action bar
+    + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px">'
+    + '<button class="btn btn-secondary btn-sm" onclick="openAssetListModal(\'' + esc(f.formId) + '\')" '
+    +   'style="font-size:.76rem">' + _ICO.view + ' Assets</button>'
+    + '<button class="btn btn-secondary btn-sm" '
+    +   'onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')" '
+    +   'style="font-size:.76rem">🖨 Preview PDF</button>'
+    + '<button class="btn btn-danger btn-sm" id="reject-toggle-' + esc(f.formId) + '" '
+    +   'onclick="_toggleInlineReject(\'' + esc(f.formId) + '\')">Reject ▾</button>'
+    + '<button class="btn btn-success btn-sm" '
+    +   'onclick="_submitConfirmForm(\'' + esc(f.formId) + '\',this)">✓ Confirm</button>'
     + '</div>'
     + '</div>';
 }
 
-function _renderTransferPendingPair(fromForm, toForm) {
+// ─── TRANSFER REVIEW PAIR ─────────────────────────────────────────────────────
+function _renderTransferReviewPair(fromForm, toForm) {
+  var pairCardId = 'xpair-' + (fromForm ? fromForm.formId : '') + '-' + (toForm ? toForm.formId : '');
+
   function miniPanel(f, side) {
     if (!f) return '<div style="background:var(--bg4);border:1px dashed var(--border);'
       + 'border-radius:8px;padding:14px;display:flex;align-items:center;'
       + 'justify-content:center;color:var(--text3);font-size:.8rem;font-style:italic">'
       + 'No ' + side + ' form</div>';
     var isFrom = side === 'From';
-    var bg  = isFrom ? 'var(--bg3)' : 'rgba(59,130,246,.05)';
-    var bc  = isFrom ? 'var(--border)' : 'rgba(59,130,246,.2)';
-    return '<div style="background:' + bg + ';border:1px solid ' + bc + ';border-radius:8px;padding:14px">'
-      + '<div style="font-size:.68rem;font-weight:700;color:' + (isFrom?'var(--text3)':'#60a5fa')
-      +   ';text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">'
+    var bg  = isFrom ? 'var(--bg3)' : 'rgba(59,130,246,.04)';
+    var bc  = isFrom ? 'var(--border)' : 'rgba(59,130,246,.18)';
+    return '<div style="background:' + bg + ';border:1px solid ' + bc + ';border-radius:8px;padding:12px">'
+      + '<div style="font-size:.67rem;font-weight:700;color:' + (isFrom ? 'var(--text3)' : '#60a5fa')
+      +   ';text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">'
       + (isFrom ? '📤 Releasing' : '📥 Receiving') + '</div>'
-      + '<div style="font-weight:700;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+      + '<div style="font-weight:700;font-size:.86rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
       +   esc(f.staffName || '—') + '</div>'
       + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:.7rem;color:var(--text3);margin-top:2px">'
       +   esc(f.empId || '—') + '</div>'
-      + '<div style="margin-top:6px;font-size:.72rem;color:var(--text2)">'
-      +   esc(f.assetCount || 0) + ' asset(s)</div>'
+      + '<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap;align-items:center">'
+      + '<span class="pool-pill" style="font-size:.7rem">' + (f.assetCount || 0) + ' asset(s)</span>'
+      + (f.district ? '<span class="loc-pill lp-dist" style="font-size:.67rem">' + esc(f.district) + '</span>' : '')
+      + '</div>'
+      + '<button class="btn btn-secondary btn-xs" style="margin-top:8px;gap:4px;font-size:.72rem;width:100%;justify-content:center" '
+      +   'onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')">🖨 Preview PDF</button>'
       + '</div>';
   }
 
-  var pairId = (fromForm || toForm).formId;
+  var fId = fromForm ? fromForm.formId : '';
+  var tId = toForm   ? toForm.formId   : '';
+
   return '<div style="background:var(--card);border:1px solid var(--border);'
-    + 'border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">'
-    + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:12px">'
+    + 'border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)" id="' + esc(pairCardId) + '">'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
     + '<span class="badge badge-transfer">Transfer Pair</span>'
-    + '<span style="font-size:.72rem;color:var(--text3);margin-left:auto">'
+    + '<span style="font-size:.7rem;color:var(--text3);margin-left:auto">'
     +   'Submitted ' + esc(fmtDate((fromForm || toForm).submittedAt) || '—') + '</span>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:12px">'
+    + '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:14px">'
     + miniPanel(fromForm, 'From')
-    + '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2">'
+    + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" style="flex-shrink:0">'
     +   '<polyline points="9 18 15 12 9 6"/></svg>'
     + miniPanel(toForm, 'To')
     + '</div>'
-    + '<div style="display:flex;justify-content:flex-end">'
-    + '<button class="btn btn-primary btn-sm" onclick="openTransferReview('
-    +   '\'' + esc(fromForm ? fromForm.formId : '') + '\','
-    +   '\'' + esc(toForm   ? toForm.formId   : '') + '\')">'
-    + 'Review Pair →</button>'
+    // Inline rejection panel for transfer pair
+    + '<div id="xreject-panel-' + esc(fId) + '-' + esc(tId) + '" class="inline-reject-panel" style="display:none;'
+    +   'margin-bottom:10px;padding:12px;background:rgba(239,68,68,.04);'
+    +   'border:1px solid rgba(239,68,68,.2);border-radius:8px">'
+    + '<div style="font-size:.72rem;font-weight:700;color:var(--red);margin-bottom:8px">'
+    +   'Rejection Comment</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+    + '<div><div style="font-size:.7rem;color:var(--text3);margin-bottom:4px">For Releasing Party</div>'
+    + '<textarea id="xreject-from-' + esc(fId) + '" placeholder="Comment for ' + esc(fromForm ? fromForm.staffName : '—') + '…" '
+    +   'style="width:100%;min-height:56px;background:var(--bg3);border:1px solid rgba(239,68,68,.3);'
+    +   'color:var(--text);padding:7px 9px;border-radius:6px;font-family:inherit;font-size:.79rem;'
+    +   'outline:none;resize:vertical"></textarea></div>'
+    + '<div><div style="font-size:.7rem;color:var(--text3);margin-bottom:4px">For Receiving Party</div>'
+    + '<textarea id="xreject-to-' + esc(tId) + '" placeholder="Comment for ' + esc(toForm ? toForm.staffName : '—') + '…" '
+    +   'style="width:100%;min-height:56px;background:var(--bg3);border:1px solid rgba(239,68,68,.3);'
+    +   'color:var(--text);padding:7px 9px;border-radius:6px;font-family:inherit;font-size:.79rem;'
+    +   'outline:none;resize:vertical"></textarea></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:6px;justify-content:flex-end">'
+    + '<button class="btn btn-secondary btn-sm" '
+    +   'onclick="_toggleXferReject(\'' + esc(fId) + '\',\'' + esc(tId) + '\')">Cancel</button>'
+    + '<button class="btn btn-danger btn-sm" '
+    +   'onclick="_submitRejectTransfer(\'' + esc(fId) + '\',\'' + esc(tId) + '\',this)">Submit Rejection</button>'
+    + '</div></div>'
+    // Action bar
+    + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">'
+    + '<button class="btn btn-danger btn-sm" '
+    +   'onclick="_toggleXferReject(\'' + esc(fId) + '\',\'' + esc(tId) + '\')">Reject Transfer ▾</button>'
+    + '<button class="btn btn-success btn-sm" '
+    +   'onclick="_submitConfirmTransfer(\'' + esc(fId) + '\',\'' + esc(tId) + '\',this)">✓ Confirm Both</button>'
     + '</div>'
     + '</div>';
 }
 
-// ─── MODAL OPENERS ────────────────────────────────────────────────────────────
-function openFormPreview(formId) {
-  _activeFormId = formId;
-  var form = MY_FORMS.find(function(f){ return f.formId === formId; })
-          || PENDING_FORMS.find(function(f){ return f.formId === formId; });
-  if (!form) { toast('Form not found', 'err'); return; }
-
-  var sub = document.getElementById('fpmSubtitle');
-  if (sub) sub.textContent = esc(form.formType || 'Enrollment') + ' — ' + esc(form.staffName || '');
-
-  document.getElementById('formPreviewBody').innerHTML = _buildFormPreviewHtml(form);
-
-  // Handle submit button state
-  var submitBtn = document.getElementById('fpmSubmitBtn');
-  var cdBadge   = document.getElementById('fpmCooldownBadge');
-  var savBtn    = document.getElementById('fpmSaveDraftBtn');
-
-  if (form.status === 'Confirmed') {
-    if (submitBtn) submitBtn.style.display = 'none';
-    if (savBtn)   savBtn.style.display    = 'none';
-    if (cdBadge)  cdBadge.style.display   = 'none';
-  } else if (form.status === 'Pending') {
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Awaiting Review'; }
-    if (savBtn)   savBtn.style.display = 'none';
-    if (cdBadge)  cdBadge.style.display = 'none';
-  } else {
-    // Draft or Rejected
-    var hasCooldown = form.cooldownUntil && new Date(form.cooldownUntil) > new Date();
-    if (submitBtn) {
-      submitBtn.disabled = !!hasCooldown;
-      submitBtn.textContent = 'Submit for Review';
-      submitBtn.style.display = '';
-    }
-    if (savBtn)  savBtn.style.display = form.status === 'Draft' ? '' : 'none';
-    if (cdBadge) {
-      cdBadge.style.display = hasCooldown ? '' : 'none';
-      if (hasCooldown) {
-        cdBadge.textContent = '⏱ ' + _formatCooldown(form.cooldownUntil);
-        _startCooldownTick(formId, form.cooldownUntil, 'fpmCooldownBadge');
-      }
-    }
+// ─── INLINE REJECT TOGGLE HELPERS ────────────────────────────────────────────
+function _toggleInlineReject(formId) {
+  var panel  = document.getElementById('reject-panel-' + formId);
+  var toggle = document.getElementById('reject-toggle-' + formId);
+  if (!panel) return;
+  var open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  if (toggle) toggle.textContent = open ? 'Reject ▾' : 'Cancel ▴';
+  if (!open) {
+    var ta = document.getElementById('reject-comment-' + formId);
+    if (ta) ta.focus();
   }
-
-  openModal('formPreviewModal');
 }
 
-function openSingleReview(formId) {
-  _activeFormId = formId;
-  _srmRejectMode = false;
-  var form = PENDING_FORMS.find(function(f){ return f.formId === formId; });
-  if (!form) { toast('Form not found', 'err'); return; }
-
-  var sub = document.getElementById('srmSubtitle');
-  if (sub) sub.textContent = esc(form.formType || 'Enrollment') + ' — ' + esc(form.staffName || '');
-
-  document.getElementById('singleReviewBody').innerHTML = _buildFormPreviewHtml(form);
-  document.getElementById('srmRejectPanel').style.display   = 'none';
-  document.getElementById('srmRejectComment').value         = '';
-  document.getElementById('srmRejectBtn').textContent       = 'Reject';
-  openModal('singleReviewModal');
+function _toggleXferReject(fId, tId) {
+  var panel = document.getElementById('xreject-panel-' + fId + '-' + tId);
+  if (!panel) return;
+  var open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
 }
 
-function openTransferReview(fromFormId, toFormId) {
-  _activeFromFormId = fromFormId;
-  _activeToFormId   = toFormId;
-  _trmRejectMode    = false;
-
-  function loadPanel(formId, bodyId, rejectId) {
-    var el = document.getElementById(bodyId);
-    if (!el) return;
-    if (!formId) { el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:24px">No form</div>'; return; }
-    var form = PENDING_FORMS.find(function(f){ return f.formId === formId; });
-    el.innerHTML = form ? _buildFormPreviewHtml(form) : '<div style="color:var(--red);padding:16px">Form not found</div>';
-    var rp = document.getElementById(rejectId);
-    if (rp) rp.style.display = 'none';
-  }
-
-  loadPanel(fromFormId, 'trmFromBody', 'trmFromRejectPanel');
-  loadPanel(toFormId,   'trmToBody',   'trmToRejectPanel');
-  document.getElementById('trmRejectBtn').textContent = 'Reject Transfer';
-  openModal('transferReviewModal');
-}
-
-function openReviseForm(formId) {
-  _activeFormId = formId;
-  var form = MY_FORMS.find(function(f){ return f.formId === formId; });
-  if (!form) { toast('Form not found', 'err'); return; }
-
-  var banner = document.getElementById('rfmRejectionComment');
-  if (banner) banner.textContent = form.rejectionComment || 'No comment provided.';
-
-  document.getElementById('rfmFormBody').innerHTML = _buildFormPreviewHtml(form);
-
-  var resubBtn = document.getElementById('rfmResubmitBtn');
-  var cdBadge  = document.getElementById('rfmCooldownBadge');
-  var hasCooldown = form.cooldownUntil && new Date(form.cooldownUntil) > new Date();
-  if (resubBtn) {
-    resubBtn.disabled = !!hasCooldown;
-    resubBtn.textContent = hasCooldown ? 'Resubmit (Cooling Down)' : 'Resubmit for Review';
-  }
-  if (cdBadge) {
-    cdBadge.style.display = hasCooldown ? '' : 'none';
-    if (hasCooldown) {
-      cdBadge.textContent = '⏱ ' + _formatCooldown(form.cooldownUntil);
-      _startCooldownTick(formId, form.cooldownUntil, 'rfmCooldownBadge');
-    }
-  }
-
-  openModal('reviseFormModal');
-}
-
-// ─── FORM PREVIEW HTML BUILDER ────────────────────────────────────────────────
-function _buildFormPreviewHtml(form) {
-  var assets = form.assets;
-  if (!assets) {
-    try { assets = JSON.parse(form.assetsJson || '[]'); } catch(e) { assets = []; }
-  }
-  var statusColors = {
-    Draft:     { bg:'rgba(107,130,160,.12)', color:'var(--text3)' },
-    Pending:   { bg:'rgba(59,130,246,.1)',   color:'var(--blue)' },
-    Confirmed: { bg:'rgba(22,163,74,.1)',    color:'var(--green)' },
-    Rejected:  { bg:'rgba(239,68,68,.1)',    color:'var(--red)' }
-  };
-  var sc = statusColors[form.status] || statusColors.Draft;
-
-  var html = '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;'
-    + 'padding:14px 18px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-    + '<div>'
-    + '<div style="font-size:.68rem;color:var(--text3);font-weight:700;text-transform:uppercase;'
-    +   'letter-spacing:.05em;margin-bottom:3px">Accountable Staff</div>'
-    + '<div style="font-weight:700">' + esc(form.staffName || '—') + '</div>'
-    + '</div>'
-    + '<div>'
-    + '<div style="font-size:.68rem;color:var(--text3);font-weight:700;text-transform:uppercase;'
-    +   'letter-spacing:.05em;margin-bottom:3px">Employee ID</div>'
-    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:.85rem">' + esc(form.empId || '—') + '</div>'
-    + '</div>'
-    + '<div>'
-    + '<div style="font-size:.68rem;color:var(--text3);font-weight:700;text-transform:uppercase;'
-    +   'letter-spacing:.05em;margin-bottom:3px">Designation</div>'
-    + '<div>' + esc(form.designation || '—') + '</div>'
-    + '</div>'
-    + '<div>'
-    + '<div style="font-size:.68rem;color:var(--text3);font-weight:700;text-transform:uppercase;'
-    +   'letter-spacing:.05em;margin-bottom:3px">Status</div>'
-    + '<span class="badge" style="background:' + sc.bg + ';color:' + sc.color + '">'
-    +   esc(form.status || '—') + '</span>'
-    + '</div>'
-    + '</div>';
-
-  // Asset table
-  if (assets.length) {
-    html += '<div style="font-size:.72rem;font-weight:700;color:var(--text3);text-transform:uppercase;'
-      + 'letter-spacing:.06em;margin-bottom:8px">' + assets.length + ' Asset(s)</div>'
-      + '<div class="tbl-wrap" style="margin-bottom:0;max-height:300px;overflow-y:auto">'
-      + '<table><thead><tr>'
-      + '<th>Barcode</th><th>Type</th><th>Brand</th><th>Serial</th><th>Condition</th>'
-      + '</tr></thead><tbody>'
-      + assets.map(function(a) {
-          return '<tr>'
-            + '<td><span class="mono-bc">' + esc(a.barcode || a.Barcode || '—') + '</span></td>'
-            + '<td><span class="type-tag">' + esc(a.type || a.Type || '—') + '</span></td>'
-            + '<td>' + esc(a.brand || a.Brand || '—') + '</td>'
-            + '<td class="mono-sm">' + esc(a.serial || a.Serial || '—') + '</td>'
-            + '<td><span class="cond-' + (a.condition || a.Condition || 'good').toLowerCase() + '">'
-            +   esc(a.condition || a.Condition || '—') + '</span></td>'
-            + '</tr>';
-        }).join('')
-      + '</tbody></table></div>';
-  } else {
-    html += '<div style="color:var(--text3);font-size:.84rem;padding:16px 0;text-align:center">'
-      + 'No assets in this form.</div>';
-  }
-
-  return html;
-}
-
-// ─── SUBMIT HANDLERS ──────────────────────────────────────────────────────────
-function saveDraftFromPreview() {
-  toast('Form saved as Draft.', 'ok');
-  closeModal('formPreviewModal');
-}
-
-function submitFromPreview() {
-  var btn = document.getElementById('fpmSubmitBtn');
+// ─── SUPERVISOR ACTIONS ───────────────────────────────────────────────────────
+function _submitConfirmForm(formId, btn) {
   _lockBtn(btn);
   google.script.run
     .withSuccessHandler(function(r) {
       _unlockBtn(btn);
-      if (r && r.cooldown) {
-        // Rate limit hit
-        var cd = document.getElementById('fpmCooldownBadge');
-        if (cd) { cd.style.display = ''; cd.textContent = '⏱ ' + _formatCooldown(r.cooldownUntil); }
-        if (btn) { btn.disabled = true; }
-        toast('Please wait before resubmitting. Cooldown active.', 'warn');
-        _loadApprovalData();
-        return;
-      }
-      toast(typeof r === 'string' ? r : 'Form submitted for review.', 'ok');
-      closeModal('formPreviewModal');
-      _loadApprovalData();
-    })
-    .withFailureHandler(function(err) {
-      _unlockBtn(btn);
-      toast(err.message, 'err');
-    })
-    .submitFormForReview(_activeFormId, SESSION.username);
-}
-
-function toggleSrmReject() {
-  _srmRejectMode = !_srmRejectMode;
-  var panel  = document.getElementById('srmRejectPanel');
-  var btn    = document.getElementById('srmRejectBtn');
-  var cfmBtn = document.getElementById('srmConfirmBtn');
-  if (panel) panel.style.display = _srmRejectMode ? '' : 'none';
-  if (btn)   btn.textContent  = _srmRejectMode ? 'Cancel Reject' : 'Reject';
-  if (cfmBtn) cfmBtn.textContent = _srmRejectMode ? 'Submit Rejection' : '✓ Confirm';
-  if (!_srmRejectMode) document.getElementById('srmRejectComment').value = '';
-}
-
-function confirmSingleFormAction() {
-  if (_srmRejectMode) {
-    var comment = document.getElementById('srmRejectComment').value.trim();
-    if (!comment) { toast('Please enter a rejection reason.', 'warn'); return; }
-    var btn = document.getElementById('srmConfirmBtn');
-    _lockBtn(btn);
-    google.script.run
-      .withSuccessHandler(function(r) {
-        _unlockBtn(btn);
-        toast(typeof r === 'string' ? r : 'Form rejected.', r && r.startsWith && r.startsWith('Error') ? 'err' : 'ok');
-        closeModal('singleReviewModal');
-        _loadApprovalData();
-        if (currentPage === 'for-approval') renderForApprovalPage();
-      })
-      .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-      .rejectForm(_activeFormId, SESSION.username, comment);
-  } else {
-    var btn = document.getElementById('srmConfirmBtn');
-    _lockBtn(btn);
-    google.script.run
-      .withSuccessHandler(function(r) {
-        _unlockBtn(btn);
-        toast(typeof r === 'string' ? r : 'Form confirmed.', r && r.startsWith && r.startsWith('Error') ? 'err' : 'ok');
-        closeModal('singleReviewModal');
-        _loadApprovalData();
-        if (currentPage === 'for-approval') renderForApprovalPage();
-      })
-      .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-      .confirmForm(_activeFormId, SESSION.username);
-  }
-}
-
-function toggleTrmReject() {
-  _trmRejectMode = !_trmRejectMode;
-  var fromRP = document.getElementById('trmFromRejectPanel');
-  var toRP   = document.getElementById('trmToRejectPanel');
-  var btn    = document.getElementById('trmRejectBtn');
-  var cfmBtn = document.getElementById('trmConfirmBtn');
-  if (fromRP) fromRP.style.display = _trmRejectMode ? '' : 'none';
-  if (toRP)   toRP.style.display   = _trmRejectMode ? '' : 'none';
-  if (btn)    btn.textContent  = _trmRejectMode ? 'Cancel' : 'Reject Transfer';
-  if (cfmBtn) cfmBtn.textContent = _trmRejectMode ? 'Submit Rejection' : '✓ Confirm Both';
-  if (!_trmRejectMode) {
-    document.getElementById('trmFromRejectComment').value = '';
-    document.getElementById('trmToRejectComment').value   = '';
-  }
-}
-
-function confirmTransferPairAction() {
-  var btn = document.getElementById('trmConfirmBtn');
-  if (_trmRejectMode) {
-    var fromComment = document.getElementById('trmFromRejectComment').value.trim();
-    var toComment   = document.getElementById('trmToRejectComment').value.trim();
-    if (!fromComment && !toComment) { toast('Enter at least one rejection comment.', 'warn'); return; }
-    _lockBtn(btn);
-    google.script.run
-      .withSuccessHandler(function(r) {
-        _unlockBtn(btn);
-        toast(typeof r === 'string' ? r : 'Transfer rejected.', r && r.startsWith && r.startsWith('Error') ? 'err' : 'ok');
-        closeModal('transferReviewModal');
-        _loadApprovalData();
+      var msg = typeof r === 'string' ? r : (r && r.message ? r.message : 'Form confirmed.');
+      var isErr = typeof msg === 'string' && msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        _loadApprovalData(function() { renderPendingReview(); });
         loadData();
-      })
-      .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-      .rejectTransferPair(_activeFromFormId, _activeToFormId, SESSION.username, fromComment, toComment);
-  } else {
-    _lockBtn(btn);
-    google.script.run
-      .withSuccessHandler(function(r) {
-        _unlockBtn(btn);
-        toast(typeof r === 'string' ? r : 'Transfer confirmed.', r && r.startsWith && r.startsWith('Error') ? 'err' : 'ok');
-        closeModal('transferReviewModal');
-        _loadApprovalData();
-        loadData();
-      })
-      .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-      .confirmTransferPair(_activeFromFormId, _activeToFormId, SESSION.username);
-  }
-}
-
-function resubmitFormAction() {
-  var btn = document.getElementById('rfmResubmitBtn');
-  _lockBtn(btn);
-  google.script.run
-    .withSuccessHandler(function(r) {
-      _unlockBtn(btn);
-      if (r && r.cooldown) {
-        var cd = document.getElementById('rfmCooldownBadge');
-        if (cd) { cd.style.display = ''; cd.textContent = '⏱ ' + _formatCooldown(r.cooldownUntil); }
-        if (btn) btn.disabled = true;
-        toast('Cooldown active. Please wait before resubmitting.', 'warn');
-        return;
       }
-      toast(typeof r === 'string' ? r : 'Form resubmitted for review.', 'ok');
-      closeModal('reviseFormModal');
-      _loadApprovalData();
-      if (currentPage === 'for-approval') renderForApprovalPage();
     })
     .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-    .submitFormForReview(_activeFormId, SESSION.username);
+    .confirmForm(formId, SESSION.username);
+}
+
+function _submitRejectForm(formId, btn) {
+  var comment = (document.getElementById('reject-comment-' + formId) || {}).value;
+  if (!comment || !comment.trim()) { toast('Please enter a rejection reason.', 'warn'); return; }
+  _lockBtn(btn);
+  google.script.run
+    .withSuccessHandler(function(r) {
+      _unlockBtn(btn);
+      var msg = typeof r === 'string' ? r : (r && r.message ? r.message : 'Form rejected.');
+      var isErr = typeof msg === 'string' && msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        _loadApprovalData(function() { renderPendingReview(); });
+      }
+    })
+    .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
+    .rejectForm(formId, SESSION.username, comment.trim());
+}
+
+function _submitConfirmTransfer(fId, tId, btn) {
+  _lockBtn(btn);
+  google.script.run
+    .withSuccessHandler(function(r) {
+      _unlockBtn(btn);
+      var msg = typeof r === 'string' ? r : (r && r.message ? r.message : 'Transfer confirmed.');
+      var isErr = typeof msg === 'string' && msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        _loadApprovalData(function() { renderPendingReview(); });
+        loadData();
+      }
+    })
+    .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
+    .confirmTransferPair(fId, tId, SESSION.username);
+}
+
+function _submitRejectTransfer(fId, tId, btn) {
+  var fromComment = (document.getElementById('xreject-from-' + fId) || {}).value || '';
+  var toComment   = (document.getElementById('xreject-to-'   + tId) || {}).value || '';
+  if (!fromComment.trim() && !toComment.trim()) {
+    toast('Enter at least one rejection comment.', 'warn'); return;
+  }
+  _lockBtn(btn);
+  google.script.run
+    .withSuccessHandler(function(r) {
+      _unlockBtn(btn);
+      var msg = typeof r === 'string' ? r : (r && r.message ? r.message : 'Transfer rejected.');
+      var isErr = typeof msg === 'string' && msg.startsWith('Error');
+      toast(msg, isErr ? 'err' : 'ok');
+      if (!isErr) {
+        _loadApprovalData(function() { renderPendingReview(); });
+        loadData();
+      }
+    })
+    .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
+    .rejectTransferPair(fId, tId, SESSION.username, fromComment.trim(), toComment.trim());
 }
 </script>

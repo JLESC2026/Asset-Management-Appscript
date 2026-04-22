@@ -536,4 +536,108 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
   #transferReviewPanels{grid-template-columns:1fr!important}
   #transferReviewPanels>svg{display:none}
 }
+
+/* ── APPROVAL CARDS (revised) ── */
+.approval-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+  transition: border-color .15s, box-shadow .18s;
+  position: relative;
+}
+.approval-card:hover {
+  box-shadow: var(--shadow-md);
+}
+.approval-card-draft {
+  border-color: var(--border2);
+}
+.approval-card-draft:hover {
+  border-color: var(--accent3);
+}
+.approval-card-pending {
+  border-color: rgba(59,130,246,.35);
+  background: rgba(59,130,246,.015);
+}
+.approval-card-confirmed {
+  border-color: rgba(22,163,74,.32);
+  background: rgba(22,163,74,.015);
+}
+.approval-card-rejected {
+  border-color: rgba(239,68,68,.38);
+  background: rgba(239,68,68,.015);
+}
+.approval-card-rejected:hover {
+  border-color: var(--red);
+  box-shadow: 0 4px 16px rgba(239,68,68,.1);
+}
+
+/* ── INLINE REJECT PANEL ── */
+.inline-reject-panel {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: rgba(239,68,68,.04);
+  border: 1px solid rgba(239,68,68,.22);
+  border-radius: var(--radius2);
+  animation: irFadeIn .18s ease;
+}
+@keyframes irFadeIn {
+  from { opacity:0; transform: translateY(-6px); }
+  to   { opacity:1; transform: none; }
+}
+.inline-reject-panel textarea {
+  width: 100%;
+  min-height: 64px;
+  background: var(--bg3);
+  border: 1px solid rgba(239,68,68,.32);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: var(--radius2);
+  font-family: inherit;
+  font-size: .82rem;
+  outline: none;
+  resize: vertical;
+  transition: border-color .18s;
+}
+.inline-reject-panel textarea:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(239,68,68,.1);
+}
+
+/* ── COOLDOWN BADGE ── */
+.cooldown-badge {
+  display: inline-block;
+  background: rgba(232,81,24,.1);
+  border: 1px solid rgba(232,81,24,.28);
+  color: var(--orange);
+  font-size: .74rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+/* ── ASSET LIST MODAL ── */
+#assetListModal .tbl-wrap table {
+  table-layout: auto;
+}
+
+/* ── FOR APPROVAL PAGE RESPONSIVE ── */
+@media (max-width:640px) {
+  #myFormsGrid            { grid-template-columns: 1fr !important; }
+  #pendingEnrollmentGrid  { grid-template-columns: 1fr !important; }
+  .approval-card          { padding: 12px 14px; }
+}
+
+/* ── Transfer pair review grid responsive ── */
+@media (max-width:700px) {
+  [id^="xpair-"] [style*="grid-template-columns:1fr auto 1fr"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+  [id^="xpair-"] [style*="grid-template-columns:1fr auto 1fr"] > svg {
+    display: none !important;
+  }
+}
 </style>

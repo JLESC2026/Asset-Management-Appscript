@@ -46,14 +46,18 @@ var _stEmpRegistry = [];
 var _dirtyPages    = [];
 var _scopeCache    = null;
 var ORG_LOOKUP = {};
+
 // ── Approval System State ─────────────────────────────────────────────────────
 var PENDING_FORMS = [];
 var MY_FORMS      = [];
 var APPROVAL_CFG  = {};
 var _approvalPollTimer = null;
+
+// ── Asset List Modal state ────────────────────────────────────────────────────
+var _assetListFormId = '';
+
 // ═══════════════════════════════════════
 //  LOCATION RESOLUTION HELPERS
-//  Used by JS_StaffAssets and JS_EquipmentRecord
 // ═══════════════════════════════════════
 
 var _LOC_NODIST   = '(No District)';
@@ -68,26 +72,16 @@ function _isSentinel(val) {
     || val === '(No Division)';
 }
 
-/**
- * Resolves the full location of an asset, filling in missing levels.
- * Priority:
- *   1. Direct Division + District columns on the asset
- *   2. ORG_LOOKUP via AssetLocation (col T) or Branch
- *   3. BaseOffice / Branch / Location string as last resort
- * Returns { div, dist, area, branch } or null if truly no location.
- */
 function _resolveAssetLocation(asset) {
   var div    = (asset.Division || '').trim();
   var dist   = (asset.District || '').trim();
   var area   = (asset.Area     || '').trim();
   var branch = (asset.Branch   || '').trim();
 
-  // 1. Have Division → enough to place the asset
   if (div) {
     return { div: div, dist: dist, area: area, branch: branch };
   }
 
-  // 2. Try ORG_LOOKUP via AssetLocation (col T) or Branch
   var resolved = _resolveByOrgLookup(asset);
   if (resolved && (resolved.division || resolved.district)) {
     return {
@@ -98,13 +92,12 @@ function _resolveAssetLocation(asset) {
     };
   }
 
-  // 3. Last resort: BaseOffice / Branch / Location as a label
   var fallback = (asset.BaseOffice || asset.Branch || asset.Location || '').trim();
   if (fallback) {
     return { div: fallback, dist: '', area: '', branch: '' };
   }
 
-  return null; // truly unlocated — skipped in Staff Assets, bucketed as Unassigned in Equip Record
+  return null;
 }
 
 var _ICO = {
@@ -116,7 +109,8 @@ var _ICO = {
   view:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
   edit: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
   barcode: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="13" y1="8" x2="14" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>',
-  return: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>'
+  return: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>',
+  print: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>'
 };
 
 // ── Floating tooltip init ─────────────────────────────────────────────────────
@@ -258,7 +252,6 @@ function isSenior() { return !!(SESSION && SESSION.roleTier === 'senior'); }
 function isFE()     { return !!(SESSION && SESSION.roleTier === 'fe'); }
 function isHO()     { return isAdmin(); }
 
-// ── Permission helpers — ADD these immediately after the 4 above ──
 function canAdd()      { return !!(SESSION && SESSION.perms && SESSION.perms.canAdd); }
 function canEdit()     { return !!(SESSION && SESSION.perms && SESSION.perms.canEdit); }
 function canDelete()   { return !!(SESSION && SESSION.perms && SESSION.perms.canDelete); }
@@ -273,8 +266,8 @@ function canSeeHO()    { return SESSION && (SESSION.scopeType === 'ho'    || SES
 function canSeeField() { return SESSION && (SESSION.scopeType === 'field' || SESSION.scopeType === 'both'); }
 function isDualScope() { return SESSION && SESSION.scopeType === 'both'; }
 
-function canSubmitForm()       { return !!(SESSION && (SESSION.roleTier === 'fe' || SESSION.roleTier === 'senior')); }
-function canReviewForms()      { return !!(SESSION && (SESSION.roleTier === 'senior' || SESSION.roleTier === 'ho')); }
+function canSubmitForm()        { return !!(SESSION && (SESSION.roleTier === 'fe' || SESSION.roleTier === 'senior')); }
+function canReviewForms()       { return !!(SESSION && (SESSION.roleTier === 'senior' || SESSION.roleTier === 'ho')); }
 function canSeeForApprovalPage(){ return !!SESSION; }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -337,13 +330,7 @@ function _resolveByOrgLookup(asset) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  _filterByScope  — FIX v2
-//
-//  The EffectiveAssignment column is the single source of truth:
-//    'Central Office' → HO users only
-//    'Field Office'   → Field users only (scoped by Division / District)
-//    blank            → shown to nobody (legacy / disposal rows)
-//
+//  _filterByScope
 // ─────────────────────────────────────────────────────────────────────────────
 function _filterByScope(assets) {
   if (assets === ASSETS && _scopeCache) return _scopeCache;
@@ -359,22 +346,19 @@ function _filterByScope(assets) {
     var assetDiv  = (a.Division  || '').toLowerCase().trim();
     var assetDist = (a.District  || '').toLowerCase().trim();
 
-    // HO-tier users with field scope see ALL field assets (they have full div/dist lists)
     if (isHO()) {
-      if (userDivs.length === 0 && userDists.length === 0) return true; // full access
+      if (userDivs.length === 0 && userDists.length === 0) return true;
       if (assetDiv  && userDivs.length  > 0 && userDivs.indexOf(assetDiv)   >= 0) return true;
       if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) return true;
-      return assetDiv === '' && assetDist === ''; // include unlocated field assets
+      return assetDiv === '' && assetDist === '';
     }
 
-    // Senior FE: division + district match
     if (isSenior()) {
       if (assetDiv  && userDivs.length  > 0 && userDivs.indexOf(assetDiv)   >= 0) return true;
       if (assetDist && userDists.length > 0 && userDists.indexOf(assetDist) >= 0) return true;
       return false;
     }
 
-    // Regular FE: district match only
     if (assetDist && userDists.length > 0) return userDists.indexOf(assetDist) >= 0;
     return false;
   }
@@ -408,13 +392,11 @@ function _filterByScope(assets) {
 function _getFEDistricts(){ return _getScopeDistricts(); }
 function _filterByFEDistricts(assets){ return _filterByScope(assets); }
 
-// ─── SCOPE LABEL HELPER ───────────────────────────────────────────────────────
 function _getScopeLabel() {
   var scope = SESSION.scopeType || (isAdmin() ? 'ho' : 'field');
   if (scope === 'both') return 'HO & FE';
   if (scope === 'ho')   return 'Head Office';
 
-  // FE (regular user) → districts only
   if (!isSenior() && !isAdmin()) {
     var dists = (SESSION.userDistricts || []).filter(function(d){ return d && d.trim(); });
     if (!dists.length) return 'Field';
@@ -427,7 +409,6 @@ function _getScopeLabel() {
     return 'Districts ' + dn[0] + '–' + dn[dn.length-1];
   }
 
-  // SFE / field-scope admin → divisions
   var divs = (SESSION.userDivisions || []).filter(function(d){ return d && d.trim(); });
   if (!divs.length) {
     var dists2 = (SESSION.userDistricts || []).filter(function(d){ return d && d.trim(); });
@@ -457,7 +438,7 @@ function _getScopeLabel() {
 // ═══════════════════════════════════════
 function openModal(id){
   document.getElementById(id).classList.add('open');
-  
+
   setTimeout(function() {
     var modal  = document.getElementById(id);
     if (!modal) return;
@@ -477,9 +458,6 @@ function openModal(id){
   }, 100);
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  ESCAPE KEY & KEYBOARD SHORTCUTS
-// ═══════════════════════════════════════════════════════════════════════
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     var openModals = document.querySelectorAll('.modal-backdrop.open');
@@ -488,20 +466,20 @@ document.addEventListener('keydown', function(e) {
       topModal.classList.remove('open');
     }
   }
-  
+
   if (e.key === 'Tab') {
     var openModal = document.querySelector('.modal-backdrop.open .modal');
     if (!openModal) return;
-    
+
     var focusable = openModal.querySelectorAll(
       'button:not([disabled]),input:not([disabled]),select:not([disabled]),' +
       'textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
     );
     if (focusable.length === 0) return;
-    
+
     var first = focusable[0];
     var last = focusable[focusable.length - 1];
-    
+
     if (e.shiftKey && document.activeElement === first) {
       e.preventDefault();
       last.focus();
@@ -510,7 +488,7 @@ document.addEventListener('keydown', function(e) {
       first.focus();
     }
   }
-  
+
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     var openModals = document.querySelectorAll('.modal-backdrop.open');
     if (openModals.length > 0) {
@@ -520,9 +498,9 @@ document.addEventListener('keydown', function(e) {
     }
   }
 });
+
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 
-// ─── MOBILE SIDEBAR HELPERS ──────────────────────────────────────────────────
 function toggleMobileSidebar() {
   var sb = document.querySelector('.sidebar');
   var overlay = document.getElementById('sidebarOverlay');
@@ -537,11 +515,38 @@ function closeMobileSidebar() {
 }
 
 // ═══════════════════════════════════════
+//  PRINT GATE (NEW)
+//  Checks whether all assets for a staff/branch have confirmed
+//  accountability forms before allowing PDF print.
+//  Grandfathered assets (pre-existing) always pass.
+// ═══════════════════════════════════════
+function _checkPrintGate(assets) {
+  if (!assets || !assets.length) return true;
+
+  var blocked = assets.filter(function(a) {
+    // Grandfathered OR Confirmed → pass
+    var isGrandfathered = String(a.Grandfathered || '').toLowerCase() === 'true';
+    var isConfirmed     = (a.jsApprovalStatus || 'Confirmed') === 'Confirmed';
+    return !isConfirmed && !isGrandfathered;
+  });
+
+  if (blocked.length === 0) return true;
+
+  toast(
+    blocked.length + ' asset' + (blocked.length !== 1 ? 's' : '') +
+    ' still pending supervisor approval. ' +
+    'The form can be printed once all assets are confirmed in the For Approval page.',
+    'warn'
+  );
+  return false;
+}
+
+// ═══════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════
 function doLogin(){
   if(document.getElementById('loginBtn').disabled) return;
-  
+
   var u=document.getElementById('authUser').value.trim();
   var p=document.getElementById('authPass').value;
   var e=document.getElementById('authError');
@@ -673,7 +678,6 @@ function logout(){
 function _applyPermissions() {
   if (!SESSION) return;
 
-  // ── Hide "Add Asset" buttons for users without canAdd ───────────────────
   if (!canAdd()) {
     document.querySelectorAll('button').forEach(function(btn) {
       var oc = btn.getAttribute('onclick') || '';
@@ -681,7 +685,6 @@ function _applyPermissions() {
     });
   }
 
-  // ── Hide standalone "New Borrow" button ─────────────────────────────────
   if (!canBorrow()) {
     document.querySelectorAll('button').forEach(function(btn) {
       var oc = btn.getAttribute('onclick') || '';
@@ -690,7 +693,6 @@ function _applyPermissions() {
     });
   }
 
-  // ── Hide standalone "New Transfer" button ────────────────────────────────
   if (!canTransfer()) {
     document.querySelectorAll('button').forEach(function(btn) {
       var oc = btn.getAttribute('onclick') || '';
@@ -699,7 +701,6 @@ function _applyPermissions() {
     });
   }
 
-  // ── Hide bulk delete controls for users without canDelete ────────────────
   if (!canDelete()) {
     ['btnBulkDelete','btnBulkDelSpare','btnBulkDelAllocated',
      'btnBulkDelActiveBorrow','btnBulkDelDisposal'].forEach(function(id) {
@@ -710,7 +711,6 @@ function _applyPermissions() {
     if (cbAll) cbAll.closest('th').style.visibility = 'hidden';
   }
 
-  // ── View-only banner ─────────────────────────────────────────────────────
   if (isViewOnly()) {
     var banner = document.createElement('div');
     banner.style.cssText = 'position:fixed;top:56px;left:0;right:0;z-index:500;background:rgba(217,119,6,.12);border-bottom:1px solid rgba(217,119,6,.3);padding:6px 20px;font-size:.78rem;color:var(--yellow);font-weight:600;text-align:center;pointer-events:none';
@@ -718,8 +718,6 @@ function _applyPermissions() {
     document.body.insertBefore(banner, document.getElementById('app'));
   }
 
-  // ── Role badge in topbar ─────────────────────────────────────────────────
-  // ── Designation badge (districtBadge) + scope label (topRole) ────────────
   var badge = document.getElementById('districtBadge');
   if (!badge) return;
   var desig = (SESSION.designation || '').trim();
@@ -732,7 +730,6 @@ function _applyPermissions() {
   } else {
     badge.style.display = 'none';
   }
-  // Scope visibility label inside user-badge
   var topRoleEl = document.getElementById('topRole');
   if (topRoleEl) topRoleEl.textContent = _getScopeLabel();
 }
@@ -839,15 +836,14 @@ function renderAll(){
     'transfers':        renderTransferTable,
     'activity':         renderActivityTable,
     'staff-assets':     renderStaffAssets,
-    'equipment-record': renderEquipmentRecord
-    , 'for-approval':    renderForApprovalPage
+    'equipment-record': renderEquipmentRecord,
+    'for-approval':     renderForApprovalPage
   };
 
   var renderer = pageRenderMap[currentPage];
   if (renderer) renderer();
 
   _dirtyPages = Object.keys(pageRenderMap).filter(function(p){ return p !== currentPage && p !== 'dashboard'; });
-  // ── Load approval data ──────────────────────────────────────────────────────
   _loadApprovalData();
 }
 
@@ -883,18 +879,18 @@ function updateBadges(){
   document.getElementById('nbDisposal').textContent  = disp;
   document.getElementById('nbBorrowActive').textContent = borr;
   document.getElementById('nbBorrowPool').textContent   = pool;
-  
+
   var nbBA = document.getElementById('nbBorrowActiveSub');
   if (nbBA) nbBA.textContent = borr;
   var nbBP = document.getElementById('nbBorrowPoolSub');
   if (nbBP) nbBP.textContent = pool;
-  
+
   var equipCount = _filterByScope(ASSETS.filter(function(a){return a.status !== 'disposal';})).length;
   var equipEl = document.getElementById('nbEquipment');
   if(equipEl) equipEl.textContent = equipCount;
   var staffEl = document.getElementById('nbStaffAssets');
   if(staffEl) staffEl.textContent = alloc;
-  // ── Approval badge ──────────────────────────────────────────────────────────
+
   _updateApprovalBadge();
 }
 
@@ -904,13 +900,11 @@ function _updateApprovalBadge() {
   el.classList.remove('nb-loading');
 
   if (!canReviewForms()) {
-    // For FEs — show their own rejected form count as a nudge
     var rejected = MY_FORMS.filter(function(f){ return f.status === 'Rejected'; }).length;
     el.textContent = rejected || '0';
     el.style.display = rejected ? '' : 'none';
     return;
   }
-  // For supervisors/admins — show pending review count
   var pending = PENDING_FORMS.length;
   el.textContent = pending || '0';
   el.style.display = pending ? '' : 'none';
@@ -940,7 +934,6 @@ function _startCooldownTick(formId, cooldownUntil, displayElId) {
       var cdEl = document.getElementById(displayElId);
       if (cdEl) {
         cdEl.style.display = 'none';
-        // Re-enable submit button if present
         var btn = document.getElementById('approvalSubmitBtn-' + formId);
         if (btn) { btn.disabled = false; btn.textContent = 'Submit for Review'; }
       }
@@ -951,8 +944,14 @@ function _startCooldownTick(formId, cooldownUntil, displayElId) {
   }, 1000);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  _loadApprovalData  —  accepts optional callback (Step 1 fix)
+// ─────────────────────────────────────────────────────────────────────────────
 function _loadApprovalData(onComplete) {
-  if (!SESSION) return;
+  if (!SESSION) {
+    if (typeof onComplete === 'function') onComplete();
+    return;
+  }
   google.script.run
     .withSuccessHandler(function(r) {
       MY_FORMS      = _parseApprovalForms(r.myForms      || []);
@@ -978,6 +977,42 @@ function _parseApprovalForms(forms) {
     f.assetCount = f.assets.length;
     return f;
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  openAssetListModal  —  shows assets in a form without opening the PDF
+// ─────────────────────────────────────────────────────────────────────────────
+function openAssetListModal(formId) {
+  _assetListFormId = formId;
+  var form = MY_FORMS.find(function(f){ return f.formId === formId; })
+          || PENDING_FORMS.find(function(f){ return f.formId === formId; });
+  if (!form) { toast('Form not found', 'err'); return; }
+
+  var assets = form.assets;
+  if (!assets) {
+    try { assets = JSON.parse(form.assetsJson || '[]'); } catch(e) { assets = []; }
+  }
+
+  document.getElementById('assetListModalTitle').textContent = 'Assets in ' + form.formId;
+  document.getElementById('assetListModalSubtitle').textContent =
+    form.staffName + ' · ' + (form.formType || 'Enrollment');
+
+  var tbody = document.getElementById('assetListModalBody');
+  if (!tbody) return;
+  tbody.innerHTML = assets.length
+    ? assets.map(function(a) {
+        return '<tr>'
+          + '<td><span class="mono-bc">' + esc(a.barcode || a.Barcode || '—') + '</span></td>'
+          + '<td><span class="type-tag">' + esc(a.type || a.Type || '—') + '</span></td>'
+          + '<td>' + esc(a.brand || a.Brand || '—') + '</td>'
+          + '<td class="mono-sm">' + esc(a.serial || a.Serial || '—') + '</td>'
+          + '<td><span class="cond-' + (a.condition || a.Condition || 'good').toLowerCase() + '">'
+          +   esc(a.condition || a.Condition || '—') + '</span></td>'
+          + '</tr>';
+      }).join('')
+    : '<tr><td colspan="5" class="tbl-empty">No assets in this form.</td></tr>';
+
+  openModal('assetListModal');
 }
 
 // ═══════════════════════════════════════

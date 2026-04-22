@@ -38,7 +38,7 @@
         <div class="field"><label>Condition</label><select id="fCondition"><option>New</option><option>Good</option><option>Damage</option><option>Repair</option></select></div>
       </div>
       <div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(124,106,247,.08);border:1px solid rgba(124,106,247,.25);font-size:.78rem;color:var(--accent2)">
-        ℹ New assets added here go to the <strong>Spare Pool</strong>. You can allocate them later.
+        ℹ New assets go to the <strong>Spare Pool</strong>. An accountability form draft will be created automatically — you'll submit it for supervisor approval on the <strong>For Approval</strong> page.
       </div>
       <div id="laptopSpecsSection" style="display:none">
         <div class="enroll-section-title">Laptop Specifications</div>
@@ -50,7 +50,7 @@
       </div>
     </div>
 
-    <!-- Step 2: Location & Warranty -->
+    <!-- Step 2: Location & Purchase (with Accountable Person) -->
     <div class="modal-body" id="enrollStep2" style="display:none">
       <div class="enroll-section-title">Purchase &amp; Warranty</div>
       <div class="form-grid" style="margin-bottom:14px">
@@ -67,6 +67,7 @@
         </div>
         <div class="field"><label>Warranty Validity</label><input type="date" id="fWVal" readonly style="opacity:.7;cursor:not-allowed"/></div>
       </div>
+
       <div class="enroll-section-title">Location</div>
       <div class="form-grid" style="margin-bottom:14px">
         <div class="field">
@@ -86,11 +87,18 @@
           <div class="field"><label>Branch</label><input type="text" id="fBranch" placeholder="Enter Branch"/></div>
         </div>
       </div>
-      <div class="enroll-section-title">Entry By (Auto-filled)</div>
-      <div class="form-grid" style="margin-bottom:14px">
-        <div class="field"><label>Entry Employee ID</label><input type="text" id="fEntryEmpId" readonly style="opacity:.6;cursor:not-allowed;font-family:'JetBrains Mono',monospace"/></div>
-        <div class="field"><label>Entered By</label><input type="text" id="fEntryName" readonly style="opacity:.6;cursor:not-allowed"/></div>
+
+      <!-- Accountable Person (NEW) -->
+      <div class="enroll-section-title">Accountable Person</div>
+      <div style="padding:10px 14px;background:rgba(232,81,24,.05);border:1px solid rgba(232,81,24,.18);border-radius:8px;font-size:.78rem;color:var(--text2);margin-bottom:12px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:5px;color:var(--accent)"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Spare assets are held accountable to the <strong>enrolling officer</strong> until allocated to a staff member.
       </div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field"><label>Enrolling Officer ID</label><input type="text" id="fEntryEmpId" readonly style="opacity:.6;cursor:not-allowed;font-family:'JetBrains Mono',monospace"/></div>
+        <div class="field"><label>Enrolling Officer Name</label><input type="text" id="fEntryName" readonly style="opacity:.6;cursor:not-allowed"/></div>
+      </div>
+
       <div class="form-grid" style="margin-bottom:14px">
         <div class="field form-span2"><label>Remarks</label><textarea id="fRemarks" placeholder="Any notes about this asset…"></textarea></div>
       </div>
@@ -99,6 +107,17 @@
     <!-- Step 3: Confirm -->
     <div class="modal-body" id="enrollStep3" style="display:none">
       <div id="enrollConfirmBody"></div>
+      <!-- After-enroll notice -->
+      <div style="margin-top:16px;padding:12px 16px;background:rgba(59,130,246,.07);
+        border:1px solid rgba(59,130,246,.2);border-radius:8px;font-size:.8rem;color:#60a5fa;
+        display:flex;align-items:flex-start;gap:10px">
+        <span style="font-size:1.1rem;flex-shrink:0">📋</span>
+        <div>
+          After enrolling, a <strong>draft Accountability Form</strong> will be created automatically.
+          You will be taken to the <strong>For Approval</strong> page to submit it for supervisor review.
+          The asset can be printed and used once the supervisor confirms.
+        </div>
+      </div>
     </div>
 
     <div class="modal-footer" id="enrollFooter">
@@ -448,9 +467,12 @@
         </table>
       </div>
     </div>
-<div class="modal-footer">
-      <button class="btn btn-secondary btn-sm" onclick="openAccountabilityFormByEmp(_samCurrentEmpId)" style="gap:6px;color:var(--accent);border-color:rgba(232,81,24,.3)">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+    <!-- PRINT FOOTER — gated by _checkPrintGate -->
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm"
+        onclick="_printAccountabilityFormGated(_samCurrentEmpId)"
+        style="gap:6px;color:var(--accent);border-color:rgba(232,81,24,.3)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
         Print Accountability Form
       </button>
       <div style="flex:1"></div>
@@ -480,6 +502,7 @@
         </table>
       </div>
     </div>
+    <!-- PRINT FOOTER — gated by _checkPrintGate -->
     <div class="modal-footer" id="eqModalFooter" style="flex-shrink:0">
       <button class="btn btn-secondary" onclick="closeModal('equipmentBranchModal')">Close</button>
     </div>
@@ -603,176 +626,37 @@
   </div>
 </div>
 
-<!-- ══ FORM PREVIEW MODAL (drafter — before submit) ══ -->
-<div class="modal-backdrop" id="formPreviewModal">
-  <div class="modal modal-lg" style="max-height:92vh;display:flex;flex-direction:column">
+<!-- ══ ASSET LIST MODAL (NEW — replaces form preview modals) ══ -->
+<div class="modal-backdrop" id="assetListModal">
+  <div class="modal" style="max-width:680px;display:flex;flex-direction:column;max-height:82vh">
     <div class="modal-hdr" style="flex-shrink:0">
       <div>
-        <h3>Accountability Form Preview</h3>
-        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="fpmSubtitle">
-          Review before submitting for approval
-        </p>
+        <h3 id="assetListModalTitle">Assets in Form</h3>
+        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="assetListModalSubtitle"></p>
       </div>
-      <button class="modal-close" onclick="closeModal('formPreviewModal')">×</button>
+      <button class="modal-close" onclick="closeModal('assetListModal')">×</button>
     </div>
-    <div class="modal-body" id="formPreviewBody" style="overflow-y:auto;flex:1;padding:20px 28px">
-      <div style="text-align:center;padding:40px;color:var(--text3)">Loading preview…</div>
-    </div>
-    <div class="modal-footer" style="flex-shrink:0">
-      <button class="btn btn-secondary" onclick="closeModal('formPreviewModal')">Cancel</button>
-      <button class="btn btn-secondary" id="fpmSaveDraftBtn"
-        onclick="saveDraftFromPreview()" style="color:var(--yellow);border-color:rgba(217,119,6,.35)">
-        Save as Draft
-      </button>
-      <div style="flex:1"></div>
-      <div id="fpmCooldownBadge" style="display:none;font-size:.76rem;color:var(--orange);
-        padding:5px 12px;background:rgba(232,81,24,.08);border:1px solid rgba(232,81,24,.25);
-        border-radius:6px;font-weight:600"></div>
-      <button class="btn btn-primary" id="fpmSubmitBtn" onclick="submitFromPreview()">
-        Submit for Review
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ SINGLE REVIEW MODAL (supervisor — enrollment) ══ -->
-<div class="modal-backdrop" id="singleReviewModal">
-  <div class="modal modal-lg" style="max-height:92vh;display:flex;flex-direction:column">
-    <div class="modal-hdr" style="flex-shrink:0">
-      <div>
-        <h3>Review Form</h3>
-        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="srmSubtitle">
-          Enrollment Accountability Form
-        </p>
-      </div>
-      <button class="modal-close" onclick="closeModal('singleReviewModal')">×</button>
-    </div>
-    <div class="modal-body" id="singleReviewBody" style="overflow-y:auto;flex:1;padding:20px 28px">
-      <div style="text-align:center;padding:40px;color:var(--text3)">Loading…</div>
-    </div>
-    <!-- Rejection comment area (hidden by default) -->
-    <div id="srmRejectPanel" style="display:none;padding:14px 28px;
-      background:rgba(239,68,68,.06);border-top:1px solid rgba(239,68,68,.2)">
-      <div style="font-size:.76rem;font-weight:700;color:var(--red);margin-bottom:6px">
-        Rejection Comment *
-      </div>
-      <textarea id="srmRejectComment" placeholder="Explain why this form is being rejected…"
-        style="width:100%;min-height:70px;background:var(--bg3);border:1px solid rgba(239,68,68,.35);
-               color:var(--text);padding:9px 12px;border-radius:var(--radius2);
-               font-family:inherit;font-size:.85rem;outline:none;resize:vertical"></textarea>
-    </div>
-    <div class="modal-footer" style="flex-shrink:0">
-      <button class="btn btn-secondary" onclick="closeModal('singleReviewModal')">Cancel</button>
-      <button class="btn btn-danger" id="srmRejectBtn" onclick="toggleSrmReject()">
-        Reject
-      </button>
-      <div style="flex:1"></div>
-      <button class="btn btn-success" id="srmConfirmBtn" onclick="confirmSingleFormAction()">
-        ✓ Confirm
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ TRANSFER REVIEW MODAL (supervisor — paired) ══ -->
-<div class="modal-backdrop" id="transferReviewModal">
-  <div class="modal modal-lg" style="max-height:92vh;max-width:980px;display:flex;flex-direction:column">
-    <div class="modal-hdr" style="flex-shrink:0">
-      <div>
-        <h3>Review Transfer Pair</h3>
-        <p style="font-size:.78rem;color:var(--text3);margin-top:2px">
-          Both forms must be confirmed or rejected together
-        </p>
-      </div>
-      <button class="modal-close" onclick="closeModal('transferReviewModal')">×</button>
-    </div>
-    <div class="modal-body" style="overflow-y:auto;flex:1;padding:16px 20px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" id="transferReviewPanels">
-        <!-- Left: From Panel -->
-        <div id="trmFromPanel" class="transfer-review-panel">
-          <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
-                      color:var(--text3);margin-bottom:10px">From (Releasing Party)</div>
-          <div id="trmFromBody" style="background:var(--bg3);border:1px solid var(--border);
-            border-radius:var(--radius2);padding:14px;min-height:120px">
-            Loading…
-          </div>
-          <div id="trmFromRejectPanel" style="display:none;margin-top:10px">
-            <textarea id="trmFromRejectComment" placeholder="Comment for releasing party…"
-              style="width:100%;min-height:60px;background:var(--bg3);
-                     border:1px solid rgba(239,68,68,.35);color:var(--text);
-                     padding:8px 10px;border-radius:var(--radius2);
-                     font-family:inherit;font-size:.82rem;outline:none;resize:vertical"></textarea>
-          </div>
-        </div>
-        <!-- Right: To Panel -->
-        <div id="trmToPanel" class="transfer-review-panel">
-          <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
-                      color:#60a5fa;margin-bottom:10px">To (Receiving Party)</div>
-          <div id="trmToBody" style="background:rgba(59,130,246,.04);
-            border:1px solid rgba(59,130,246,.2);
-            border-radius:var(--radius2);padding:14px;min-height:120px">
-            Loading…
-          </div>
-          <div id="trmToRejectPanel" style="display:none;margin-top:10px">
-            <textarea id="trmToRejectComment" placeholder="Comment for receiving party…"
-              style="width:100%;min-height:60px;background:var(--bg3);
-                     border:1px solid rgba(239,68,68,.35);color:var(--text);
-                     padding:8px 10px;border-radius:var(--radius2);
-                     font-family:inherit;font-size:.82rem;outline:none;resize:vertical"></textarea>
-          </div>
-        </div>
+    <div style="overflow-y:auto;flex:1">
+      <div class="tbl-wrap" style="border:none;border-radius:0;box-shadow:none">
+        <table>
+          <thead><tr>
+            <th>Barcode</th>
+            <th>Type</th>
+            <th>Brand</th>
+            <th>Serial</th>
+            <th>Condition</th>
+          </tr></thead>
+          <tbody id="assetListModalBody">
+            <tr><td colspan="5" class="tbl-empty">—</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
     <div class="modal-footer" style="flex-shrink:0">
-      <button class="btn btn-secondary" onclick="closeModal('transferReviewModal')">Cancel</button>
-      <button class="btn btn-danger" id="trmRejectBtn" onclick="toggleTrmReject()">
-        Reject Transfer
-      </button>
-      <div style="flex:1"></div>
-      <button class="btn btn-success" id="trmConfirmBtn" onclick="confirmTransferPairAction()">
-        ✓ Confirm Both
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ REVISE FORM MODAL (drafter — after rejection) ══ -->
-<div class="modal-backdrop" id="reviseFormModal">
-  <div class="modal modal-lg" style="max-height:92vh;display:flex;flex-direction:column">
-    <div class="modal-hdr" style="flex-shrink:0">
-      <div>
-        <h3>Revise & Resubmit</h3>
-        <p style="font-size:.78rem;color:var(--text3);margin-top:2px" id="rfmSubtitle">
-          Your form was rejected — review the comment and resubmit
-        </p>
+      <div style="flex:1;font-size:.76rem;color:var(--text3)">
+        These are the assets captured in this accountability form snapshot.
       </div>
-      <button class="modal-close" onclick="closeModal('reviseFormModal')">×</button>
-    </div>
-    <!-- Rejection banner -->
-    <div id="rfmRejectionBanner" class="rejection-banner" style="
-      margin:0 28px 0;padding:12px 16px;
-      background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
-      border-radius:var(--radius2);font-size:.84rem;color:var(--red);
-      display:flex;gap:10px;align-items:flex-start;flex-shrink:0
-    ">
-      <span style="font-size:1.1rem;flex-shrink:0">✕</span>
-      <div>
-        <div style="font-weight:700;margin-bottom:3px">Rejection Reason</div>
-        <div id="rfmRejectionComment" style="color:#f87171;font-size:.82rem">—</div>
-      </div>
-    </div>
-    <div class="modal-body" id="rfmFormBody" style="overflow-y:auto;flex:1;padding:16px 28px">
-      <div style="text-align:center;padding:40px;color:var(--text3)">Loading…</div>
-    </div>
-    <div class="modal-footer" style="flex-shrink:0">
-      <button class="btn btn-secondary" onclick="closeModal('reviseFormModal')">Cancel</button>
-      <div style="flex:1"></div>
-      <div id="rfmCooldownBadge" style="display:none;font-size:.76rem;color:var(--orange);
-        padding:5px 12px;background:rgba(232,81,24,.08);border:1px solid rgba(232,81,24,.25);
-        border-radius:6px;font-weight:600"></div>
-      <button class="btn btn-primary" id="rfmResubmitBtn" onclick="resubmitFormAction()">
-        Resubmit for Review
-      </button>
+      <button class="btn btn-secondary" onclick="closeModal('assetListModal')">Close</button>
     </div>
   </div>
 </div>
