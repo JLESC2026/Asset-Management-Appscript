@@ -30,10 +30,10 @@ function renderDisposal() {
     const dRec = DISPOSALS.find(d => String(d[0]) === a.Barcode) || null;
     let reason = '—', disposedBy = '—', disposeDate = '—', dispRemarks = '—';
     if (dRec) {
-      reason      = esc(dRec[1]);
-      disposedBy  = esc(dRec[2]);
-      disposeDate = fmtDate(dRec[3]);
-      dispRemarks = esc(dRec[4]);
+      reason      = esc(dRec[2]);       // Col 3: Reason (was dRec[1])
+      disposedBy  = esc(dRec[3]);       // Col 4: DisposedBy (was dRec[2])
+      disposeDate = fmtDate(dRec[4]);   // Col 5: DisposeDate (was dRec[3])
+      dispRemarks = esc(dRec[5]);       // Col 6: Remarks (was dRec[4])
     } else if (a.Remarks) {
       const match = a.Remarks.match(/DISPOSAL:\s*(.+?)\s+by\s+(.+?)(?:\s*\||$)/i);
       if (match) { reason = esc(match[1]); disposedBy = esc(match[2]); }

@@ -435,11 +435,6 @@ function _submitEnroll() {
   var accEmpId = (document.getElementById('fAccEmpId') || {}).value || '';
   var accName  = (document.getElementById('fAccName')  || {}).value || '';
   var accDesig = (document.getElementById('fAccDesig') || {}).value || '';
-  // If accountable person not set, fall back to inputter
-  if (!accEmpId.trim()) {
-    accEmpId = SESSION ? SESSION.username : '';
-    accName  = SESSION ? SESSION.name     : '';
-  }
 
   var obj = {
     entryEmpId:   document.getElementById('fEntryEmpId').value,
@@ -478,9 +473,10 @@ function _submitEnroll() {
       if (!isErr) {
         closeModal('addAssetModal');
         loadData();
-        _loadApprovalData(function() {
-          switchPage('for-approval');
-          if (formId) {
+        if (formId) {
+          // Non-spare (direct allocation): redirect to For Approval page
+          _loadApprovalData(function() {
+            switchPage('for-approval');
             setTimeout(function() {
               var card = document.getElementById('acard-' + formId);
               if (card) {
@@ -490,8 +486,11 @@ function _submitEnroll() {
                 setTimeout(function(){ card.style.boxShadow = ''; }, 2000);
               }
             }, 300);
-          }
-        });
+          });
+        } else {
+          // Spare asset: redirect to Spare Pool to confirm the asset is there
+          setTimeout(function() { switchPage('spare'); }, 400);
+        }
       }
     })
     .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
@@ -1175,6 +1174,7 @@ function submitBorrow() {
       barcode, borrowerName:name,
       empId:          _cleanBorrowVal('bEmpId'),
       designation:    _cleanBorrowVal('bDesig'),
+      baseOffice:     _cleanBorrowVal('bBranch'),   // bBranch is auto-filled with base office
       division:       _cleanBorrowVal('bDiv'),
       district:       _cleanBorrowVal('bDistrict'),
       branch:         _cleanBorrowVal('bBranch'),
@@ -1229,6 +1229,7 @@ function submitDisposal() {
   if (!by)     { toast('"Disposed By" is required', 'warn'); return; }
   const _btn = document.querySelector('#disposalModal .modal-footer .btn-danger');
   _lockBtn(_btn);
+  const _dispAsset = ASSETS.find(x => x.Barcode === _disposalBarcode) || {};
   google.script.run
     .withSuccessHandler(r => {
       _unlockBtn(_btn);
@@ -1237,8 +1238,14 @@ function submitDisposal() {
     })
     .withFailureHandler(err => { _unlockBtn(_btn); toast(err.message,'err'); })
     .saveDisposal({
-      barcode:_disposalBarcode, reason, disposedBy:by,
-      disposeDate:date, remarks:document.getElementById('dRemarks').value
+      barcode:    _disposalBarcode,
+      reason,
+      disposedBy: by,
+      disposeDate: date,
+      remarks:    document.getElementById('dRemarks').value,
+      serial:     _dispAsset.Serial    || '',
+      assetType:  _dispAsset.Type      || '',
+      location:   _dispAsset.AssetLocation || _dispAsset.Branch || ''
     });
 }
 

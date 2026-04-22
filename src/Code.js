@@ -155,7 +155,7 @@ function _xferSheet() {
 }
 function _borrowSheet() {
   return _getOrCreate(SH_BORROW, [
-    'Barcode','BorrowerName','EmpID','Designation',
+    'Barcode','BorrowerName','EmpID','Designation','Base Office',
     'Division','District','Branch',
     'BorrowDate','ExpectedReturn','ActualReturn',
     'Status','Remarks','Timestamp'
@@ -163,7 +163,8 @@ function _borrowSheet() {
 }
 function _disposeSheet() {
   return _getOrCreate(SH_DISPOSE, [
-    'Barcode','Reason','DisposedBy','DisposeDate','Remarks','Timestamp'
+    'Barcode','Serial Number','Reason','DisposedBy','DisposeDate',
+    'Remarks','Timestamp','Location','Equipment Type','Description'
   ]);
 }
 function _logSheet() {
@@ -181,10 +182,11 @@ function _allocLogSheet() {
 }
 function _spareSheet() {
   return _getOrCreate(SH_SPARE, [
+    'Accountable Person ID','Accountable Person','Assignment','Designation','Department',
     'Barcode','Category','Brand','Serial No.','Condition',
-    'Purchase Date','Warranty Validity','Supplier',
+    'Purchase Date','Warranty Validity','Supplier','Base Office',
     'Division','District','Area','Branch','Asset Location',
-    'Enrolled By','Timestamp','Status'
+    'Enrolled By','Created By'
   ]);
 }
 
@@ -918,20 +920,27 @@ function deallocateAsset(barcode, remarks) {
     _setRow(sh, rowIdx, updates);
 
     _spareSheet().appendRow([
-      barcode,
-      String(curRow[C.TYPE          - 1] || ''),
-      String(curRow[C.BRAND         - 1] || ''),
-      String(curRow[C.SERIAL        - 1] || ''),
-      String(curRow[C.CONDITION     - 1] || 'Good'),
-      String(curRow[C.PURCH_DATE    - 1] || ''),
-      String(curRow[C.WARRANTY_VAL  - 1] || ''),
-      String(curRow[C.SUPPLIER      - 1] || ''),
-      String(curRow[C.DIVISION      - 1] || ''),
-      String(curRow[C.DISTRICT      - 1] || ''),
-      String(curRow[C.AREA          - 1] || ''),
-      String(curRow[C.BRANCH        - 1] || ''),
-      String(curRow[C.ASSET_LOCATION- 1] || ''),
-      prevStaff, nowStr, 'Available'
+      String(curRow[C.EMP_ID      - 1] || ''),   // Col 1: Accountable Person ID
+      String(curRow[C.STAFF       - 1] || ''),   // Col 2: Accountable Person
+      'Spare',                                    // Col 3: Assignment
+      String(curRow[C.DESIGNATION - 1] || ''),   // Col 4: Designation
+      String(curRow[C.DEPARTMENT  - 1] || ''),   // Col 5: Department
+      barcode,                                    // Col 6: Barcode
+      String(curRow[C.TYPE          - 1] || ''), // Col 7: Category
+      String(curRow[C.BRAND         - 1] || ''), // Col 8: Brand
+      String(curRow[C.SERIAL        - 1] || ''), // Col 9: Serial No.
+      String(curRow[C.CONDITION     - 1] || 'Good'), // Col 10: Condition
+      String(curRow[C.PURCH_DATE    - 1] || ''), // Col 11: Purchase Date
+      String(curRow[C.WARRANTY_VAL  - 1] || ''), // Col 12: Warranty Validity
+      String(curRow[C.SUPPLIER      - 1] || ''), // Col 13: Supplier
+      String(curRow[C.BASE_OFFICE   - 1] || ''), // Col 14: Base Office
+      String(curRow[C.DIVISION      - 1] || ''), // Col 15: Division
+      String(curRow[C.DISTRICT      - 1] || ''), // Col 16: District
+      String(curRow[C.AREA          - 1] || ''), // Col 17: Area
+      String(curRow[C.BRANCH        - 1] || ''), // Col 18: Branch
+      String(curRow[C.ASSET_LOCATION- 1] || ''), // Col 19: Asset Location
+      prevStaff,                                  // Col 20: Enrolled By
+      nowStr                                      // Col 21: Created By
     ]);
 
     _log('DEALLOCATE', barcode,
@@ -1237,6 +1246,7 @@ function saveBorrow(b) {
 
     bSh.appendRow([
       b.barcode, _sanitize(b.borrowerName, 100), b.empId || '', b.designation || '',
+      b.baseOffice || b.branch || '',          // Col 5: Base Office
       b.division || '', b.district || '', _sanitize(b.branch, 150),
       b.borrowDate, b.expectedReturn, '',
       'Borrow', _sanitize(b.remarks, 500), nowStr
@@ -1261,22 +1271,23 @@ function getBorrowData() {
     const sh   = _borrowSheet();
     const last = sh.getLastRow();
     if (last < EVT_DATA_START) return [];
-    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 13).getValues()
+    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 14).getValues()
       .filter(r => r[0])
       .map(r => ({
         barcode:        String(r[0]  || ''),
         borrowerName:   String(r[1]  || ''),
         empId:          String(r[2]  || ''),
         designation:    String(r[3]  || ''),
-        division:       String(r[4]  || ''),
-        district:       String(r[5]  || ''),
-        branch:         String(r[6]  || ''),
-        borrowDate:     String(r[7]  || ''),
-        expectedReturn: String(r[8]  || ''),
-        actualReturn:   String(r[9]  || ''),
-        status:         String(r[10] || 'Borrow'),
-        remarks:        String(r[11] || ''),
-        timestamp:      String(r[12] || '')
+        baseOffice:     String(r[4]  || ''),   // Col 5: Base Office (new)
+        division:       String(r[5]  || ''),   // Col 6
+        district:       String(r[6]  || ''),   // Col 7
+        branch:         String(r[7]  || ''),   // Col 8
+        borrowDate:     String(r[8]  || ''),   // Col 9
+        expectedReturn: String(r[9]  || ''),   // Col 10
+        actualReturn:   String(r[10] || ''),   // Col 11
+        status:         String(r[11] || 'Borrow'), // Col 12
+        remarks:        String(r[12] || ''),   // Col 13
+        timestamp:      String(r[13] || '')    // Col 14
       }));
   } catch(e) { return []; }
 }
@@ -1289,12 +1300,12 @@ function returnAsset(barcode, returnDate) {
     const last    = bSh.getLastRow();
 
     if (last >= EVT_DATA_START) {
-      const data = bSh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 13).getValues();
+      const data = bSh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 14).getValues();
       for (let i = data.length - 1; i >= 0; i--) {
-        if (String(data[i][0]) === String(barcode) && String(data[i][10]) === 'Borrow') {
+        if (String(data[i][0]) === String(barcode) && String(data[i][11]) === 'Borrow') {
           const sheetRow = i + EVT_DATA_START;
-          bSh.getRange(sheetRow, 10).setValue(retDate);
-          bSh.getRange(sheetRow, 11).setValue('Returned');
+          bSh.getRange(sheetRow, 11).setValue(retDate);   // ActualReturn at col 11
+          bSh.getRange(sheetRow, 12).setValue('Returned'); // Status at col 12
           break;
         }
       }
@@ -1337,15 +1348,31 @@ function saveDisposal(d) {
     const nowStr = new Date().toLocaleString('en-PH');
     const rowIdx = _findRow(sh, d.barcode);
 
+    let serial = d.serial || '';
+    let assetType = d.assetType || '';
+    let assetLocation = d.location || '';
+
     if (rowIdx > 0) {
-      const curLC = String(sh.getRange(rowIdx, C.LIFECYCLE).getValue() || '').toLowerCase();
+      const curRow = sh.getRange(rowIdx, 1, 1, 31).getValues()[0];
+      const curLC  = String(curRow[C.LIFECYCLE - 1] || '').toLowerCase();
       if (curLC === 'borrow')   return 'Error: Cannot dispose a borrowed asset.';
       if (curLC === 'transfer') return 'Error: Cannot dispose an asset in active transfer.';
+      if (!serial)        serial        = String(curRow[C.SERIAL        - 1] || '');
+      if (!assetType)     assetType     = String(curRow[C.TYPE          - 1] || '');
+      if (!assetLocation) assetLocation = String(curRow[C.ASSET_LOCATION- 1] || '');
     }
 
     dSh.appendRow([
-      d.barcode, _sanitize(d.reason, 200), _sanitize(d.disposedBy, 100),
-      d.disposeDate, _sanitize(d.remarks, 500), nowStr
+      d.barcode,
+      serial,                           // Col 2: Serial Number
+      _sanitize(d.reason, 200),         // Col 3: Reason
+      _sanitize(d.disposedBy, 100),     // Col 4: DisposedBy
+      d.disposeDate,                    // Col 5: DisposeDate
+      _sanitize(d.remarks, 500),        // Col 6: Remarks
+      nowStr,                           // Col 7: Timestamp
+      assetLocation,                    // Col 8: Location
+      assetType,                        // Col 9: Equipment Type
+      ''                                // Col 10: Description
     ]);
 
     if (rowIdx > 0) {
@@ -1369,7 +1396,7 @@ function getDisposalData() {
     const sh   = _disposeSheet();
     const last = sh.getLastRow();
     if (last < EVT_DATA_START) return [];
-    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 6).getValues()
+    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 10).getValues()
       .filter(r => r[0])
       .map(r => r.map(v => String(v || '')));
   } catch(e) { return []; }
@@ -2384,10 +2411,20 @@ function processAsset(obj, isAssign) {
       const normDiv  = _normDiv(obj.division  || '');
       const normDist = _normDist(obj.district || '');
 
-      // Accountable person: use accEmpId/accName if provided, else fall back to entryEmpId/entryName
-      const accEmpId = obj.accEmpId || obj.entryEmpId || '';
-      const accName  = obj.accName  || obj.entryName  || '';
-      const accDesig = obj.accDesig || '';
+      // ── FIX: ACCOUNTABLE PERSON LOGIC ────────────────────────────────────
+      // SPARE assets: EmpID/Staff must be EMPTY so _computeStatus returns
+      //   'spare' (not 'allocated').  Nobody is accountable for a spare asset
+      //   until it is explicitly allocated via allocateAsset().
+      //
+      // NON-SPARE (direct allocation at enroll): use accEmpId if provided,
+      //   else fall back to the inputter.
+      // ─────────────────────────────────────────────────────────────────────
+      var accEmpId = '', accName = '', accDesig = '';
+      if (statusChoice !== 'Spare') {
+        accEmpId = obj.accEmpId || obj.entryEmpId || '';
+        accName  = obj.accName  || obj.entryName  || '';
+        accDesig = obj.accDesig || '';
+      }
 
       const row = new Array(37).fill('');
       row[C.ENTRY_EMP_ID   - 1] = obj.entryEmpId  || '';
@@ -2420,12 +2457,18 @@ function processAsset(obj, isAssign) {
       row[C.REMARKS        - 1] = _sanitize(obj.remarks, 500);
       row[C.CREATED_AT     - 1] = nowStr;
       row[C.LAST_UPDATED   - 1] = nowStr;
-      row[CAE.APPROVAL_STATUS - 1] = 'Draft';
-      row[CAE.FORM_ID         - 1] = '';
-      row[CAE.DRAFTED_BY      - 1] = obj.enrolledBy || obj.entryEmpId || '';
-      row[CAE.DRAFTED_AT      - 1] = nowStr;
-      row[CAE.REJECTION_COMMENT-1] = '';
-      row[CAE.GRANDFATHERED   - 1] = false;
+
+      // ── FIX: APPROVAL STATUS ──────────────────────────────────────────────
+      // Spare assets are 'Confirmed' from birth — no approval workflow until
+      //   they are allocated.  Grandfathered = true skips the print gate check.
+      // Non-spare assets start as 'Draft' pending supervisor confirmation.
+      // ─────────────────────────────────────────────────────────────────────
+      row[CAE.APPROVAL_STATUS  - 1] = statusChoice === 'Spare' ? 'Confirmed' : 'Draft';
+      row[CAE.FORM_ID          - 1] = '';
+      row[CAE.DRAFTED_BY       - 1] = obj.enrolledBy || obj.entryEmpId || '';
+      row[CAE.DRAFTED_AT       - 1] = nowStr;
+      row[CAE.REJECTION_COMMENT- 1] = '';
+      row[CAE.GRANDFATHERED    - 1] = statusChoice === 'Spare' ? true : false;
 
       sh.appendRow(row);
       const newRowIdx = sh.getLastRow();
@@ -2434,17 +2477,48 @@ function processAsset(obj, isAssign) {
 
       if (statusChoice === 'Spare') {
         _spareSheet().appendRow([
-          obj.barcode, obj.type, obj.brand, obj.serial || '', obj.condition || 'New',
-          obj.purchDate || '', obj.wValidity || '', obj.supplier || '',
-          normDiv, normDist, obj.area || '', _sanitize(obj.branch, 150),
-          obj.location || '', obj.enrolledBy || obj.entryEmpId || '',
-          nowStr, 'Available'
+          accEmpId,                          // Col 1: Accountable Person ID
+          _sanitize(accName, 100),           // Col 2: Accountable Person
+          'Spare',                           // Col 3: Assignment
+          accDesig,                          // Col 4: Designation
+          obj.department || '',              // Col 5: Department
+          obj.barcode,                       // Col 6: Barcode
+          obj.type,                          // Col 7: Category
+          obj.brand || '',                   // Col 8: Brand
+          obj.serial ? String(obj.serial) : '', // Col 9: Serial No.
+          obj.condition || 'New',            // Col 10: Condition
+          obj.purchDate || '',               // Col 11: Purchase Date
+          obj.wValidity || '',               // Col 12: Warranty Validity
+          obj.supplier || '',                // Col 13: Supplier
+          obj.baseOffice || _sanitize(obj.branch, 150) || '', // Col 14: Base Office
+          normDiv,                           // Col 15: Division
+          normDist,                          // Col 16: District
+          obj.area || '',                    // Col 17: Area
+          _sanitize(obj.branch, 150),        // Col 18: Branch
+          obj.location || '',                // Col 19: Asset Location
+          obj.enrolledBy || obj.entryEmpId || '', // Col 20: Enrolled By
+          nowStr                             // Col 21: Created By
         ]);
       }
 
       _log('CREATE', obj.barcode, obj.type + ' | ' + obj.brand + ' | ' + statusChoice, obj.entryEmpId || '');
 
-      // Draft form — use accountable person's EmpID (not necessarily the inputter)
+      // ── FIX: ACCOUNTABILITY FORM ──────────────────────────────────────────
+      // SPARE assets: NO form created here.
+      //   Reason: Nobody is accountable for unallocated spare inventory.
+      //   The accountability form is created automatically by allocateAsset()
+      //   when the asset is later assigned to a staff member.
+      //
+      // NON-SPARE (direct allocation at enrollment): create form now.
+      // ─────────────────────────────────────────────────────────────────────
+      if (statusChoice === 'Spare') {
+        return {
+          result: 'Asset added to Spare Pool: ' + obj.barcode,
+          formId: null    // No form yet — form will be created on allocation
+        };
+      }
+
+      // Non-spare path: create the accountability form
       const assetForForm = [{
         Barcode:     obj.barcode,
         Type:        obj.type      || '',
@@ -2462,7 +2536,7 @@ function processAsset(obj, isAssign) {
         Area:        obj.area      || ''
       }];
 
-      const drafterId   = obj.enrolledBy || obj.entryEmpId || '';
+      const drafterId    = obj.enrolledBy || obj.entryEmpId || '';
       const empIdForForm = accEmpId || drafterId;
 
       const formId = draftAccountabilityForm(empIdForForm, assetForForm, 'Enrollment', '', drafterId);
