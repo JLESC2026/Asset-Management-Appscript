@@ -147,10 +147,12 @@ function _getOrCreate(name, headers) {
 function _entrySheet() { return _getOrCreate(SH_ENTRY, AE_HEADERS); }
 function _xferSheet() {
   return _getOrCreate(SH_XFER, [
-    'Barcode','TransferType','FromStaff','FromEmpID','FromDesig',
-    'FromDiv','FromDist','FromArea','FromBranch','FromRemarks',
-    'ToStaff','ToEmpID','ToDesig','ToDiv','ToDist',
-    'ToArea','ToBranch','ToRemarks','EffDate','Status','Timestamp'
+    'Barcode','TransferType',
+    'FromStaff','FromEmpID','FromDesig','FromDept','FromBaseOffice',
+    'FromDiv','FromDist','FromArea','FromBranch','FromCondition','FromAssetLoc','FromRemarks',
+    'ToStaff','ToEmpID','ToDesig','ToDept','ToBaseOffice',
+    'ToDiv','ToDist','ToArea','ToBranch','ToCondition','ToAssetLoc','ToRemarks',
+    'EffDate','Status','Timestamp'
   ]);
 }
 function _borrowSheet() {
@@ -177,7 +179,7 @@ function _allocLogSheet() {
     'Barcode','Category','Brand','Serial No.','Employee ID',
     'Accountable Staff','Designation','Department','Base Office',
     'Division','District','Area','Branch','Effectivity Date',
-    'Condition','Remarks','Timestamp','Allocated By'
+    'Condition','Asset Location','Remarks','Timestamp','Allocated By'
   ]);
 }
 function _spareSheet() {
@@ -193,8 +195,16 @@ function _spareSheet() {
 // ─── ROW HELPERS ─────────────────────────────────────────────────────────────
 function _findRow(sheet, barcode) {
   if (!barcode) return -1;
+  const bcStr = String(barcode).trim();
+
+  // Synthetic key for no-barcode assets: NOBC-{sheetRowNumber}
+  if (bcStr.startsWith('NOBC-')) {
+    const rowNum = parseInt(bcStr.slice(5), 10);
+    return (!isNaN(rowNum) && rowNum >= AE_DATA_START) ? rowNum : -1;
+  }
+
   try {
-    const finder = sheet.createTextFinder(String(barcode).trim())
+    const finder = sheet.createTextFinder(bcStr)
       .matchEntireCell(true).matchCase(false);
     const range = finder.findNext();
     if (!range) return -1;
@@ -207,8 +217,7 @@ function _findRow(sheet, barcode) {
     const vals = sheet.getRange(AE_DATA_START, C.BARCODE,
       last - AE_DATA_START + 1, 1).getValues();
     for (let i = 0; i < vals.length; i++) {
-      if (String(vals[i][0]).trim() === String(barcode).trim())
-        return i + AE_DATA_START;
+      if (String(vals[i][0]).trim() === bcStr) return i + AE_DATA_START;
     }
     return -1;
   }
@@ -369,13 +378,13 @@ function getEmployeeById(empId) {
         ok:         true,
         empId:      String(row[0]  || '').trim(),
         name:       String(row[2]  || '').trim(),
-        // Location fields — blank → ' - '
+        // ⚠ Verify these column indices match your actual Masterlist sheet:
+        department: _blankOrDash(String(row[3]  || '')),  // Col D — adjust if needed
         division:   _normDiv(_blankOrDash(String(row[4]  || ''))),
         district:   _normDist(_blankOrDash(String(row[5] || ''))),
         area:       _blankOrDash(String(row[6]  || '')),
-        branch:     _blankOrDash(String(row[7]  || '')),  // Base Office
+        branch:     _blankOrDash(String(row[7]  || '')),
         baseOffice: _blankOrDash(String(row[7]  || '')),
-        // Designation from Position column
         position:   _blankOrDash(String(row[11] || ''))
       };
     }
@@ -613,16 +622,16 @@ function getAllAssets() {
 
     const data   = sh.getRange(AE_DATA_START, 1, last - AE_DATA_START + 1, 37).getValues();
     const result = data
-      .filter((row, rowIdx) => {
+      .map((row, i) => [row, i + AE_DATA_START])          // pin sheet row BEFORE filter
+      .filter(([row]) => {
         const bc = String(row[C.BARCODE - 1] || '').trim();
         const badBc = !bc || bc === '-' || bc === 'N/A' || bc === 'None' || bc === '#N/A';
         if (!badBc) return true;
-        const hasData = [C.DIVISION,C.DISTRICT,C.BRANCH,C.STAFF,C.EMP_ID,C.DEPARTMENT,C.BASE_OFFICE,C.ASSET_LOCATION]
+        return [C.DIVISION,C.DISTRICT,C.BRANCH,C.STAFF,C.EMP_ID,C.DEPARTMENT,C.BASE_OFFICE,C.ASSET_LOCATION]
           .some(col => String(row[col - 1] || '').trim());
-        return hasData;
       })
-      .map((row, rowIdx) => {
-        const get    = col => String(row[col - 1] || '');
+      .map(([row, sheetRow]) => {                          // sheetRow is always correct now
+        const get = col => String(row[col - 1] || '');
         const approvalStatus = get(CAE.APPROVAL_STATUS) || 'Confirmed';
         const grandfathered  = String(get(CAE.GRANDFATHERED)).toLowerCase() === 'true';
         const effectiveStatus = (approvalStatus === 'Confirmed' || grandfathered)
@@ -631,9 +640,9 @@ function getAllAssets() {
 
         const rawBc = String(row[C.BARCODE - 1] || '').trim();
         const badBc = !rawBc || rawBc === '-' || rawBc === 'N/A' || rawBc === 'None' || rawBc === '#N/A';
-        const syntheticKey = badBc ? ('NOBC-' + (rowIdx + AE_DATA_START)) : rawBc;
+        const syntheticKey = badBc ? ('NOBC-' + sheetRow) : rawBc;  // correct row!
 
-        const rawLC    = get(C.LIFECYCLE);
+        const rawLC = get(C.LIFECYCLE);
         const displayLC = rawLC || {
           'allocated':'Allocated','spare':'Active','borrowed':'Borrow',
           'returned':'Returned','disposal':'Dispose','transfer':'Transfer',
@@ -649,42 +658,26 @@ function getAllAssets() {
         }
 
         return {
-          Barcode:       badBc ? syntheticKey : rawBc,
+          Barcode: badBc ? syntheticKey : rawBc,
           hasRealBarcode: !badBc,
-          Type:         get(C.TYPE),
-          Brand:        get(C.BRAND),
-          Serial:       get(C.SERIAL),
-          Specs:        get(C.SPECS),
-          Supplier:     get(C.SUPPLIER),
-          Condition:    get(C.CONDITION) || 'Good',
-          AssetLocation:get(C.ASSET_LOCATION),
-          Lifecycle:    displayLC,
-          AssetStatus:  get(C.ASSET_STATUS) || 'Active',
-          StatusLabel:  get(C.STATUS_LABEL) || 'Unassigned',
+          Type: get(C.TYPE), Brand: get(C.BRAND), Serial: get(C.SERIAL),
+          Specs: get(C.SPECS), Supplier: get(C.SUPPLIER),
+          Condition: get(C.CONDITION) || 'Good',
+          AssetLocation: get(C.ASSET_LOCATION),
+          Lifecycle: displayLC, AssetStatus: get(C.ASSET_STATUS) || 'Active',
+          StatusLabel: get(C.STATUS_LABEL) || 'Unassigned',
           jsApprovalStatus: approvalStatus,
-          FormID:         get(CAE.FORM_ID) || '',
-          Grandfathered:  grandfathered,
-          PurchDate:    get(C.PURCH_DATE),
-          WarrantyTerm: get(C.WARRANTY_TERM),
-          WarrantyVal:  get(C.WARRANTY_VAL),
-          Remarks:      get(C.REMARKS),
-          Notes:        get(C.NOTES),
-          EmpID:        get(C.EMP_ID) || 'N/A',
-          Staff:        get(C.STAFF)  || 'Unassigned',
-          Designation:  get(C.DESIGNATION),
-          Department:   get(C.DEPARTMENT),
-          BaseOffice:   get(C.BASE_OFFICE),
-          Assignment:        rawAssignment,
-          EffectiveAssignment: effectiveAssignment,
-          Division:     _normDiv(get(C.DIVISION)),
-          District:     _normDist(get(C.DISTRICT)),
-          Area:         get(C.AREA),
-          Branch:       get(C.BRANCH),
-          EffDate:      get(C.EFF_DATE),
-          CreatedAt:    get(C.CREATED_AT),
-          LastUpdated:  get(C.LAST_UPDATED),
-          EntryEmpId:   get(C.ENTRY_EMP_ID),
-          EntryName:    get(C.ENTRY_NAME),
+          FormID: get(CAE.FORM_ID) || '', Grandfathered: grandfathered,
+          PurchDate: get(C.PURCH_DATE), WarrantyTerm: get(C.WARRANTY_TERM),
+          WarrantyVal: get(C.WARRANTY_VAL), Remarks: get(C.REMARKS),
+          EmpID: get(C.EMP_ID) || 'N/A', Staff: get(C.STAFF) || 'Unassigned',
+          Designation: get(C.DESIGNATION), Department: get(C.DEPARTMENT),
+          BaseOffice: get(C.BASE_OFFICE),
+          Assignment: rawAssignment, EffectiveAssignment: effectiveAssignment,
+          Division: _normDiv(get(C.DIVISION)), District: _normDist(get(C.DISTRICT)),
+          Area: get(C.AREA), Branch: get(C.BRANCH), EffDate: get(C.EFF_DATE),
+          CreatedAt: get(C.CREATED_AT), LastUpdated: get(C.LAST_UPDATED),
+          EntryEmpId: get(C.ENTRY_EMP_ID), EntryName: get(C.ENTRY_NAME),
           BorName:'', BorEmpID:'', BorDesig:'', BorDiv:'', BorDist:'',
           BorBranch:'', BorDate:'', ExpReturn:'', ActReturn:'', BorRemarks:'',
           XferType:'', ToStaff:'', ToEmpID:'', ToDiv:'', ToBranch:'', XferDate:'',
@@ -782,6 +775,31 @@ function deleteAssets(barcodes, callerEmpId) {
   finally    { lock.releaseLock(); }
 }
 
+// ─── FIX SPARE SHEET HEADERS ──────────────────────────────────────────────────
+// Run this once if the Spare sheet headers were misaligned (data pushed down)
+function fixSpareSheetHeaders() {
+  const sh = _ss().getSheetByName(SH_SPARE);
+  if (!sh) return 'Spare sheet not found';
+  const headers = [
+    'Barcode','Category','Brand','Serial No.','Condition',
+    'Purchase Date','Warranty Validity','Supplier',
+    'Division','District','Area','Branch','Asset Location',
+    'Enrolled By','Timestamp','Status'
+  ];
+  // Check if row 1 already has headers
+  const row1 = sh.getRange(1,1,1,headers.length).getValues()[0];
+  if (row1[0] === 'Barcode') return 'Headers already correct';
+  // Insert a row at top and add headers
+  sh.insertRowBefore(1);
+  sh.getRange(1,1,1,headers.length)
+    .setValues([headers])
+    .setFontWeight('bold')
+    .setBackground('#0f0e1c')
+    .setFontColor('#a07ee0');
+  sh.setFrozenRows(1);
+  return 'Headers fixed — ' + headers.length + ' columns';
+}
+
 // ─── ALLOCATE ─────────────────────────────────────────────────────────────────
 // Now drafts an accountability form after successful allocation
 function allocateAsset(obj) {
@@ -819,31 +837,38 @@ function allocateAsset(obj) {
     const normDiv  = _normDiv(obj.division  || '');
     const normDist = _normDist(obj.district || '');
 
-    _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,    'Allocated'],   [C.ASSET_STATUS, 'Active'],
-      [C.STATUS_LABEL, 'Assigned'],    [C.EMP_ID,       obj.empId           || ''],
+    const updates = [
+      [C.LIFECYCLE,    'Allocated'],
+      [C.ASSET_STATUS, 'Active'],
+      [C.STATUS_LABEL, 'Assigned'],
+      [C.EMP_ID,       obj.empId           || ''],
       [C.STAFF,        _sanitize(obj.staffName, 100)],
-      [C.DESIGNATION,  obj.designation || ''],
-      [C.DEPARTMENT,   obj.department  || ''],
-      [C.BASE_OFFICE,  obj.baseOffice  || ''],
-      [C.DIVISION,     normDiv],        [C.DISTRICT,     normDist],
-      [C.AREA,         obj.area        || ''],
+      [C.DESIGNATION,  obj.designation     || ''],
+      [C.DEPARTMENT,   obj.department      || ''],
+      [C.BASE_OFFICE,  obj.baseOffice      || ''],
+      [C.DIVISION,     normDiv],
+      [C.DISTRICT,     normDist],
+      [C.AREA,         obj.area            || ''],
       [C.BRANCH,       _sanitize(obj.branch, 150)],
-      [C.EFF_DATE,     obj.effDate     || nowStr],
-      [C.REMARKS,      _sanitize(obj.remarks, 500)]
-    ]);
+      [C.EFF_DATE,     obj.effDate         || nowStr],
+      [C.REMARKS,      _sanitize(obj.remarks, 500)],
+    ];
+    if (obj.condition) updates.push([C.CONDITION, obj.condition]);
+    if (obj.assetLocation) updates.push([C.ASSET_LOCATION, obj.assetLocation]);
+    _setRow(sh, rowIdx, updates);
 
     // Write to Allocated log
     _allocLogSheet().appendRow([
       obj.barcode,
-      obj.type      || String(curRow[C.TYPE  - 1] || ''),
-      obj.brand     || String(curRow[C.BRAND - 1] || ''),
-      obj.serial    || String(curRow[C.SERIAL- 1] || ''),
+      obj.type      || String(curRow[C.TYPE      - 1] || ''),
+      obj.brand     || String(curRow[C.BRAND     - 1] || ''),
+      obj.serial    || String(curRow[C.SERIAL    - 1] || ''),
       obj.empId, _sanitize(obj.staffName, 100),
-      obj.designation || '', obj.department || '', obj.baseOffice || '',
+      obj.designation  || '', obj.department || '', obj.baseOffice || '',
       normDiv, normDist, obj.area || '', _sanitize(obj.branch, 150),
       obj.effDate || nowStr,
       obj.condition || String(curRow[C.CONDITION - 1] || 'Good'),
+      obj.assetLocation || '',
       _sanitize(obj.remarks, 500), nowStr, obj.allocatedBy || ''
     ]);
 
@@ -874,7 +899,7 @@ function allocateAsset(obj) {
     const formId = draftAccountabilityForm(
       obj.empId,
       assetForForm,
-      'Enrollment',
+      'Allocation',
       '',
       drafterId
     );
@@ -1021,24 +1046,39 @@ function saveTransfer(t) {
     _xferSheet().appendRow([
       t.barcode, t.transferType,
       _sanitize(t.fromStaff, 100), t.fromEmpId, t.fromDesig,
-      t.fromDiv, t.fromDist, t.fromArea, _sanitize(t.fromBranch, 150), _sanitize(t.fromRemarks, 500),
+      t.fromDept || '', t.fromBaseOffice || '',
+      t.fromDiv, t.fromDist, t.fromArea, _sanitize(t.fromBranch, 150),
+      String(curRow[C.CONDITION - 1] || ''), // from condition (current state)
+      String(curRow[C.ASSET_LOCATION - 1] || ''),
+      _sanitize(t.fromRemarks, 500),
       _sanitize(t.toStaff, 100), t.toEmpId, t.toDesig,
-      normToDiv, normToDist, t.toArea, _sanitize(t.toBranch, 150), _sanitize(t.toRemarks, 500),
+      t.toDept || '', t.toBaseOffice || '',
+      normToDiv, normToDist, t.toArea, _sanitize(t.toBranch, 150),
+      t.toCondition || '', t.toAssetLocation || '',
+      _sanitize(t.toRemarks, 500),
       t.effDate, t.status || 'Completed', nowStr
     ]);
 
-    _setRow(sh, rowIdx, [
-      [C.LIFECYCLE,    'Allocated'],  [C.ASSET_STATUS, 'Active'],
-      [C.STATUS_LABEL, 'Assigned'],   [C.EMP_ID,       t.toEmpId   || ''],
+    const xferUpdates = [
+      [C.LIFECYCLE,    'Allocated'],
+      [C.ASSET_STATUS, 'Active'],
+      [C.STATUS_LABEL, 'Assigned'],
+      [C.EMP_ID,       t.toEmpId      || ''],
       [C.STAFF,        _sanitize(t.toStaff, 100)],
-      [C.DESIGNATION,  t.toDesig   || ''],
-      [C.DIVISION,     normToDiv],    [C.DISTRICT,     normToDist],
-      [C.AREA,         t.toArea    || ''],
+      [C.DESIGNATION,  t.toDesig      || ''],
+      [C.DEPARTMENT,   t.toDept       || ''],
+      [C.BASE_OFFICE,  t.toBaseOffice || ''],
+      [C.DIVISION,     normToDiv],
+      [C.DISTRICT,     normToDist],
+      [C.AREA,         t.toArea       || ''],
       [C.BRANCH,       _sanitize(t.toBranch, 150)],
       [C.EFF_DATE,     t.effDate],
-      [CAE.APPROVAL_STATUS, 'Draft'],
-      [CAE.REJECTION_COMMENT, '']
-    ]);
+      [CAE.APPROVAL_STATUS,    'Draft'],
+      [CAE.REJECTION_COMMENT,  '']
+    ];
+    if (t.toCondition)     xferUpdates.push([C.CONDITION,     t.toCondition]);
+    if (t.toAssetLocation) xferUpdates.push([C.ASSET_LOCATION, t.toAssetLocation]);
+    _setRow(sh, rowIdx, xferUpdates);
 
     const assetObj = {
       Barcode:   t.barcode,
@@ -1497,6 +1537,7 @@ function getDropdownData() {
         result.laptopSpecValues[spec] = vals;
       }
     }
+    result.departments = getDepartmentList();
     return result;
   } catch(e) {
     return { categories:[], brands:{}, models:{}, suppliers:[], laptopSpecs:[], error:e.message };
@@ -1523,6 +1564,22 @@ function getHeadOfficeDepts() {
       if (v) depts.push(v);
     }
     return depts;
+  } catch(e) { return []; }
+}
+
+function getDepartmentList() {
+  try {
+    const sh   = _entrySheet();
+    const last = sh.getLastRow();
+    const depts = new Set();
+    if (last >= AE_DATA_START) {
+      const vals = sh.getRange(AE_DATA_START, C.DEPARTMENT,
+        last - AE_DATA_START + 1, 1).getValues();
+      vals.forEach(r => { const v = String(r[0]||'').trim(); if(v) depts.add(v); });
+    }
+    // Merge with HO depts from dropdown sheet
+    getHeadOfficeDepts().forEach(d => depts.add(d));
+    return [...depts].sort();
   } catch(e) { return []; }
 }
 

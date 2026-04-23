@@ -73,8 +73,14 @@ function renderMyForms() {
   var typeFilter   = (document.getElementById('myFormsTypeFilter') || {}).value || '';
 
   var data = MY_FORMS.filter(function(f) {
-    if (statusFilter && f.status   !== statusFilter) return false;
-    if (typeFilter   && f.formType !== typeFilter)   return false;
+    if (statusFilter && f.status !== statusFilter) return false;
+    if (typeFilter) {
+      if (typeFilter === 'Transfer') {
+        // Match both Transfer-From and Transfer-To under one filter
+        return f.formType === 'Transfer-From' || f.formType === 'Transfer-To';
+      }
+      if (f.formType !== typeFilter) return false;
+    }
     return true;
   });
 
@@ -102,12 +108,19 @@ function renderMyForms() {
   });
 
   grid.innerHTML = data.map(function(f) {
-    switch (f.status) {
-      case 'Draft':     return _renderDraftCard(f);
-      case 'Pending':   return _renderPendingCard(f);
-      case 'Rejected':  return _renderRejectedCard(f);
-      case 'Confirmed': return _renderConfirmedCard(f);
-      default:          return _renderDraftCard(f);
+    switch (f.formType) {
+      case 'Enrollment':    return _renderDraftCard(f);      // handled by status inside
+      case 'Allocation':    return _renderAllocationCard(f);
+      case 'Transfer-From':
+      case 'Transfer-To':   return _renderMyTransferCard(f); // new below
+      default:
+        switch (f.status) {
+          case 'Draft':     return _renderDraftCard(f);
+          case 'Pending':   return _renderPendingCard(f);
+          case 'Rejected':  return _renderRejectedCard(f);
+          case 'Confirmed': return _renderConfirmedCard(f);
+          default:          return _renderDraftCard(f);
+        }
     }
   }).join('');
 
@@ -255,6 +268,109 @@ function _renderConfirmedCard(f) {
     + '</div>';
 }
 
+// ─── NEW: Allocation card (same draft/pending/rejected/confirmed flow) ────
+function _renderAllocationCard(f) {
+  // Reuse the same status-based renderers — Allocation behaves like Enrollment
+  switch (f.status) {
+    case 'Draft':     return _renderDraftCard(f);
+    case 'Pending':   return _renderPendingCard(f);
+    case 'Rejected':  return _renderRejectedCard(f);
+    case 'Confirmed': return _renderConfirmedCard(f);
+    default:          return _renderDraftCard(f);
+  }
+}
+
+// ─── MY FORMS: Unified transfer card (shows both From+To context) ─────────
+function _renderMyTransferCard(f) {
+  var isFrom   = f.formType === 'Transfer-From';
+  var sideIcon = isFrom ? '📤' : '📥';
+  var sideLabel= isFrom ? 'Releasing' : 'Receiving';
+  var tc = { bg:'rgba(8,145,178,.1)', color:'var(--cyan)', icon:'🔄' };
+
+  return '<div class="approval-card" id="acard-' + esc(f.formId) + '" '
+    + 'style="border-color:rgba(8,145,178,.28);background:rgba(8,145,178,.02)">'
+
+    // Header
+    + '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">'
+    + '<div style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;'
+    +   'justify-content:center;font-size:1rem;flex-shrink:0;background:' + tc.bg + '">🔄</div>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-weight:700;font-size:.9rem;color:var(--text);overflow:hidden;'
+    +   'text-overflow:ellipsis;white-space:nowrap">' + esc(f.staffName || 'Unknown Staff') + '</div>'
+    + '<div style="display:flex;gap:5px;align-items:center;margin-top:3px;flex-wrap:wrap">'
+    + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:.7rem;color:var(--text3)">'
+    +   esc(f.formId) + '</span>'
+    + '<span style="background:rgba(8,145,178,.12);color:var(--cyan);'
+    +   'font-size:.67rem;padding:1px 6px;border-radius:10px;font-weight:600">'
+    +   'Transfer · ' + sideIcon + ' ' + sideLabel + '</span>'
+    + '</div></div></div>'
+
+    // Meta
+    + _cardMeta(f)
+
+    // Status banner
+    + (f.status === 'Pending'
+      ? '<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;'
+        + 'background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.18);'
+        + 'border-radius:6px;margin-bottom:10px">'
+        + '<div class="spinner" style="width:11px;height:11px;border-width:2px;'
+        + 'border-top-color:var(--blue);border-color:rgba(59,130,246,.2)"></div>'
+        + '<span style="font-size:.76rem;color:var(--blue);font-weight:600">Awaiting supervisor review</span>'
+        + '</div>'
+      : '')
+    + (f.status === 'Rejected'
+      ? '<div style="padding:7px 12px;background:rgba(239,68,68,.07);'
+        + 'border:1px solid rgba(239,68,68,.22);border-radius:6px;margin-bottom:8px">'
+        + '<div style="font-size:.67rem;font-weight:700;color:var(--red);'
+        + 'text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Rejection Reason</div>'
+        + '<div style="font-size:.78rem;color:#f87171;line-height:1.4">'
+        + esc(f.rejectionComment || 'No comment provided') + '</div></div>'
+      : '')
+    + (f.status === 'Confirmed'
+      ? '<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;'
+        + 'background:rgba(22,163,74,.07);border:1px solid rgba(22,163,74,.2);'
+        + 'border-radius:6px;margin-bottom:10px">'
+        + '<span style="color:var(--green);font-weight:700">✓</span>'
+        + '<span style="font-size:.76rem;color:var(--green);font-weight:600">Confirmed</span>'
+        + (f.reviewedAt ? '<span style="font-size:.7rem;color:var(--text3);margin-left:auto">'
+          + esc(fmtDate(f.reviewedAt) || f.reviewedAt) + '</span>' : '')
+        + '</div>'
+      : '')
+
+    // Date
+    + '<div style="font-size:.72rem;color:var(--text3);margin-bottom:10px">'
+    + (f.status === 'Draft'     ? 'Drafted '   : '')
+    + (f.status === 'Pending'   ? 'Submitted ' : '')
+    + (f.status === 'Rejected'  ? 'Reviewed '  : '')
+    + (f.status === 'Confirmed' ? 'Confirmed ' : '')
+    + esc(fmtDate(f.submittedAt || f.draftedAt || f.reviewedAt || '') || '—')
+    + '</div>'
+
+    // Actions
+    + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">'
+    + '<button class="btn btn-secondary btn-sm" onclick="openAssetListModal(\'' + esc(f.formId) + '\')" '
+    +   'style="font-size:.76rem">' + _ICO.view + ' Assets</button>'
+    + '<button class="btn btn-secondary btn-sm" '
+    +   'onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')" '
+    +   'style="font-size:.76rem">🖨 Preview PDF</button>'
+    + (f.status === 'Draft'
+      ? '<button class="btn btn-primary btn-sm" '
+        + 'onclick="_submitFormForReview(\'' + esc(f.formId) + '\',this)">Submit for Review →</button>'
+      : '')
+    + (f.status === 'Rejected'
+      ? '<button class="btn btn-primary btn-sm" id="resubmit-' + esc(f.formId) + '" '
+        + 'onclick="_submitFormForReview(\'' + esc(f.formId) + '\',this)">Resubmit for Review</button>'
+      : '')
+    + (f.status === 'Confirmed'
+      ? '<button class="btn btn-sm" '
+        + 'onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')" '
+        + 'style="background:rgba(22,163,74,.1);color:var(--green);border:1px solid rgba(22,163,74,.3);'
+        + 'gap:5px;font-size:.76rem">' + _ICO.print + ' Print PDF Form</button>'
+      : '')
+    + '</div>'
+    + '</div>';
+}
+
 // ─── SUBMIT HELPERS ───────────────────────────────────────────────────────────
 function _submitFormForReview(formId, btn) {
   _lockBtn(btn);
@@ -389,65 +505,81 @@ function _renderEnrollmentReviewCard(f) {
 
 // ─── TRANSFER REVIEW PAIR ─────────────────────────────────────────────────────
 function _renderTransferReviewPair(fromForm, toForm) {
-  var pairCardId = 'xpair-' + (fromForm ? fromForm.formId : '') + '-' + (toForm ? toForm.formId : '');
+  var fId = fromForm ? fromForm.formId : '';
+  var tId = toForm   ? toForm.formId   : '';
+  var pairId = 'xpair-' + fId + '-' + tId;
 
-  function miniPanel(f, side) {
-    if (!f) return '<div style="background:var(--bg4);border:1px dashed var(--border);'
-      + 'border-radius:8px;padding:14px;display:flex;align-items:center;'
-      + 'justify-content:center;color:var(--text3);font-size:.8rem;font-style:italic">'
-      + 'No ' + side + ' form</div>';
-    var isFrom = side === 'From';
-    var bg  = isFrom ? 'var(--bg3)' : 'rgba(59,130,246,.04)';
-    var bc  = isFrom ? 'var(--border)' : 'rgba(59,130,246,.18)';
-    return '<div style="background:' + bg + ';border:1px solid ' + bc + ';border-radius:8px;padding:12px">'
-      + '<div style="font-size:.67rem;font-weight:700;color:' + (isFrom ? 'var(--text3)' : '#60a5fa')
-      +   ';text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">'
-      + (isFrom ? '📤 Releasing' : '📥 Receiving') + '</div>'
-      + '<div style="font-weight:700;font-size:.86rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+  var submittedAt = (fromForm || toForm || {}).submittedAt || '';
+
+  // Mini party block (inline, horizontal)
+  function partyBlock(f, side) {
+    if (!f) return '<div style="flex:1;padding:10px 14px;background:var(--bg4);'
+      + 'border:1px dashed var(--border);border-radius:8px;'
+      + 'display:flex;align-items:center;justify-content:center;'
+      + 'color:var(--text3);font-size:.78rem;font-style:italic">No ' + side + ' form</div>';
+
+    var isFrom  = side === 'From';
+    var bg      = isFrom ? 'var(--bg3)' : 'rgba(59,130,246,.05)';
+    var bc      = isFrom ? 'var(--border)' : 'rgba(59,130,246,.2)';
+    var labelColor = isFrom ? 'var(--text3)' : '#60a5fa';
+    var icon    = isFrom ? '📤' : '📥';
+
+    return '<div style="flex:1;background:' + bg + ';border:1px solid ' + bc + ';'
+      + 'border-radius:8px;padding:10px 14px">'
+      + '<div style="font-size:.65rem;font-weight:700;color:' + labelColor + ';'
+      +   'text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">'
+      + icon + ' ' + side + '</div>'
+      + '<div style="font-weight:700;font-size:.84rem;overflow:hidden;'
+      +   'text-overflow:ellipsis;white-space:nowrap" title="' + esc(f.staffName || '') + '">'
       +   esc(f.staffName || '—') + '</div>'
-      + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:.7rem;color:var(--text3);margin-top:2px">'
-      +   esc(f.empId || '—') + '</div>'
-      + '<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap;align-items:center">'
-      + '<span class="pool-pill" style="font-size:.7rem">' + (f.assetCount || 0) + ' asset(s)</span>'
-      + (f.district ? '<span class="loc-pill lp-dist" style="font-size:.67rem">' + esc(f.district) + '</span>' : '')
+      + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:.7rem;'
+      +   'color:var(--text3);margin-top:2px">' + esc(f.empId || '—') + '</div>'
+      + '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;align-items:center">'
+      + '<span class="pool-pill" style="font-size:.68rem">' + (f.assetCount || 0) + ' asset(s)</span>'
+      + (f.district ? '<span class="loc-pill lp-dist" style="font-size:.66rem">' + esc(f.district) + '</span>' : '')
+      + (f.branch   ? '<span class="loc-pill lp-branch" style="font-size:.66rem">' + esc(f.branch) + '</span>' : '')
       + '</div>'
-      + '<button class="btn btn-secondary btn-xs" style="margin-top:8px;gap:4px;font-size:.72rem;width:100%;justify-content:center" '
-      +   'onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')">🖨 Preview PDF</button>'
+      + '<button class="btn btn-secondary btn-xs" style="margin-top:8px;width:100%;justify-content:center;gap:4px;font-size:.7rem"'
+      +   ' onclick="openAccountabilityFormByEmp(\'' + esc(f.empId || '') + '\')">'
+      + '🖨 Preview PDF</button>'
       + '</div>';
   }
 
-  var fId = fromForm ? fromForm.formId : '';
-  var tId = toForm   ? toForm.formId   : '';
+  return '<div class="approval-card" id="' + esc(pairId) + '" '
+    + 'style="border-color:rgba(8,145,178,.3);background:rgba(8,145,178,.02)">'
 
-  return '<div style="background:var(--card);border:1px solid var(--border);'
-    + 'border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)" id="' + esc(pairCardId) + '">'
-    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
-    + '<span class="badge badge-transfer">Transfer Pair</span>'
-    + '<span style="font-size:.7rem;color:var(--text3);margin-left:auto">'
-    +   'Submitted ' + esc(fmtDate((fromForm || toForm).submittedAt) || '—') + '</span>'
+    // ── Header row ──
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'
+    + '<span class="badge badge-transfer" style="font-size:.7rem">🔄 Transfer</span>'
+    + (submittedAt
+        ? '<span style="font-size:.7rem;color:var(--text3);margin-left:auto">Submitted '
+          + esc(fmtDate(submittedAt) || submittedAt) + '</span>'
+        : '<span style="margin-left:auto"></span>')
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:14px">'
-    + miniPanel(fromForm, 'From')
-    + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" style="flex-shrink:0">'
-    +   '<polyline points="9 18 15 12 9 6"/></svg>'
-    + miniPanel(toForm, 'To')
+
+    // ── Two party blocks side by side ──
+    + '<div style="display:flex;gap:8px;align-items:stretch;margin-bottom:14px">'
+    + partyBlock(fromForm, 'From')
+    + '<div style="display:flex;align-items:center;flex-shrink:0;padding:0 4px;color:var(--text3)">'
+    +   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>'
     + '</div>'
-    // Inline rejection panel for transfer pair
-    + '<div id="xreject-panel-' + esc(fId) + '-' + esc(tId) + '" class="inline-reject-panel" style="display:none;'
-    +   'margin-bottom:10px;padding:12px;background:rgba(239,68,68,.04);'
-    +   'border:1px solid rgba(239,68,68,.2);border-radius:8px">'
-    + '<div style="font-size:.72rem;font-weight:700;color:var(--red);margin-bottom:8px">'
-    +   'Rejection Comment</div>'
+    + partyBlock(toForm, 'To')
+    + '</div>'
+
+    // ── Inline rejection panel (hidden) ──
+    + '<div id="xreject-panel-' + esc(fId) + '-' + esc(tId) + '" '
+    +   'class="inline-reject-panel" style="display:none;margin-bottom:12px">'
+    + '<div style="font-size:.7rem;font-weight:700;color:var(--red);margin-bottom:8px">Rejection Comments</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
-    + '<div><div style="font-size:.7rem;color:var(--text3);margin-bottom:4px">For Releasing Party</div>'
-    + '<textarea id="xreject-from-' + esc(fId) + '" placeholder="Comment for ' + esc(fromForm ? fromForm.staffName : '—') + '…" '
-    +   'style="width:100%;min-height:56px;background:var(--bg3);border:1px solid rgba(239,68,68,.3);'
-    +   'color:var(--text);padding:7px 9px;border-radius:6px;font-family:inherit;font-size:.79rem;'
+    + '<div><div style="font-size:.68rem;color:var(--text3);margin-bottom:3px">For Releasing Party</div>'
+    + '<textarea id="xreject-from-' + esc(fId) + '" placeholder="Comment for ' + esc((fromForm || {}).staffName || '—') + '…"'
+    +   ' style="width:100%;min-height:52px;background:var(--bg3);border:1px solid rgba(239,68,68,.3);'
+    +   'color:var(--text);padding:7px 9px;border-radius:6px;font-family:inherit;font-size:.78rem;'
     +   'outline:none;resize:vertical"></textarea></div>'
-    + '<div><div style="font-size:.7rem;color:var(--text3);margin-bottom:4px">For Receiving Party</div>'
-    + '<textarea id="xreject-to-' + esc(tId) + '" placeholder="Comment for ' + esc(toForm ? toForm.staffName : '—') + '…" '
-    +   'style="width:100%;min-height:56px;background:var(--bg3);border:1px solid rgba(239,68,68,.3);'
-    +   'color:var(--text);padding:7px 9px;border-radius:6px;font-family:inherit;font-size:.79rem;'
+    + '<div><div style="font-size:.68rem;color:var(--text3);margin-bottom:3px">For Receiving Party</div>'
+    + '<textarea id="xreject-to-' + esc(tId) + '" placeholder="Comment for ' + esc((toForm || {}).staffName || '—') + '…"'
+    +   ' style="width:100%;min-height:52px;background:var(--bg3);border:1px solid rgba(239,68,68,.3);'
+    +   'color:var(--text);padding:7px 9px;border-radius:6px;font-family:inherit;font-size:.78rem;'
     +   'outline:none;resize:vertical"></textarea></div>'
     + '</div>'
     + '<div style="display:flex;gap:6px;justify-content:flex-end">'
@@ -456,10 +588,11 @@ function _renderTransferReviewPair(fromForm, toForm) {
     + '<button class="btn btn-danger btn-sm" '
     +   'onclick="_submitRejectTransfer(\'' + esc(fId) + '\',\'' + esc(tId) + '\',this)">Submit Rejection</button>'
     + '</div></div>'
-    // Action bar
+
+    // ── Action bar ──
     + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">'
     + '<button class="btn btn-danger btn-sm" '
-    +   'onclick="_toggleXferReject(\'' + esc(fId) + '\',\'' + esc(tId) + '\')">Reject Transfer ▾</button>'
+    +   'onclick="_toggleXferReject(\'' + esc(fId) + '\',\'' + esc(tId) + '\')">Reject ▾</button>'
     + '<button class="btn btn-success btn-sm" '
     +   'onclick="_submitConfirmTransfer(\'' + esc(fId) + '\',\'' + esc(tId) + '\',this)">✓ Confirm Both</button>'
     + '</div>'

@@ -46,9 +46,9 @@
       </select>
       <select class="filter-select" id="myFormsTypeFilter" onchange="renderMyForms()">
         <option value="">All Types</option>
-        <option value="Enrollment">Enrollment</option>
-        <option value="Transfer-From">Transfer (From)</option>
-        <option value="Transfer-To">Transfer (To)</option>
+        <option value="Enrollment">Enrollment (Spare)</option>
+        <option value="Allocation">Allocation</option>
+        <option value="Transfer">Transfer</option>
       </select>
       <span id="myFormsCount" style="margin-left:auto;font-size:.8rem;color:var(--text3)"></span>
     </div>
@@ -86,7 +86,7 @@
       <div style="font-size:.7rem;font-weight:700;color:var(--cyan);text-transform:uppercase;
                   letter-spacing:.1em;margin-bottom:12px;padding-bottom:7px;
                   border-bottom:1px solid rgba(8,145,178,.2)">
-        🔄 Transfer Accountability Pairs
+        🔄 Transfer Accountability
       </div>
       <div id="pendingTransferGrid" style="display:flex;flex-direction:column;gap:14px">
         <div style="color:var(--text3);font-size:.85rem;padding:16px 0">

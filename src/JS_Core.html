@@ -1126,7 +1126,7 @@ function switchPage(p){
 
 function loadDropdownData(){
   google.script.run
-    .withSuccessHandler(function(d){ DROPDOWN_DATA=d; populateCategoryDropdown(); populateSupplierDropdown(); })
+    .withSuccessHandler(function(d){ DROPDOWN_DATA=d; populateCategoryDropdown(); populateSupplierDropdown(); populateDeptDropdowns(); })
     .withFailureHandler(function(){})
     .getDropdownData();
 }

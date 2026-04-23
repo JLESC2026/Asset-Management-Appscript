@@ -199,6 +199,23 @@
         <div class="field"><label>Area</label><input type="text" id="alArea" placeholder="Auto-filled"/></div>
         <div class="field form-span2"><label>Branch / Base Office</label><input type="text" id="alBranch" placeholder="Auto-filled"/></div>
       </div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field form-span2"><label>Department</label>
+          <select id="alDept">
+            <option value="">Select dept…</option>
+          </select>
+        </div>
+        <div class="field"><label>Asset Location (Physical)</label>
+          <input type="text" id="alAssetLocation" placeholder="e.g. 788 – Bucay"/>
+        </div>
+        <div class="field"><label>Condition at Allocation</label>
+          <select id="alCondition">
+            <option value="">No change</option>
+            <option>New</option><option>Good</option>
+            <option>Damage</option><option>Repair</option>
+          </select>
+        </div>
+      </div>
       <div id="allocLookupMsg" style="font-size:.78rem;margin-bottom:14px;padding:6px 10px;border-radius:6px;display:none"></div>
       <div class="enroll-section-title">Allocation Details</div>
       <div class="form-grid" style="margin-bottom:8px">
@@ -290,6 +307,22 @@
             <div class="field"><label>District</label><input type="text" id="tToDist" placeholder="Auto-filled"/></div>
             <div class="field"><label>Branch</label><input type="text" id="tToBranch" placeholder="Auto-filled"/></div>
             <div class="field"><label>Area</label><input type="text" id="tToArea" placeholder="Auto-filled"/></div>
+            <div class="field"><label>Department</label>
+              <select id="tToDept"><option value="">Select dept…</option></select>
+            </div>
+            <div class="field"><label>Base Office</label>
+              <input type="text" id="tToBaseOffice" placeholder="Auto-filled"/>
+            </div>
+            <div class="field"><label>Asset Location (Physical)</label>
+              <input type="text" id="tToAssetLocation" placeholder="e.g. 788 – Bucay"/>
+            </div>
+            <div class="field"><label>Condition After Transfer</label>
+              <select id="tToCondition">
+                <option value="">No change</option>
+                <option>New</option><option>Good</option>
+                <option>Damage</option><option>Repair</option>
+              </select>
+            </div>
             <div class="field"><label>Remarks</label><input type="text" id="tToRemarks" placeholder="Optional"/></div>
           </div>
         </div>
