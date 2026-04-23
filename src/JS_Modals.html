@@ -196,11 +196,11 @@ function switchViewTab(tab) {
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="xfer-from">${esc(r[2]||'—')}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-          <span class="xfer-to">${esc(r[10]||'—')}</span>
+          <span class="xfer-to">${esc(r[14]||'—')}</span>
         </div>
         <div class="xfer-meta">
-          <span>📋 ${esc(r[1]||'—')}</span><span>📅 ${fmtDate(r[18])||'—'}</span>
-          <span class="badge badge-${r[19]==='Completed'?'returned':'transfer'}" style="font-size:.68rem">${esc(r[19]||'Pending')}</span>
+          <span>📋 ${esc(r[1]||'—')}</span><span>📅 ${fmtDate(r[26])||'—'}</span>
+          <span class="badge badge-${r[27]==='Completed'?'returned':'transfer'}" style="font-size:.68rem">${esc(r[27]||'Pending')}</span>
         </div>
       </div>`).join('') + '</div>';
   }
@@ -1378,8 +1378,9 @@ function _printAccountabilityFormGated(empId) {
     return (a.EmpID || '').trim().toLowerCase() === String(empId || '').trim().toLowerCase()
       && ['allocated', 'transfer'].indexOf(a.status) >= 0;
   });
-  if (!_checkPrintGate(assets)) {
-    if (confirm('Some assets are pending supervisor approval.\n\nGo to the For Approval page to submit and track your forms?')) {
+  var _gate = _checkPrintGate(assets);
+  if (!_gate.allowed) {
+    if (confirm(_gate.blockedCount + ' asset(s) are pending supervisor approval.\n\nGo to the For Approval page to submit and track your forms?')) {
       closeModal('staffAssetModal');
       _loadApprovalData(function() { switchPage('for-approval'); });
     }
@@ -1391,8 +1392,9 @@ function _printAccountabilityFormGated(empId) {
 function _printAccountabilityFormFromBranchGated(idx) {
   var rec = _eqBranchReg[idx];
   if (!rec || !rec.assets || !rec.assets.length) { toast('No assets to print.', 'warn'); return; }
-  if (!_checkPrintGate(rec.assets)) {
-    if (confirm('Some assets in this branch are pending supervisor approval.\n\nGo to the For Approval page?')) {
+  var _branchGate = _checkPrintGate(rec.assets);
+  if (!_branchGate.allowed) {
+    if (confirm(_branchGate.blockedCount + ' asset(s) in this branch are pending supervisor approval.\n\nGo to the For Approval page?')) {
       closeModal('equipmentBranchModal');
       _loadApprovalData(function() { switchPage('for-approval'); });
     }

@@ -35,8 +35,12 @@ function openAccountabilityFormByEmp(empId) {
   });
   if (!empAssets.length) { toast('No assets found for: ' + empId, 'warn'); return; }
   var ref = empAssets[0];
+  // For spare/borrow-item assets, Staff is 'Unassigned' — use EntryName instead
+  var accountableName = (ref.Staff && ref.Staff !== 'Unassigned')
+    ? ref.Staff
+    : (ref.EntryName || '');
   _loadEngineersAndRender({
-    name:           ref.Staff       || '',
+    name:           accountableName,
     id_no:          empId,
     designation:    ref.Designation || '',
     department:     ref.Department  || ref.Division || '',
@@ -78,8 +82,15 @@ function _loadEngineersAndRender(data) {
   try {
     google.script.run
       .withSuccessHandler(function(eng) {
-        data.fe_name     = _toTitleCase((eng && eng.fe)     || '');
-        data.senior_name = _toTitleCase((eng && eng.senior) || '');
+        data.fe_name       = _toTitleCase((eng && eng.fe)     || '');
+        data.senior_name   = _toTitleCase((eng && eng.senior) || '');
+        // Pull signatory config from fetched APPROVAL_CFG if available
+        var _cfg = APPROVAL_CFG || {};
+        data.verifiedByName  = _cfg.verifiedByName  || 'MARICON B. JAROPILLO';
+        data.processedByLabel= _cfg.processedByLabel|| 'Field Engineer';
+        data.checkedByLabel  = _cfg.checkedByLabel  || 'Senior Field Engineer';
+        data.notedByName     = _cfg.notedByName     || 'PATRICK GERARD G. REYES';
+        data.notedByTitle    = _cfg.notedByTitle    || 'Department Head';
         _renderAccountabilityForm(data);
       })
       .withFailureHandler(function() {
@@ -267,20 +278,20 @@ function _renderAccountabilityForm(data) {
     + '<div class="sig-block">'
     + '<span class="sig-lbl">Processed by:</span>'
     + '<div class="sig-line">' + esc(feName) + '</div>'
-    + '<div class="sig-title">Field Engineer</div>'
+    + '<div class="sig-title">' + esc(data.processedByLabel || 'Field Engineer') + '</div>'
     + '<div class="sig-date-line"></div>'
     + '<div class="sig-date-label">Date</div>'
     + '</div>\n'
     + '<div class="sig-block">'
     + '<span class="sig-lbl">Checked by:</span>'
     + '<div class="sig-line">' + esc(seniorName) + '</div>'
-    + '<div class="sig-title">Senior Field Engineer</div>'
+    + '<div class="sig-title">' + esc(data.checkedByLabel || 'Senior Field Engineer') + '</div>'
     + '<div class="sig-date-line"></div>'
     + '<div class="sig-date-label">Date</div>'
     + '</div>\n'
     + '<div class="sig-block">'
     + '<span class="sig-lbl">Verified by:</span>'
-    + '<div class="sig-line">MARICON B. JAROPILLO</div>'
+    + '<div class="sig-line">' + esc((data.verifiedByName || 'MARICON B. JAROPILLO').toUpperCase()) + '</div>'
     + '<div class="sig-title">System Administrator</div>'
     + '<div class="sig-date-line"></div>'
     + '<div class="sig-date-label">Date</div>'
@@ -291,8 +302,8 @@ function _renderAccountabilityForm(data) {
     + '<div class="noted-wrap">'
     + '<div class="noted-block">'
     + '<div class="noted-label">Noted by:</div>'
-    + '<div class="noted-name">PATRICK GERARD G. REYES</div>'
-    + '<div class="noted-title">Department Head</div>'
+    + '<div class="noted-name">' + esc((data.notedByName || 'PATRICK GERARD G. REYES').toUpperCase()) + '</div>'
+    + '<div class="noted-title">' + esc(data.notedByTitle || 'Department Head') + '</div>'
     + '<div class="noted-date-line"></div>'
     + '<div class="noted-date-label">Date</div>'
     + '</div>'

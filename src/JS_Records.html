@@ -32,13 +32,13 @@ function renderTransferTable() {
         <div style="font-size:.72rem;color:var(--text3)">${r[3] ? 'ID: ' + esc(r[3]) : ''}</div>
       </td>
       <td>
-        <div style="font-weight:600;color:#60a5fa">${esc(r[10]) || '—'}</div>
-        <div style="font-size:.72rem;color:var(--text3)">${r[11] ? 'ID: ' + esc(r[11]) : ''}</div>
+        <div style="font-weight:600;color:#60a5fa">${esc(r[14]) || '—'}</div>
+        <div style="font-size:.72rem;color:var(--text3)">${r[15] ? 'ID: ' + esc(r[15]) : ''}</div>
       </td>
       <td><span class="badge badge-transfer">${esc(r[1]) || '—'}</span></td>
-      <td class="nowrap-sm">${fmtDate(r[18]) || '—'}</td>
-      <td><span class="badge badge-${r[19] === 'Completed' ? 'returned' : 'transfer'}">${esc(r[19] || 'Pending')}</span></td>
-      <td style="font-size:.74rem;color:var(--text3)">${esc(r[20]) || ''}</td>
+      <td class="nowrap-sm">${fmtDate(r[26]) || '—'}</td>
+      <td><span class="badge badge-${r[27] === 'Completed' ? 'returned' : 'transfer'}">${esc(r[27] || 'Pending')}</span></td>
+      <td style="font-size:.74rem;color:var(--text3)">${esc(r[28]) || ''}</td>
     </tr>`;
   }).join('');
 

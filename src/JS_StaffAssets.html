@@ -609,80 +609,8 @@ window._renderStaffEmpInline = function(emp, div, dist, area, branch, mode) {
 // Alias for any lingering references
 window._renderStaffLeaf = window._renderStaffEmpInline;
 
-// ── BULK TRANSFER MODAL FUNCTIONS ──────────────────────────────────────────
-function openBulkTransferModal(empId, div, dist, area, branch, mode) {
-  closeModal('staffAssetModal');
-  
-  // Get from employee data
-  var emp, assets;
-  if (mode === 'ho') {
-    emp = _stTree[div] && _stTree[div][empId];
-    assets = emp ? (emp.assets||[]) : [];
-  } else {
-    var ft = window._stFieldTree || {};
-    var distKey = dist || _LOC_NODIST;
-    var areaKey = area || _LOC_NOAREA;
-    var branchKey = branch || _LOC_NOBRANCH;
-    var bTree = (((ft[div] || {})[distKey] || {})[areaKey] || {})[branchKey] || {};
-    emp = bTree[empId] || null;
-    assets = emp ? (emp.assets||[]) : [];
-  }
-  
-  if (!emp) { toast('Staff data not found.','err'); return; }
-  
-  // Filter to only allocated/transfer status
-  var toTransfer = assets.filter(function(a) {
-    return ['allocated','transfer'].indexOf(a.status) >= 0;
-  });
-  
-  // Store from employee info
-  window._bxFromEmp = emp;
-  window._bxFromAssets = toTransfer;
-  window._bxSelectedAssets = toTransfer.map(function(a) { return a.Barcode; });
-  
-  // Populate from party
-  document.getElementById('bxFromName').textContent = emp.name || '—';
-  document.getElementById('bxFromEmpId').textContent = empId || '—';
-  
-  var locStr = '';
-  if (mode === 'ho') {
-    locStr = '🏛 Head Office / ' + (div || '—');
-  } else {
-    locStr = (div || '—') + ' / ' + (dist || '—') + ' / ' + (branch || '—');
-  }
-  document.getElementById('bxFromLoc').textContent = locStr;
-  
-  // Build asset checklist
-  var listHtml = toTransfer.map(function(a, idx) {
-    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 10px;' +
-           'background:var(--bg3);border-radius:6px;border:1px solid var(--border)">' +
-           '<input type="checkbox" id="bxAsset_'+idx+'" checked style="cursor:pointer" ' +
-           'data-barcode="'+esc(a.Barcode)+'" onchange="updateBxSelectedCount()"/>' +
-           '<label for="bxAsset_'+idx+'" style="flex:1;cursor:pointer;display:flex;gap:8px;align-items:center;margin:0">' +
-           '<span class="mono-bc" style="font-size:.75rem">'+esc(a.Barcode)+'</span>' +
-           '<span style="font-size:.75rem;color:var(--text3)">'+esc(a.Brand)+' '+esc(a.Type)+'</span>' +
-           '<span class="cond-'+(a.Condition||'good').toLowerCase()+'" style="font-size:.7rem;margin-left:auto">' +
-           (esc(a.Condition)||'—')+'</span>' +
-           '</label></div>';
-  }).join('');
-  
-  document.getElementById('bxAssetList').innerHTML = listHtml || '<div style="color:var(--text3);font-size:.78rem">No assets to transfer</div>';
-  
-  // Clear form fields
-  document.getElementById('bxType').value = 'Permanent';
-  document.getElementById('bxEffDate').value = new Date().toISOString().split('T')[0];
-  document.getElementById('bxToEmpId').value = '';
-  document.getElementById('bxToStaff').value = '';
-  document.getElementById('bxToDesig').value = '';
-  document.getElementById('bxToDiv').value = '';
-  document.getElementById('bxToDist').value = '';
-  document.getElementById('bxToArea').value = '';
-  document.getElementById('bxToBranch').value = '';
-  document.getElementById('bxLookupMsg').style.display = 'none';
-  
-  updateBxSelectedCount();
-  openModal('bulkTransferModal');
-}
+// NOTE: openBulkTransferModal is defined in JS_Modals.html and loaded after this file.
+// Do not define it here. Bulk transfer functionality is handled entirely by JS_Modals.html.
 
 function updateBxSelectedCount() {
   var checkboxes = document.querySelectorAll('#bxAssetList input[type="checkbox"]');
@@ -691,9 +619,4 @@ function updateBxSelectedCount() {
   document.getElementById('bxSelectedCount').textContent = selected.length + ' selected';
 }
 
-// onBxToEmpInput is defined in JS_Modals.html (loaded after this file).
-// The authoritative implementation lives there — do not duplicate here.
-
-// submitBulkTransfer is defined in JS_Modals.html (loaded after this file).
-// The authoritative implementation lives there — do not duplicate here.
 </script>

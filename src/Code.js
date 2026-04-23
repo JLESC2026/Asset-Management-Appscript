@@ -85,7 +85,8 @@ function _sanitize(val, maxLen) {
 
 function _normDiv(raw) {
   if (!raw) return '';
-  return String(raw).trim().replace(/^DIv/i, m => 'Div');
+  // Normalise "div 1", "DIV 1", "Division 1", "DIVISION 1" → "Div 1"
+  return String(raw).trim().replace(/^div(?:ision)?\s*/i, 'Div ').trim();
 }
 
 function _normDist(raw) {
@@ -1059,6 +1060,7 @@ function saveTransfer(t) {
       t.effDate, t.status || 'Completed', nowStr
     ]);
 
+    const curApprovalStatus = String(curRow[CAE.APPROVAL_STATUS - 1] || '').trim();
     const xferUpdates = [
       [C.LIFECYCLE,    'Allocated'],
       [C.ASSET_STATUS, 'Active'],
@@ -1073,8 +1075,11 @@ function saveTransfer(t) {
       [C.AREA,         t.toArea       || ''],
       [C.BRANCH,       _sanitize(t.toBranch, 150)],
       [C.EFF_DATE,     t.effDate],
-      [CAE.APPROVAL_STATUS,    'Draft'],
-      [CAE.REJECTION_COMMENT,  '']
+      // Only reset approval status if asset is not already Confirmed
+      ...(curApprovalStatus !== 'Confirmed' ? [
+        [CAE.APPROVAL_STATUS,   'Draft'],
+        [CAE.REJECTION_COMMENT, '']
+      ] : [])
     ];
     if (t.toCondition)     xferUpdates.push([C.CONDITION,     t.toCondition]);
     if (t.toAssetLocation) xferUpdates.push([C.ASSET_LOCATION, t.toAssetLocation]);
@@ -1184,16 +1189,40 @@ function saveBulkTransfer(barcodes, t) {
 
       // Write individual transfer record to Transfers sheet
       _xferSheet().appendRow([
-        bc, t.transferType,
-        _sanitize(t.fromStaff, 100), t.fromEmpId, t.fromDesig,
-        t.fromDiv, t.fromDist, t.fromArea, _sanitize(t.fromBranch, 150), _sanitize(t.fromRemarks, 500),
-        _sanitize(t.toStaff, 100), t.toEmpId, t.toDesig,
-        normToDiv, normToDist, t.toArea, _sanitize(t.toBranch, 150), _sanitize(t.toRemarks, 500),
-        t.effDate, 'Completed', nowStr
+        bc,                                       // col 1:  Barcode
+        t.transferType,                           // col 2:  TransferType
+        _sanitize(t.fromStaff, 100),              // col 3:  FromStaff
+        t.fromEmpId,                              // col 4:  FromEmpID
+        t.fromDesig   || '',                      // col 5:  FromDesig
+        t.fromDiv     || '',                      // col 6:  FromDept  (reuse div as dept placeholder)
+        t.fromBaseOffice || t.fromBranch || '',   // col 7:  FromBaseOffice
+        t.fromDiv     || '',                      // col 8:  FromDiv
+        t.fromDist    || '',                      // col 9:  FromDist
+        t.fromArea    || '',                      // col 10: FromArea
+        _sanitize(t.fromBranch, 150),             // col 11: FromBranch
+        '',                                       // col 12: FromCondition
+        '',                                       // col 13: FromAssetLoc
+        _sanitize(t.fromRemarks, 500),            // col 14: FromRemarks
+        _sanitize(t.toStaff, 100),                // col 15: ToStaff
+        t.toEmpId,                                // col 16: ToEmpID
+        t.toDesig     || '',                      // col 17: ToDesig
+        t.toDept      || '',                      // col 18: ToDept
+        t.toBaseOffice || t.toBranch || '',       // col 19: ToBaseOffice
+        normToDiv,                                // col 20: ToDiv
+        normToDist,                               // col 21: ToDist
+        t.toArea      || '',                      // col 22: ToArea
+        _sanitize(t.toBranch, 150),               // col 23: ToBranch
+        '',                                       // col 24: ToCondition
+        '',                                       // col 25: ToAssetLoc
+        _sanitize(t.toRemarks, 500),              // col 26: ToRemarks
+        t.effDate,                                // col 27: EffDate
+        'Completed',                              // col 28: Status
+        nowStr                                    // col 29: Timestamp
       ]);
 
       // Update asset row
-      _setRow(sh, rowIdx, [
+      const bulkCurApproval = String(curRow[CAE.APPROVAL_STATUS - 1] || '').trim();
+      const bulkSetRowUpdates = [
         [C.LIFECYCLE,    'Allocated'],  [C.ASSET_STATUS, 'Active'],
         [C.STATUS_LABEL, 'Assigned'],   [C.EMP_ID,       t.toEmpId   || ''],
         [C.STAFF,        _sanitize(t.toStaff, 100)],
@@ -1202,9 +1231,12 @@ function saveBulkTransfer(barcodes, t) {
         [C.AREA,         t.toArea    || ''],
         [C.BRANCH,       _sanitize(t.toBranch, 150)],
         [C.EFF_DATE,     t.effDate],
-        [CAE.APPROVAL_STATUS, 'Draft'],
-        [CAE.REJECTION_COMMENT, '']
-      ]);
+        ...(bulkCurApproval !== 'Confirmed' ? [
+          [CAE.APPROVAL_STATUS,   'Draft'],
+          [CAE.REJECTION_COMMENT, '']
+        ] : [])
+      ];
+      _setRow(sh, rowIdx, bulkSetRowUpdates);
     });
 
     if (!fromAssets.length) {
@@ -1213,9 +1245,54 @@ function saveBulkTransfer(barcodes, t) {
 
     // One shared form pair for all assets
     const drafterId  = t.fromEmpId || '';
-    const fromFormId = draftAccountabilityForm(t.fromEmpId || '', fromAssets, 'Transfer-From', '', drafterId);
-    const toFormId   = draftAccountabilityForm(t.toEmpId   || '', toAssets,   'Transfer-To',
-      fromFormId.startsWith('Error') ? '' : fromFormId, drafterId);
+    // Pre-generate both IDs sequentially while still under lock to prevent
+    // race between sheet read and append in draftAccountabilityForm
+    const fromFormId = _generateFormIDUnsafe();
+    // Append From form row directly to reserve the ID slot before generating To ID
+    const _nowForIds = new Date().toLocaleString('en-PH');
+    const _fromContext = _getContextType(t.fromEmpId || '');
+    const _fromAssetsJson = _buildAssetsSnapshot(fromAssets);
+    const _fromRef = fromAssets.length ? fromAssets[0] : {};
+    const _fromRow = new Array(AF_TOTAL_COLS).fill('');
+    _fromRow[AF.FORM_ID - 1]      = fromFormId;
+    _fromRow[AF.FORM_TYPE - 1]    = 'Transfer-From';
+    _fromRow[AF.CONTEXT_TYPE - 1] = _fromContext;
+    _fromRow[AF.EMP_ID - 1]       = t.fromEmpId || '';
+    _fromRow[AF.STAFF_NAME - 1]   = _sanitize(_fromRef.Staff || '', 100);
+    _fromRow[AF.DESIGNATION - 1]  = _fromRef.Designation || '';
+    _fromRow[AF.DEPARTMENT - 1]   = _fromRef.Department  || '';
+    _fromRow[AF.BRANCH - 1]       = _sanitize(_fromRef.Branch || '', 150);
+    _fromRow[AF.DIVISION - 1]     = _fromRef.Division || '';
+    _fromRow[AF.DISTRICT - 1]     = _fromRef.District || '';
+    _fromRow[AF.ASSETS_JSON - 1]  = _fromAssetsJson;
+    _fromRow[AF.STATUS - 1]       = 'Draft';
+    _fromRow[AF.DRAFTED_BY - 1]   = drafterId;
+    _fromRow[AF.DRAFTED_AT - 1]   = _nowForIds;
+    _afSheet().appendRow(_fromRow);
+    _log('DRAFT_FORM', fromFormId, 'Transfer-From | ' + (t.fromEmpId || '') + ' | ' + fromAssets.length + ' assets', drafterId);
+
+    const toFormId = _generateFormIDUnsafe();
+    const _toContext = _getContextType(t.toEmpId || '');
+    const _toAssetsJson = _buildAssetsSnapshot(toAssets);
+    const _toRef = toAssets.length ? toAssets[0] : {};
+    const _toRow = new Array(AF_TOTAL_COLS).fill('');
+    _toRow[AF.FORM_ID - 1]        = toFormId;
+    _toRow[AF.FORM_TYPE - 1]      = 'Transfer-To';
+    _toRow[AF.LINKED_FORM_ID - 1] = fromFormId;
+    _toRow[AF.CONTEXT_TYPE - 1]   = _toContext;
+    _toRow[AF.EMP_ID - 1]         = t.toEmpId || '';
+    _toRow[AF.STAFF_NAME - 1]     = _sanitize(_toRef.Staff || '', 100);
+    _toRow[AF.DESIGNATION - 1]    = _toRef.Designation || '';
+    _toRow[AF.DEPARTMENT - 1]     = _toRef.Department  || '';
+    _toRow[AF.BRANCH - 1]         = _sanitize(_toRef.Branch || '', 150);
+    _toRow[AF.DIVISION - 1]       = _toRef.Division || '';
+    _toRow[AF.DISTRICT - 1]       = _toRef.District || '';
+    _toRow[AF.ASSETS_JSON - 1]    = _toAssetsJson;
+    _toRow[AF.STATUS - 1]         = 'Draft';
+    _toRow[AF.DRAFTED_BY - 1]     = drafterId;
+    _toRow[AF.DRAFTED_AT - 1]     = _nowForIds;
+    _afSheet().appendRow(_toRow);
+    _log('DRAFT_FORM', toFormId, 'Transfer-To | ' + (t.toEmpId || '') + ' | ' + toAssets.length + ' assets', drafterId);
 
     if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
       const afSh     = _afSheet();
@@ -1256,7 +1333,7 @@ function getTransferData() {
     const sh   = _xferSheet();
     const last = sh.getLastRow();
     if (last < EVT_DATA_START) return [];
-    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 21).getValues()
+    return sh.getRange(EVT_DATA_START, 1, last - EVT_DATA_START + 1, 29).getValues()
       .filter(r => r[0])
       .map(r => r.map(v => String(v || '')));
   } catch(e) { return []; }
