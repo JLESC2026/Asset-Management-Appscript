@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 function renderSpare() {
   // Skip if page is not currently visible
-  if (document.getElementById('page-spare').style.display === 'none' 
+  if (!document.getElementById('page-spare').classList.contains('active')
     && currentPage !== 'spare') return;
   _resetTblSel('spare');
   let data = _filterByScope(ASSETS.filter(a => a.status === 'spare'));

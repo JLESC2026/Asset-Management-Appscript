@@ -12,10 +12,12 @@
     <div id="authError" class="error-msg" style="display:none"></div>
     
     <div class="input-group">
-      <input type="text" id="authUser" placeholder="Employee ID" autocomplete="username"/>
+      <input type="text" id="authUser" placeholder="Employee ID" autocomplete="username"
+             onkeydown="if(event.key==='Enter')document.getElementById('authPass').focus()"/>
     </div>
     <div class="input-group">
-      <input type="password" id="authPass" placeholder="Password" autocomplete="current-password"/>
+      <input type="password" id="authPass" placeholder="Password" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')doLogin()"/>
     </div>
     
     <button class="btn btn-primary btn-full" id="loginBtn" onclick="doLogin()">

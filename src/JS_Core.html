@@ -31,6 +31,11 @@ var _eqBranchReg     = [];
 var _eqSearchQ       = '';
 var _moveStaffEmpId  = '';
 var _samCurrentEmpId = '';
+var _samDiv          = '';
+var _samDist         = '';
+var _samArea         = '';
+var _samBranch       = '';
+var _samMode         = '';
 var _mouUnitType    = '';
 var _mouCurrentPath = { div:'', dist:'', area:'', branch:'' };
 var _empLookupTimer  = null;
@@ -489,12 +494,19 @@ document.addEventListener('keydown', function(e) {
     }
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+  var isEnter = e.key === 'Enter';
+  var isCtrlEnter = isEnter && (e.ctrlKey || e.metaKey);
+  // Plain Enter in non-textarea/select fields, or Ctrl+Enter anywhere, submits the active modal.
+  var allowPlainEnter = isEnter && !e.shiftKey && !e.ctrlKey && !e.metaKey
+    && e.target.tagName !== 'TEXTAREA'
+    && e.target.tagName !== 'SELECT';
+
+  if (isCtrlEnter || allowPlainEnter) {
     var openModals = document.querySelectorAll('.modal-backdrop.open');
     if (openModals.length > 0) {
       var topModal = openModals[openModals.length - 1];
       var submitBtn = topModal.querySelector('.btn-primary:not([disabled])');
-      if (submitBtn) submitBtn.click();
+      if (submitBtn) { e.preventDefault(); submitBtn.click(); }
     }
   }
 });
@@ -524,21 +536,13 @@ function _checkPrintGate(assets) {
   if (!assets || !assets.length) return true;
 
   var blocked = assets.filter(function(a) {
-    // Grandfathered OR Confirmed → pass
     var isGrandfathered = String(a.Grandfathered || '').toLowerCase() === 'true';
     var isConfirmed     = (a.jsApprovalStatus || 'Confirmed') === 'Confirmed';
     return !isConfirmed && !isGrandfathered;
   });
 
-  if (blocked.length === 0) return true;
-
-  toast(
-    blocked.length + ' asset' + (blocked.length !== 1 ? 's' : '') +
-    ' still pending supervisor approval. ' +
-    'The form can be printed once all assets are confirmed in the For Approval page.',
-    'warn'
-  );
-  return false;
+  // Return false when blocked; callers are responsible for all user-facing messaging.
+  return blocked.length === 0;
 }
 
 // ═══════════════════════════════════════
@@ -731,7 +735,13 @@ function _applyPermissions() {
     badge.style.display = 'none';
   }
   var topRoleEl = document.getElementById('topRole');
-  if (topRoleEl) topRoleEl.textContent = _getScopeLabel();
+  if (topRoleEl) {
+    var roleDisplay = SESSION.role || (
+      SESSION.roleTier === 'ho'     ? 'Administrator' :
+      SESSION.roleTier === 'senior' ? 'Senior FE' : 'Field Engineer'
+    );
+    topRoleEl.textContent = roleDisplay;
+  }
 }
 
 // ═══════════════════════════════════════

@@ -2085,24 +2085,30 @@ function getRateLimitStatus(formId, drafterId) {
   } catch(e) { return { allowed: true, remaining: RL_MAX_RESUBMITS, cooldownUntil: null }; }
 }
 
+// Lock-free internal helper — call only from within an already-locked context.
+function _generateFormIDUnsafe() {
+  const sh   = _afSheet();
+  const last = sh.getLastRow();
+  const yr   = new Date().getFullYear();
+  let   max  = 0;
+  if (last >= AF_DATA_START) {
+    const ids     = sh.getRange(AF_DATA_START, AF.FORM_ID, last - AF_DATA_START + 1, 1).getValues();
+    const pattern = new RegExp('^FORM-' + yr + '-(\\d+)$');
+    ids.forEach(r => {
+      const m = String(r[0] || '').match(pattern);
+      if (m) { const n = parseInt(m[1], 10); if (!isNaN(n) && n > max) max = n; }
+    });
+  }
+  return 'FORM-' + yr + '-' + String(max + 1).padStart(3, '0');
+}
+
+// Public API — acquires its own lock; safe to call from the front-end.
 function generateFormID() {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(8000); }
   catch(e) { return 'Error: System busy — try again.'; }
   try {
-    const sh   = _afSheet();
-    const last = sh.getLastRow();
-    const yr   = new Date().getFullYear();
-    let   max  = 0;
-    if (last >= AF_DATA_START) {
-      const ids     = sh.getRange(AF_DATA_START, AF.FORM_ID, last - AF_DATA_START + 1, 1).getValues();
-      const pattern = new RegExp('^FORM-' + yr + '-(\\d+)$');
-      ids.forEach(r => {
-        const m = String(r[0] || '').match(pattern);
-        if (m) { const n = parseInt(m[1], 10); if (!isNaN(n) && n > max) max = n; }
-      });
-    }
-    return 'FORM-' + yr + '-' + String(max + 1).padStart(3, '0');
+    return _generateFormIDUnsafe();
   } finally { lock.releaseLock(); }
 }
 
@@ -2160,22 +2166,20 @@ function _clearRateLimit(formId, drafterId) {
 }
 
 function draftAccountabilityForm(empId, assets, formType, linkedFormId, draftedBy) {
-  const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); }
-  catch(e) { return 'Error: System busy — try again.'; }
   try {
     if (!empId)     return 'Error: Employee ID is required.';
     if (!formType)  return 'Error: Form type is required.';
     if (!draftedBy) return 'Error: Drafter ID is required.';
 
-    const formId  = generateFormID();
+    // Use the lock-free helper as instructed
+    const formId = _generateFormIDUnsafe();
     if (formId.startsWith('Error')) return formId;
 
     const nowStr      = new Date().toLocaleString('en-PH');
     const contextType = _getContextType(empId);
     const assetsJson  = _buildAssetsSnapshot(assets || []);
     const refAsset    = (assets && assets.length) ? assets[0] : {};
-    const staffName   = refAsset.Staff       || '';
+    const staffName   = refAsset.Staff         || '';
     const desig       = refAsset.Designation || '';
     const dept        = refAsset.Department  || '';
     const branch      = refAsset.Branch      || refAsset.BaseOffice || '';
@@ -2183,7 +2187,7 @@ function draftAccountabilityForm(empId, assets, formType, linkedFormId, draftedB
     const district    = refAsset.District    || '';
 
     const row = new Array(AF_TOTAL_COLS).fill('');
-    row[AF.FORM_ID        - 1] = formId;
+    row[AF.FORM_ID         - 1] = formId;
     row[AF.FORM_TYPE      - 1] = formType;
     row[AF.LINKED_FORM_ID - 1] = linkedFormId || '';
     row[AF.CONTEXT_TYPE   - 1] = contextType;
@@ -2216,10 +2220,11 @@ function draftAccountabilityForm(empId, assets, formType, linkedFormId, draftedB
 
     _log('DRAFT_FORM', formId, formType + ' | ' + empId + ' | ' + (assets ? assets.length : 0) + ' assets', draftedBy);
     return formId;
-  } catch(e) { return 'Error: ' + e.message; }
-  finally    { lock.releaseLock(); }
-}
 
+  } catch(e) { 
+    return 'Error: ' + e.message; 
+  }
+}
 function _buildAssetsSnapshot(assets) {
   if (!assets || !assets.length) return '[]';
   return JSON.stringify(assets.map(function(a) {

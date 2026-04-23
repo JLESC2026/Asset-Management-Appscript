@@ -23,11 +23,17 @@ function openAccountabilityForm(barcode) {
 
 function openAccountabilityFormByEmp(empId) {
   window.openAccountabilityFormByEmp = openAccountabilityFormByEmp;
+  var idLower = String(empId).trim().toLowerCase();
   var empAssets = _filterByScope(ASSETS).filter(function(a){
-    return (a.EmpID || '').trim().toLowerCase() === String(empId).trim().toLowerCase()
+    // Allocated / transferred: match by accountable EmpID
+    var allocMatch = (a.EmpID || '').trim().toLowerCase() === idLower
       && ['allocated', 'transfer'].indexOf(a.status) >= 0;
+    // Spare / borrow-item: match by the inputter who enrolled them
+    var spareMatch = (a.EntryEmpId || '').trim().toLowerCase() === idLower
+      && ['spare', 'borrow-item'].indexOf(a.status) >= 0;
+    return allocMatch || spareMatch;
   });
-  if (!empAssets.length) { toast('No allocated assets found for: ' + empId, 'warn'); return; }
+  if (!empAssets.length) { toast('No assets found for: ' + empId, 'warn'); return; }
   var ref = empAssets[0];
   _loadEngineersAndRender({
     name:           ref.Staff       || '',
@@ -297,7 +303,28 @@ function _renderAccountabilityForm(data) {
     + '</body>\n</html>';
 
   var w = window.open('', '_blank', 'width=900,height=1100');
-  if (!w) { toast('Please allow pop-ups to open the form.', 'warn'); return; }
+  if (!w) {
+    // First fallback: try without size hints (some browsers treat sized popups differently).
+    try { w = window.open('about:blank', '_blank'); } catch(e2) {}
+  }
+  if (!w) {
+    // Second fallback: Blob URL — bypasses the popup blocker in most browsers.
+    try {
+      var blob = new Blob([html], { type: 'text/html' });
+      var blobUrl = URL.createObjectURL(blob);
+      w = window.open(blobUrl, '_blank');
+      // Revoke after a short delay to free memory.
+      setTimeout(function(){ URL.revokeObjectURL(blobUrl); }, 10000);
+    } catch(e3) {}
+  }
+  if (!w) {
+    toast(
+      'Pop-up blocked. Allow pop-ups for this site in your browser settings, ' +
+      'then click Print Accountability Form again.',
+      'warn'
+    );
+    return;
+  }
   w.document.write(html);
   w.document.close();
 }

@@ -635,7 +635,7 @@ function _submitConfirmForm(formId, btn) {
       }
     })
     .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-    .confirmForm(formId, SESSION.username);
+    .confirmForm(formId, SESSION.username, SESSION.roleTier);
 }
 
 function _submitRejectForm(formId, btn) {
@@ -653,7 +653,7 @@ function _submitRejectForm(formId, btn) {
       }
     })
     .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-    .rejectForm(formId, SESSION.username, comment.trim());
+    .rejectForm(formId, SESSION.username, comment.trim(), SESSION.roleTier);
 }
 
 function _submitConfirmTransfer(fId, tId, btn) {
@@ -670,7 +670,7 @@ function _submitConfirmTransfer(fId, tId, btn) {
       }
     })
     .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-    .confirmTransferPair(fId, tId, SESSION.username);
+    .confirmTransferPair(fId, tId, SESSION.username, SESSION.roleTier);
 }
 
 function _submitRejectTransfer(fId, tId, btn) {
@@ -692,6 +692,6 @@ function _submitRejectTransfer(fId, tId, btn) {
       }
     })
     .withFailureHandler(function(err) { _unlockBtn(btn); toast(err.message, 'err'); })
-    .rejectTransferPair(fId, tId, SESSION.username, fromComment.trim(), toComment.trim());
+    .rejectTransferPair(fId, tId, SESSION.username, fromComment.trim(), toComment.trim(), SESSION.roleTier);
 }
 </script>
