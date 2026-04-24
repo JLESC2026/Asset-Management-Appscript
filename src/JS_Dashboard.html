@@ -1,90 +1,509 @@
 <script>
 // ═══════════════════════════════════════
-//  DASHBOARD
+//  DASHBOARD — Enhanced
 // ═══════════════════════════════════════
 function renderDashboard(){
-  var dashData = _filterByScope(ASSETS);
-  var spare = dashData.filter(function(a){return a.status==='spare';}).length;
-  var alloc = dashData.filter(function(a){return ['allocated','transfer'].indexOf(a.status)>=0;}).length;
-  var borr  = dashData.filter(function(a){return a.status==='borrowed';}).length;
-  var disp  = dashData.filter(function(a){return a.status==='disposal';}).length;
-  var pool  = dashData.filter(function(a){return a.status==='borrow-item';}).length;
-  
-  // Count overdue borrows (due date passed) (UX-9)
-  var overdueCount = dashData.filter(function(a) {
-    return a.status === 'borrowed' && a.ExpReturn && new Date(a.ExpReturn) < new Date();
-  }).length;
-  
-  // Count recent disposals (within 7 days)
-  var weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
-  var recentDisposals = DISPOSALS.filter(function(d){
-    var dispDate = d[4]; // Dispose Date is at index 4 (col 5): [0]=Barcode,[1]=Serial,[2]=Reason,[3]=DisposedBy,[4]=DisposeDate
+  var all   = _filterByScope(ASSETS);
+  var spare = all.filter(function(a){return a.status==='spare';});
+  var alloc = all.filter(function(a){return ['allocated','transfer'].indexOf(a.status)>=0;});
+  var borr  = all.filter(function(a){return a.status==='borrowed';});
+  var disp  = all.filter(function(a){return a.status==='disposal';});
+  var pool  = all.filter(function(a){return a.status==='borrow-item';});
 
-    if (!dispDate) return false;
-    var disp = new Date(dispDate);
-    return disp >= weekAgo;
-  }).length;
+  var now = new Date();
+  now.setHours(0,0,0,0);
 
-  var stats=[
-    {label:'Total Assets', val:dashData.length, color:'var(--accent)',  icon:'📦', page:'all-assets', size:'lg'},
-    {label:'Allocated',    val:alloc,            color:'var(--blue)',    icon:'👤', page:'allocated'},
-    {label:'Spare Pool',   val:spare,            color:'var(--accent2)', icon:'🗄️', page:'spare'},
-    {label:'On Borrow',    val:borr,             color:'var(--yellow)',  icon:'📤', page:'borrow', subTab:'active',
-      badge: overdueCount > 0 ? overdueCount + ' overdue' : null,
-      badgeColor: 'var(--red)'},
-    {label:'Borrow Pool',  val:pool,             color:'var(--orange)',  icon:'📋', page:'borrow'},
-    {label:'Disposed',     val:disp,             color:'var(--red)',     icon:'🗑️', page:'disposal',
-      badge: recentDisposals > 0 ? recentDisposals + ' this week' : null,
-      badgeColor: 'var(--red)'},
+  // Overdue borrows
+  var overdue = borr.filter(function(a){
+    if (!a.ExpReturn) return false;
+    var d = _parseDate(a.ExpReturn);
+    return d && d < now;
+  });
+
+  // Due within 7 days
+  var dueSoon = borr.filter(function(a){
+    if (!a.ExpReturn) return false;
+    var d = _parseDate(a.ExpReturn);
+    if (!d || d < now) return false;
+    var diff = Math.round((d - now)/(86400000));
+    return diff <= 7;
+  });
+
+  // Warranty buckets
+  var in30 = [], in90 = [], expired = [];
+  all.forEach(function(a){
+    if (!a.WarrantyVal || a.status === 'disposal') return;
+    var d = _parseDate(a.WarrantyVal);
+    if (!d) return;
+    var diff = Math.round((d - now)/(86400000));
+    if (diff < 0)        expired.push(a);
+    else if (diff <= 30) in30.push(a);
+    else if (diff <= 90) in90.push(a);
+  });
+
+  var pendingApprovals = PENDING_FORMS.length;
+
+  _renderAlerts(overdue, dueSoon, pendingApprovals);
+  _renderStatCards(all, spare, alloc, borr, disp, pool, overdue, in30.concat(in90), pendingApprovals);
+  _renderWarranty(expired, in30, in90, all);
+  _renderCondition(all);
+  _renderActivity();
+  _renderTypeChart(all);
+  _renderLocations(all);
+  _renderLifecycle(spare, alloc, borr, disp, pool, all);
+  _renderBorrowSnapshot(borr, overdue, dueSoon);
+}
+
+// ── Date parser (handles MM/DD/YYYY and YYYY-MM-DD) ──────────────────────────
+function _parseDate(raw) {
+  if (!raw) return null;
+  var s = String(raw).trim();
+  var d;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+    var p = s.split('/');
+    d = new Date(parseInt(p[2]), parseInt(p[0])-1, parseInt(p[1]));
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    var p2 = s.split('-');
+    d = new Date(parseInt(p2[0]), parseInt(p2[1])-1, parseInt(p2[2]));
+  } else {
+    d = new Date(s);
+  }
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// ── ALERTS BANNER ─────────────────────────────────────────────────────────────
+function _renderAlerts(overdue, dueSoon, pendingApprovals) {
+  var el = document.getElementById('dashAlerts');
+  if (!el) return;
+  var alerts = [];
+
+  if (overdue.length) {
+    alerts.push(
+      '<div onclick="switchPage(\'borrow\');setTimeout(function(){switchBorrowTab(\'active\')},50)" '
+      + 'style="display:flex;align-items:center;gap:10px;padding:10px 16px;'
+      + 'background:rgba(220,38,38,.09);border:1px solid rgba(220,38,38,.28);'
+      + 'border-radius:var(--radius2);cursor:pointer;transition:.15s;margin-bottom:8px" '
+      + 'onmouseover="this.style.background=\'rgba(220,38,38,.14)\'" '
+      + 'onmouseout="this.style.background=\'rgba(220,38,38,.09)\'">'
+      + '<span style="font-size:1.1rem">🚨</span>'
+      + '<div style="flex:1">'
+      + '<div style="font-weight:700;font-size:.84rem;color:var(--red)">'
+      + overdue.length + ' borrow' + (overdue.length>1?'s':'') + ' overdue</div>'
+      + '<div style="font-size:.74rem;color:rgba(220,38,38,.75)">'
+      + overdue.slice(0,3).map(function(a){ return esc(a.Barcode) + (a.BorName?' → '+esc(a.BorName):''); }).join(' · ')
+      + (overdue.length>3 ? ' +' + (overdue.length-3) + ' more' : '')
+      + '</div></div>'
+      + '<span style="font-size:.72rem;color:var(--red);font-weight:600;opacity:.7">View →</span>'
+      + '</div>'
+    );
+  }
+
+  if (dueSoon.length && !overdue.length) {
+    alerts.push(
+      '<div style="display:flex;align-items:center;gap:10px;padding:9px 16px;'
+      + 'background:rgba(217,119,6,.08);border:1px solid rgba(217,119,6,.22);'
+      + 'border-radius:var(--radius2);margin-bottom:8px">'
+      + '<span style="font-size:1rem">⏰</span>'
+      + '<div style="font-size:.82rem;color:var(--yellow);font-weight:600">'
+      + dueSoon.length + ' borrow' + (dueSoon.length>1?'s':'') + ' due within 7 days</div>'
+      + '</div>'
+    );
+  }
+
+  if (pendingApprovals > 0 && canReviewForms()) {
+    alerts.push(
+      '<div onclick="switchPage(\'for-approval\');setTimeout(function(){switchApprovalTab(\'review\')},50)" '
+      + 'style="display:flex;align-items:center;gap:10px;padding:9px 16px;'
+      + 'background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.22);'
+      + 'border-radius:var(--radius2);cursor:pointer;margin-bottom:8px;transition:.15s" '
+      + 'onmouseover="this.style.background=\'rgba(59,130,246,.12)\'" '
+      + 'onmouseout="this.style.background=\'rgba(59,130,246,.07)\'">'
+      + '<span style="font-size:1rem">📋</span>'
+      + '<div style="font-size:.82rem;color:var(--blue);font-weight:600;flex:1">'
+      + pendingApprovals + ' accountability form' + (pendingApprovals>1?'s':'') + ' pending your review</div>'
+      + '<span style="font-size:.72rem;color:var(--blue);opacity:.7">Review →</span>'
+      + '</div>'
+    );
+  }
+
+  el.innerHTML = alerts.join('');
+}
+
+// ── STAT CARDS ────────────────────────────────────────────────────────────────
+function _renderStatCards(all, spare, alloc, borr, disp, pool, overdue, warrantyAlerts, pendingApprovals) {
+  var stats = [
+    {
+      label:'Total Assets', val:all.length, color:'var(--accent)',
+      icon:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>',
+      page:'all-assets', size:'lg',
+      sub: alloc.length + ' allocated · ' + spare.length + ' spare'
+    },
+    {
+      label:'Allocated', val:alloc.length, color:'var(--blue)',
+      icon:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+      page:'allocated',
+      sub: _countUniqueField(alloc,'EmpID') + ' staff · ' + _countUniqueField(alloc,'District') + ' districts'
+    },
+    {
+      label:'Spare Pool', val:spare.length, color:'#e85118',
+      icon:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
+      page:'spare',
+      sub: _countUniqueField(spare,'Type') + ' type' + (_countUniqueField(spare,'Type')!==1?'s':'')
+    },
+    {
+      label:'On Borrow', val:borr.length + pool.length, color:'var(--yellow)',
+      icon:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>',
+      page:'borrow', subTab:'active',
+      sub: overdue.length > 0
+        ? '<span style="color:var(--red);font-weight:700">⚠ ' + overdue.length + ' overdue</span>'
+        : borr.length + ' active · ' + pool.length + ' pool'
+    },
+    {
+      label:'Warranties', val:warrantyAlerts.length, color:'#0891b2',
+      icon:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+      page:'all-assets',
+      sub: warrantyAlerts.length > 0
+        ? '<span style="color:var(--cyan)">' + warrantyAlerts.length + ' expiring soon</span>'
+        : 'All warranties OK'
+    },
+    {
+      label:'Disposed', val:disp.length, color:'var(--red)',
+      icon:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
+      page:'disposal',
+      sub: _recentDisposalCount() + ' this month'
+    }
   ];
-  
-  document.getElementById('dashStats').innerHTML=stats.map(function(s){
-    var isLarge = s.size === 'lg';
-    return '<div class="stat-card'+(isLarge?' stat-card-primary':'')+'" '
-      + 'onclick="switchPage(\''+s.page+'\');'
+
+  var el = document.getElementById('dashStats');
+  if (!el) return;
+  el.innerHTML = stats.map(function(s) {
+    var isLg = s.size === 'lg';
+    return '<div class="stat-card' + (isLg?' stat-card-primary':'') + '" '
+      + 'onclick="switchPage(\'' + s.page + '\');'
       + (s.subTab ? 'setTimeout(function(){switchBorrowTab(\''+s.subTab+'\')},50);' : '')
-      + '" style="cursor:pointer;'
-      + (isLarge ? 'grid-column:span 2;' : '') + '">'
-      + '<div class="stat-icon" style="background:'+s.color+'22;font-size:1.1rem">'
-      +   s.icon
+      + '" style="cursor:pointer;' + (isLg ? 'grid-column:span 2;' : '') + '">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">'
+      + '<div class="stat-icon" style="background:' + s.color + '18;color:' + s.color + ';border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center">'
+      + s.icon + '</div>'
+      + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text3);margin-top:3px"><polyline points="9 18 15 12 9 6"/></svg>'
       + '</div>'
-      + '<div class="stat-val" style="color:'+s.color+';'
-      +   (isLarge ? 'font-size:2.8rem;' : '') + '">'
-      +   s.val
-      + '</div>'
-      + '<div class="stat-label">'+s.label+'</div>'
-      + (s.badge
-          ? '<div style="margin-top:4px;font-size:.7rem;font-weight:700;'
-            + 'color:'+s.badgeColor+';background:'+s.badgeColor+'18;'
-            + 'padding:2px 8px;border-radius:10px;display:inline-block">'
-            + '⚠ '+s.badge+'</div>'
-          : '')
+      + '<div class="stat-val" style="color:' + s.color + ';font-size:' + (isLg?'2.6rem':'1.9rem') + ';line-height:1;margin-bottom:4px">' + s.val + '</div>'
+      + '<div class="stat-label" style="font-weight:600;margin-bottom:5px">' + s.label + '</div>'
+      + (s.sub ? '<div style="font-size:.72rem;color:var(--text3)">' + s.sub + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
+function _countUniqueField(arr, field) {
+  return new Set(arr.map(function(a){ return a[field] || ''; }).filter(Boolean)).size;
+}
+
+function _recentDisposalCount() {
+  var now   = new Date();
+  var start = new Date(now.getFullYear(), now.getMonth(), 1);
+  return DISPOSALS.filter(function(d){
+    var dt = _parseDate(d[4]);
+    return dt && dt >= start;
+  }).length;
+}
+
+// ── WARRANTY WIDGET ───────────────────────────────────────────────────────────
+function _renderWarranty(expired, in30, in90, all) {
+  var el = document.getElementById('dashWarranty');
+  if (!el) return;
+
+  var total = all.filter(function(a){ return a.WarrantyVal && a.status !== 'disposal'; }).length;
+  var ok    = total - expired.length - in30.length - in90.length;
+
+  if (!total) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:.82rem;padding:16px 0;text-align:center">No warranty data tracked</div>';
+    return;
+  }
+
+  var rows = [
+    { label:'Expired',       count:expired.length, color:'var(--red)',    dot:'🔴' },
+    { label:'Expires ≤ 30d', count:in30.length,    color:'var(--yellow)', dot:'🟡' },
+    { label:'Expires ≤ 90d', count:in90.length,    color:'var(--cyan)',   dot:'🔵' },
+    { label:'Valid',         count:ok,             color:'var(--green)',  dot:'🟢' }
+  ];
+
+  var bar = '<div style="display:flex;height:8px;border-radius:10px;overflow:hidden;margin-bottom:14px;gap:2px">';
+  rows.forEach(function(r) {
+    if (!r.count) return;
+    var pct = (r.count / total * 100).toFixed(1);
+    bar += '<div style="flex:' + pct + ';background:' + r.color + ';transition:flex .5s ease" title="' + r.label + ': ' + r.count + '"></div>';
+  });
+  bar += '</div>';
+
+  var listHtml = rows.map(function(r) {
+    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">'
+      + '<span style="font-size:.8rem">' + r.dot + '</span>'
+      + '<span style="font-size:.8rem;color:var(--text2);flex:1">' + r.label + '</span>'
+      + '<span style="font-weight:700;font-size:.86rem;color:' + r.color + '">' + r.count + '</span>'
+      + '<span style="font-size:.7rem;color:var(--text3);width:36px;text-align:right">'
+      + (r.count / total * 100).toFixed(0) + '%</span>'
       + '</div>';
   }).join('');
 
-  var actColors={CREATE:'var(--green)',ALLOCATE:'var(--blue)',ASSIGN:'var(--blue)',TRANSFER:'var(--cyan)',BORROW:'var(--yellow)',RETURN:'var(--green)',DISPOSE:'var(--red)',DELETE:'var(--red)',DEALLOCATE:'var(--orange)'};
-  document.getElementById('dashActivity').innerHTML=LOGS.slice(0,8).map(function(l){
-    return '<div class="activity-item">'
-      +'<div class="act-dot" style="background:'+(actColors[l.action]||'var(--accent)')+'"></div>'
-      +'<div style="flex:1;min-width:0">'
-      +'<div style="font-weight:600">'+esc(l.action)+' — <span style="font-family:\'JetBrains Mono\',monospace;font-size:.78rem">'+esc(l.barcode)+'</span></div>'
-      +'<div style="color:var(--text2)">'+esc(l.details)+'</div>'
-      +'<div class="act-time">'+esc(l.timestamp)+'</div>'
-      +'</div></div>';
-  }).join('')||'<div style="color:var(--text3);padding:16px 0;text-align:center;font-size:.85rem">No recent activity</div>';
+  el.innerHTML = bar + listHtml;
+}
 
-  var typeCounts={};
-  dashData.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
-  var vals=Object.values(typeCounts);
-  var max=vals.length?Math.max.apply(null,vals):1;
-  document.getElementById('dashTypeChart').innerHTML=Object.entries(typeCounts).sort(function(a,b){return b[1]-a[1];}).slice(0,8).map(function(entry){
-    var t=entry[0], c=entry[1];
-    return '<div class="type-row">'
-      +'<div class="type-label" title="'+t+'">'+t+'</div>'
-      +'<div class="type-track"><div class="type-fill" style="width:'+(c/max*100).toFixed(1)+'%"></div></div>'
-      +'<div class="type-count">'+c+'</div>'
-      +'</div>';
+// ── CONDITION WIDGET ──────────────────────────────────────────────────────────
+function _renderCondition(all) {
+  var el = document.getElementById('dashCondition');
+  if (!el) return;
+
+  var active = all.filter(function(a){ return a.status !== 'disposal'; });
+  var conds  = { New:0, Good:0, Fair:0, Damage:0, Repair:0 };
+  active.forEach(function(a) {
+    var c = (a.Condition || 'Good');
+    var key = c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
+    if (conds[key] !== undefined) conds[key]++;
+    else conds.Good++;
+  });
+
+  var total2 = active.length || 1;
+  var items = [
+    { label:'New',    count:conds.New,    color:'#3b82f6'       },
+    { label:'Good',   count:conds.Good,   color:'var(--green)'  },
+    { label:'Fair',   count:conds.Fair,   color:'var(--yellow)' },
+    { label:'Damage', count:conds.Damage, color:'var(--red)'    },
+    { label:'Repair', count:conds.Repair, color:'var(--orange)' }
+  ].filter(function(i){ return i.count > 0; });
+
+  // SVG donut
+  var size = 80, r = 30, cx = 40, cy = 40;
+  var circumference = 2 * Math.PI * r;
+  var segments = '';
+  var offset = 0;
+  items.forEach(function(item) {
+    var fraction = item.count / total2;
+    var dash     = fraction * circumference;
+    var gap      = circumference - dash;
+    segments += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" '
+      + 'stroke="' + item.color + '" stroke-width="10" '
+      + 'stroke-dasharray="' + dash.toFixed(2) + ' ' + gap.toFixed(2) + '" '
+      + 'stroke-dashoffset="' + (-offset * circumference / total2).toFixed(2) + '" '
+      + 'transform="rotate(-90 ' + cx + ' ' + cy + ')"/>';
+    offset += item.count;
+  });
+
+  var donut = '<div style="display:flex;align-items:center;gap:16px">'
+    + '<svg width="' + size + '" height="' + size + '" style="flex-shrink:0">'
+    + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--bg3)" stroke-width="10"/>'
+    + segments
+    + '<text x="' + cx + '" y="' + (cy+4) + '" text-anchor="middle" fill="var(--text)" '
+    + 'font-size="12" font-weight="700" font-family="JetBrains Mono,monospace">' + active.length + '</text>'
+    + '</svg>'
+    + '<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
+    + items.map(function(item) {
+        return '<div style="display:flex;align-items:center;gap:6px">'
+          + '<div style="width:8px;height:8px;border-radius:50%;background:' + item.color + ';flex-shrink:0"></div>'
+          + '<span style="font-size:.76rem;color:var(--text2);flex:1">' + item.label + '</span>'
+          + '<span style="font-size:.78rem;font-weight:700;color:' + item.color + '">' + item.count + '</span>'
+          + '<span style="font-size:.68rem;color:var(--text3);width:30px;text-align:right">'
+          + (item.count/total2*100).toFixed(0) + '%</span>'
+          + '</div>';
+      }).join('')
+    + '</div></div>';
+
+  el.innerHTML = donut;
+}
+
+// ── RECENT ACTIVITY ───────────────────────────────────────────────────────────
+function _renderActivity() {
+  var el = document.getElementById('dashActivity');
+  if (!el) return;
+  var colors = {
+    CREATE:'var(--green)',ALLOCATE:'var(--blue)',ASSIGN:'var(--blue)',
+    TRANSFER:'var(--cyan)',BORROW:'var(--yellow)',RETURN:'var(--green)',
+    DISPOSE:'var(--red)',DELETE:'var(--red)',DEALLOCATE:'var(--orange)',
+    BULK_TRANSFER:'var(--cyan)',DRAFT_FORM:'#8b5cf6',CONFIRM_FORM:'var(--green)',
+    REJECT_FORM:'var(--red)',SUBMIT_FORM:'var(--blue)',EDIT:'var(--text2)'
+  };
+  var icons = {
+    CREATE:'➕',ALLOCATE:'👤',ASSIGN:'👤',TRANSFER:'↔',BORROW:'📤',
+    RETURN:'📥',DISPOSE:'🗑',DELETE:'✕',DEALLOCATE:'↩',EDIT:'✏',
+    DRAFT_FORM:'📋',CONFIRM_FORM:'✓',SUBMIT_FORM:'📬',BULK_TRANSFER:'↔'
+  };
+
+  if (!LOGS.length) {
+    el.innerHTML = '<div style="color:var(--text3);padding:16px 0;text-align:center;font-size:.82rem">No activity yet</div>';
+    return;
+  }
+
+  el.innerHTML = LOGS.slice(0,7).map(function(l){
+    var color = colors[l.action] || 'var(--accent)';
+    var icon  = icons[l.action]  || '•';
+    return '<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">'
+      + '<div style="width:22px;height:22px;border-radius:50%;background:' + color + '18;'
+      + 'display:flex;align-items:center;justify-content:center;font-size:.7rem;'
+      + 'flex-shrink:0;margin-top:1px;border:1px solid ' + color + '30">' + icon + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-size:.8rem;font-weight:600;color:' + color + ';margin-bottom:1px">'
+      + esc(l.action) + ' <span style="font-family:\'JetBrains Mono\',monospace;font-size:.72rem">' + esc(l.barcode||'') + '</span></div>'
+      + '<div style="font-size:.73rem;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(l.details||'') + '">'
+      + esc((l.details||'').substring(0,60)) + (l.details&&l.details.length>60?'…':'') + '</div>'
+      + '<div style="font-size:.68rem;color:var(--text3);margin-top:1px">' + esc(l.timestamp||'') + '</div>'
+      + '</div></div>';
   }).join('');
 }
+
+// ── ASSET BY TYPE CHART ───────────────────────────────────────────────────────
+function _renderTypeChart(all) {
+  var el = document.getElementById('dashTypeChart');
+  if (!el) return;
+  var typeCounts = {};
+  all.forEach(function(a){ if(a.Type) typeCounts[a.Type]=(typeCounts[a.Type]||0)+1; });
+  var sorted = Object.entries(typeCounts).sort(function(a,b){return b[1]-a[1];}).slice(0,8);
+  var max = sorted.length ? sorted[0][1] : 1;
+  var colors = ['#e85118','#3b82f6','#0891b2','#16a34a','#d97706','#8b5cf6','#ec4899','#14b8a6'];
+
+  el.innerHTML = sorted.map(function(entry, i){
+    var t=entry[0], c=entry[1];
+    var pct = (c/max*100).toFixed(1);
+    return '<div class="type-row" style="margin-bottom:6px">'
+      + '<div class="type-label" title="' + t + '" style="font-size:.76rem">' + t + '</div>'
+      + '<div class="type-track">'
+      + '<div class="type-fill" style="width:' + pct + '%;background:' + (colors[i]||'var(--accent)') + ';border-radius:4px"></div>'
+      + '</div>'
+      + '<div class="type-count" style="font-weight:700;color:' + (colors[i]||'var(--accent)') + '">' + c + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+// ── TOP LOCATIONS ─────────────────────────────────────────────────────────────
+function _renderLocations(all) {
+  var el = document.getElementById('dashLocations');
+  if (!el) return;
+  var active = all.filter(function(a){ return a.status !== 'disposal'; });
+
+  var locCounts = {};
+  active.forEach(function(a) {
+    var loc = (a.District || a.Division || a.Branch || '').trim();
+    if (!loc || loc === 'N/A') return;
+    locCounts[loc] = (locCounts[loc] || 0) + 1;
+  });
+
+  var sorted = Object.entries(locCounts).sort(function(a,b){return b[1]-a[1];}).slice(0,6);
+  if (!sorted.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:.82rem;padding:12px 0;text-align:center">No location data</div>';
+    return;
+  }
+  var max = sorted[0][1];
+
+  el.innerHTML = sorted.map(function(entry, i) {
+    var loc = entry[0], count = entry[1];
+    var pct = (count / max * 100).toFixed(1);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">'
+      + '<div style="width:18px;height:18px;border-radius:50%;background:var(--bg3);'
+      + 'display:flex;align-items:center;justify-content:center;font-size:.65rem;'
+      + 'font-weight:700;color:var(--text3);flex-shrink:0">' + (i+1) + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-size:.78rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(loc) + '</div>'
+      + '<div style="height:4px;background:var(--bg3);border-radius:4px;margin-top:3px">'
+      + '<div style="height:100%;width:' + pct + '%;background:var(--accent2);border-radius:4px;transition:width .5s ease"></div>'
+      + '</div></div>'
+      + '<span style="font-size:.78rem;font-weight:700;color:var(--text2);flex-shrink:0">' + count + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+// ── LIFECYCLE BREAKDOWN ───────────────────────────────────────────────────────
+function _renderLifecycle(spare, alloc, borr, disp, pool, all) {
+  var el = document.getElementById('dashLifecycle');
+  if (!el) return;
+
+  var total = all.length || 1;
+  var segments = [
+    { label:'Allocated', val:alloc.length, color:'var(--blue)',   page:'allocated' },
+    { label:'Spare',     val:spare.length, color:'var(--accent)',  page:'spare' },
+    { label:'Borrowed',  val:borr.length,  color:'var(--yellow)', page:'borrow' },
+    { label:'Pool',      val:pool.length,  color:'var(--orange)', page:'borrow' },
+    { label:'Disposed',  val:disp.length,  color:'var(--red)',    page:'disposal' }
+  ].filter(function(s){ return s.val > 0; });
+
+  var bar = '<div style="display:flex;height:12px;border-radius:8px;overflow:hidden;gap:2px;margin-bottom:16px">';
+  segments.forEach(function(s) {
+    var flex = (s.val / total * 100).toFixed(2);
+    bar += '<div style="flex:' + flex + ';background:' + s.color + ';cursor:pointer;transition:.2s" '
+      + 'onclick="switchPage(\'' + s.page + '\')" title="' + s.label + ': ' + s.val + '"></div>';
+  });
+  bar += '</div>';
+
+  var rows = segments.map(function(s) {
+    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="switchPage(\'' + s.page + '\')">'
+      + '<div style="width:10px;height:10px;border-radius:3px;background:' + s.color + ';flex-shrink:0"></div>'
+      + '<span style="font-size:.8rem;color:var(--text2);flex:1">' + s.label + '</span>'
+      + '<span style="font-size:.84rem;font-weight:700;color:' + s.color + '">' + s.val + '</span>'
+      + '<span style="font-size:.7rem;color:var(--text3);width:36px;text-align:right">' + (s.val/total*100).toFixed(1) + '%</span>'
+      + '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>'
+      + '</div>';
+  }).join('');
+
+  el.innerHTML = bar + rows;
+}
+
+// ── BORROW SNAPSHOT ───────────────────────────────────────────────────────────
+function _renderBorrowSnapshot(borr, overdue, dueSoon) {
+  var el      = document.getElementById('dashBorrows');
+  var countEl = document.getElementById('dashBorrowCount');
+  if (!el) return;
+
+  if (countEl) countEl.textContent = borr.length + ' active';
+
+  if (!borr.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:.82rem;padding:16px 0;text-align:center">No active borrows</div>';
+    return;
+  }
+
+  var sorted = borr.slice().sort(function(a, b) {
+    var da = _parseDate(a.ExpReturn) || new Date(9999,0,1);
+    var db = _parseDate(b.ExpReturn) || new Date(9999,0,1);
+    return da - db;
+  }).slice(0, 6);
+
+  el.innerHTML = sorted.map(function(a) {
+    var days = daysUntil(a.ExpReturn);
+    var daysLabel, daysColor;
+    if (days === null)  { daysLabel = '—';                         daysColor = 'var(--text3)'; }
+    else if (days < 0)  { daysLabel = Math.abs(days) + 'd overdue'; daysColor = 'var(--red)'; }
+    else if (days === 0){ daysLabel = 'Due today';                  daysColor = 'var(--yellow)'; }
+    else if (days <= 3) { daysLabel = days + 'd left';              daysColor = 'var(--yellow)'; }
+    else                { daysLabel = days + 'd left';              daysColor = 'var(--green)'; }
+
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="display:flex;gap:6px;align-items:center">'
+      + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:.72rem;color:var(--accent2)">' + esc(a.Barcode||'—') + '</span>'
+      + '<span class="type-tag" style="font-size:.65rem">' + esc(a.Type||'—') + '</span>'
+      + '</div>'
+      + '<div style="font-size:.76rem;font-weight:600;color:var(--text);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+      + esc(a.BorName||'Unknown') + '</div>'
+      + (a.BorBranch ? '<div style="font-size:.7rem;color:var(--text3)">' + esc(a.BorBranch) + '</div>' : '')
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0">'
+      + '<div style="font-size:.75rem;font-weight:700;color:' + daysColor + '">' + daysLabel + '</div>'
+      + (a.ExpReturn ? '<div style="font-size:.68rem;color:var(--text3)">' + esc(fmtDate(a.ExpReturn)) + '</div>' : '')
+      + '</div>'
+      + '</div>';
+  }).join('');
+
+  if (borr.length > 6) {
+    el.innerHTML += '<div style="padding-top:8px;text-align:center">'
+      + '<button class="btn btn-secondary btn-sm" onclick="switchPage(\'borrow\')" style="font-size:.76rem;width:100%">'
+      + 'View all ' + borr.length + ' borrows</button></div>';
+  }
+}
+
+// ── RESPONSIVE: collapse 3-col to 2-col on narrow screens ────────────────────
+(function() {
+  function _adjustDashLayout() {
+    var row = document.getElementById('dashMainRow');
+    if (!row) return;
+    row.style.gridTemplateColumns = window.innerWidth < 1000 ? '1fr 1fr' : '1fr 1fr 1fr';
+  }
+  window.addEventListener('resize', _adjustDashLayout);
+  document.addEventListener('DOMContentLoaded', _adjustDashLayout);
+})();
 </script>

@@ -1,32 +1,92 @@
 <!-- ══ DASHBOARD ══ -->
 <div class="page active" id="page-dashboard">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px">
     <div>
-      <h2 style="font-size:1.4rem;font-weight:700">Dashboard</h2>
-      <p style="color:var(--text2);font-size:.85rem" id="dashDate"></p>
+      <h2 style="font-size:1.5rem;font-weight:800;letter-spacing:-.02em;color:var(--text)">Dashboard</h2>
+      <p style="color:var(--text3);font-size:.83rem;margin-top:3px" id="dashDate"></p>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="switchPage('spare');setTimeout(openAddAssetModal,100)">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      Add Asset
-    </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="switchPage('spare')" style="gap:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        Spare Pool
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="switchPage('spare');setTimeout(openAddAssetModal,100)" style="gap:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Asset
+      </button>
+    </div>
   </div>
+
+  <!-- Alert Banner (overdue / warnings) -->
+  <div id="dashAlerts"></div>
+
+  <!-- Primary stat cards -->
   <div class="dash-stats" id="dashStats"></div>
-  <div class="dash-row">
+
+  <!-- Secondary info row: warranty + condition -->
+  <div class="dash-row" style="margin-bottom:16px" id="dashSecondRow">
+    <div class="dash-card" id="dashWarrantyCard">
+      <h3 style="display:flex;align-items:center;gap:7px;font-size:.84rem;font-weight:700;color:var(--text2);margin-bottom:12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Warranty Status
+      </h3>
+      <div id="dashWarranty"></div>
+    </div>
+    <div class="dash-card" id="dashConditionCard">
+      <h3 style="display:flex;align-items:center;gap:7px;font-size:.84rem;font-weight:700;color:var(--text2);margin-bottom:12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Asset Condition
+      </h3>
+      <div id="dashCondition"></div>
+    </div>
+  </div>
+
+  <!-- Third info row: activity + type chart + top locations -->
+  <div id="dashMainRow" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
     <div class="dash-card">
-      <h3>
+      <h3 style="display:flex;align-items:center;gap:7px;font-size:.84rem;font-weight:700;color:var(--text2);margin-bottom:12px">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         Recent Activity
       </h3>
       <div id="dashActivity"></div>
     </div>
     <div class="dash-card">
-      <h3>
+      <h3 style="display:flex;align-items:center;gap:7px;font-size:.84rem;font-weight:700;color:var(--text2);margin-bottom:12px">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Assets by Type
       </h3>
       <div id="dashTypeChart" class="type-bar"></div>
     </div>
+    <div class="dash-card">
+      <h3 style="display:flex;align-items:center;gap:7px;font-size:.84rem;font-weight:700;color:var(--text2);margin-bottom:12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Top Locations
+      </h3>
+      <div id="dashLocations"></div>
+    </div>
   </div>
+
+  <!-- Bottom row: lifecycle breakdown + active borrows snapshot -->
+  <div class="dash-row">
+    <div class="dash-card">
+      <h3 style="display:flex;align-items:center;gap:7px;font-size:.84rem;font-weight:700;color:var(--text2);margin-bottom:14px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Lifecycle Breakdown
+      </h3>
+      <div id="dashLifecycle"></div>
+    </div>
+    <div class="dash-card">
+      <h3 style="display:flex;align-items:center;gap:7px;font-size:.84rem;font-weight:700;color:var(--text2);margin-bottom:12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        Active Borrows
+        <span id="dashBorrowCount" style="margin-left:auto;font-size:.72rem;padding:1px 8px;border-radius:10px;background:rgba(217,119,6,.12);color:var(--yellow);font-weight:700"></span>
+      </h3>
+      <div id="dashBorrows"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══ ALL ASSETS ══ -->
