@@ -748,6 +748,7 @@ function _applyPermissions() {
 // ═══════════════════════════════════════
 function loadData(){
   _scopeCache = null;
+  LOGS_FULL_LOADED = false;
   showLoading();
   google.script.run
     .withSuccessHandler(function(r) {

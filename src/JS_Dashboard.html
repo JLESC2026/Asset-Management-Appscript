@@ -19,7 +19,8 @@ function renderDashboard(){
   var weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
   var recentDisposals = DISPOSALS.filter(function(d){
-    var dispDate = d[3]; // Dispose Date at index 3
+    var dispDate = d[4]; // Dispose Date is at index 4 (col 5): [0]=Barcode,[1]=Serial,[2]=Reason,[3]=DisposedBy,[4]=DisposeDate
+
     if (!dispDate) return false;
     var disp = new Date(dispDate);
     return disp >= weekAgo;

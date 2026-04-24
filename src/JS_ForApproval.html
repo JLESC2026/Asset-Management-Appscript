@@ -409,7 +409,9 @@ function _submitFormForReview(formId, btn) {
 
 // ─── PENDING REVIEW ───────────────────────────────────────────────────────────
 function renderPendingReview() {
-  var enrollments = PENDING_FORMS.filter(function(f) { return f.formType === 'Enrollment'; });
+  var enrollments = PENDING_FORMS.filter(function(f) {
+      return f.formType === 'Enrollment' || f.formType === 'Allocation';
+    });
   var xferForms   = PENDING_FORMS.filter(function(f) {
     return f.formType === 'Transfer-From' || f.formType === 'Transfer-To';
   });

@@ -140,6 +140,7 @@ function renderBorrowPool() {
 function renderBorrowHistory() {
   const q   = (document.getElementById('borrowHistSearch')?.value || '').toLowerCase();
   const fSt = document.getElementById('borrowHistStatus')?.value  || '';
+  pages.borrowHist = 1; // reset to page 1 on every render
 
   const scopedBarcodes = new Set(_filterByScope(ASSETS).map(a => a.Barcode));
   let data = [...BORROWS].reverse().filter(b => scopedBarcodes.has(b.barcode));

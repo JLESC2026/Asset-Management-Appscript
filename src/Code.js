@@ -140,6 +140,7 @@ function _getOrCreate(name, headers) {
         .setBackground('#0f0e1c').setFontColor('#a07ee0').setWrap(false);
       sh.setFrozenRows(1);
       sh.setColumnWidths(1, headers.length, 140);
+    sh.insertRowsAfter(1, 2); // ensure data starts at row 4, matching EVT_DATA_START = 4
     }
   }
   return sh;
@@ -259,23 +260,20 @@ function _isHashed(str) { return /^[0-9a-f]{64}$/.test(String(str)); }
 // ─── ROLE CLASSIFICATION ──────────────────────────────────────────────────────
 function _mapRoleTier(role) {
   const r = String(role || '').trim().toLowerCase();
-  const HO_ROLES = [
-    'admin', 'super admin', 'superadmin', 'administrator',
-    'super user', 'superuser', 'it admin', 'it administrator',
-    'system admin', 'sysadmin', 'it head', 'department head',
-    'head', 'manager', 'it manager', 'iictd head', 'dept head'
-  ];
-  const SENIOR_ROLES = [
-    'supervisor', 'senior', 'senior fe', 'senior field engineer',
-    'senior engineer', 'sfe', 'sfr', 'field supervisor', 'area supervisor',
-    'district supervisor', 'division supervisor', 'team lead', 'team leader',
-    'lead engineer'
-  ];
-  if (HO_ROLES.includes(r))     return 'ho';
-  if (SENIOR_ROLES.includes(r)) return 'senior';
+
+  // Keyword-based detection for flexibility
+  if (r.includes('admin') || r.includes('head') || r.includes('manager') ||
+      r.includes('director') || r.includes('superuser') || r.includes('super user') ||
+      r.includes('it head') || r.includes('department head') || r.includes('dept head') ||
+      r.includes('iictd head') || r.includes('system admin') || r.includes('sysadmin')) {
+    return 'ho';
+  }
+  if (r.includes('senior') || r.includes('supervisor') || r.includes('team lead') ||
+      r.includes('lead engineer') || r.includes('sfe') || r.includes('sfr')) {
+    return 'senior';
+  }
   return 'fe';
 }
-
 function _parseRemarks(remarks, roleTier) {
   const r = String(remarks || '').toLowerCase().trim();
 
@@ -905,13 +903,8 @@ function allocateAsset(obj) {
       drafterId
     );
 
-    // Link formId back to the asset row
-    if (!formId.startsWith('Error')) {
-      sh.getRange(rowIdx, CAE.APPROVAL_STATUS).setValue('Draft');
-      sh.getRange(rowIdx, CAE.FORM_ID).setValue(formId);
-      sh.getRange(rowIdx, CAE.DRAFTED_BY).setValue(drafterId);
-      sh.getRange(rowIdx, CAE.DRAFTED_AT).setValue(nowStr);
-    }
+    // draftAccountabilityForm already writes APPROVAL_STATUS, FORM_ID, DRAFTED_BY, DRAFTED_AT
+    // to the asset row internally. No duplicate writes needed here.
 
     return {
       result: 'Asset allocated to ' + _sanitize(obj.staffName, 100),
@@ -969,8 +962,8 @@ function deallocateAsset(barcode, remarks) {
       String(curRow[C.AREA          - 1] || ''), // Col 17: Area
       String(curRow[C.BRANCH        - 1] || ''), // Col 18: Branch
       String(curRow[C.ASSET_LOCATION- 1] || ''), // Col 19: Asset Location
-      prevStaff,                                  // Col 20: Enrolled By
-      nowStr                                      // Col 21: Created By
+      String(curRow[C.ENTRY_NAME - 1] || ''),    // Col 20: Original Enrollee (from Asset Entry)
+      nowStr                                      // Col 21: Returned At
     ]);
 
     _log('DEALLOCATE', barcode,
@@ -1100,17 +1093,20 @@ function saveTransfer(t) {
       District:    t.fromDist   || '', Branch:   t.fromBranch || ''
     });
     const toAsset = Object.assign({}, assetObj, {
-      Staff:       t.toStaff || '', EmpID:    t.toEmpId  || '',
-      Designation: t.toDesig || '', Division: normToDiv,
-      District:    normToDist,      Branch:   t.toBranch || ''
+      Staff:       t.toStaff    || '', EmpID:    t.toEmpId  || '',
+      Designation: t.toDesig   || '', Division: normToDiv,
+      District:    normToDist,         Branch:   t.toBranch || '',
+      Condition:   t.toCondition || assetObj.Condition  // capture post-transfer condition
     });
 
     const drafterId  = t.fromEmpId || '';
     const fromFormId = draftAccountabilityForm(t.fromEmpId || '', [fromAsset], 'Transfer-From', '', drafterId);
     const toFormId   = draftAccountabilityForm(t.toEmpId   || '', [toAsset],   'Transfer-To',   fromFormId.startsWith('Error') ? '' : fromFormId, drafterId);
 
-    if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
-      const afSh     = _afSheet();
+if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
+      sh.getRange(rowIdx, CAE.APPROVAL_STATUS).setValue('Draft');
+      sh.getRange(rowIdx, CAE.REJECTION_COMMENT).setValue('');
+      // ... rest of existing code inside this block unchanged      const afSh     = _afSheet();
       const fromRowI = _findAFRow(fromFormId);
       if (fromRowI > 0) afSh.getRange(fromRowI, AF.LINKED_FORM_ID).setValue(toFormId);
       // Link formId to asset row
@@ -1299,19 +1295,25 @@ function saveBulkTransfer(barcodes, t) {
       const fromRowI = _findAFRow(fromFormId);
       if (fromRowI > 0) afSh.getRange(fromRowI, AF.LINKED_FORM_ID).setValue(toFormId);
 
-      // Link toFormId to all affected asset rows
-      barcodes.forEach(bc => {
-        const rowIdx = _findRow(sh, bc);
-        if (rowIdx < 1) return;
-        sh.getRange(rowIdx, CAE.FORM_ID).setValue(toFormId);
-        sh.getRange(rowIdx, CAE.DRAFTED_BY).setValue(drafterId);
-        sh.getRange(rowIdx, CAE.DRAFTED_AT).setValue(nowStr);
-      });
+// Link fromFormId to releasing-party assets, toFormId to receiving-party assets
+    _updateAssetApprovalStatus(fromFormId, 'Draft', '');
+
+    barcodes.forEach(function(bc) {
+      const rowIdx = _findRow(sh, bc);
+      if (rowIdx < 1) return;
+      // After transfer the asset row belongs to the new owner; link toFormId
+      sh.getRange(rowIdx, CAE.FORM_ID).setValue(toFormId);
+      sh.getRange(rowIdx, CAE.DRAFTED_BY).setValue(drafterId);
+      sh.getRange(rowIdx, CAE.DRAFTED_AT).setValue(nowStr);
+    });
     }
 
-    _log('BULK_TRANSFER', barcodes.join(','),
-      fromAssets.length + ' assets | ' + (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100),
-      t.fromEmpId || '');
+    // Log one entry per successfully transferred barcode so Activity Log scoping works
+    fromAssets.forEach(function(a) {
+      _log('BULK_TRANSFER', a.Barcode,
+        (_sanitize(t.fromStaff, 100) || '—') + ' → ' + _sanitize(t.toStaff, 100),
+        t.fromEmpId || '');
+    });
 
     let msg = 'Bulk transfer saved: ' + fromAssets.length + ' asset(s).';
     if (failed.length) msg += ' Skipped: ' + failed.join(', ');
@@ -1581,7 +1583,7 @@ function getDropdownData() {
           const m = String(data[r][c] || '').trim();
           if (m) models.push(m);
         }
-        result.models[cat.name + '|' + brand] = models;
+        result.models[cat.name + '|' + brand] = [...new Set(models)];
       }
     });
 
@@ -1597,7 +1599,7 @@ function getDropdownData() {
     if (supplierCol > -1)
       for (let r = 1; r < lastRow; r++) {
         const s = String(data[r][supplierCol] || '').trim();
-        if (s) result.suppliers.push(s);
+        if (s && !result.suppliers.includes(s)) result.suppliers.push(s);
       }
 
     if (laptopSpecCol > -1) {
@@ -1788,7 +1790,9 @@ function _log(action, barcode, details, performer) {
       new Date().toLocaleString('en-PH'),
       action, barcode || '', details || '', performer || ''
     ]);
-  } catch(e) {}
+  } catch(e) {
+    Logger.log('[_log FAILED] action=' + action + ' barcode=' + barcode + ' err=' + e.message);
+  }
 }
 
 function getActivityLogs(page, pageSize) {
@@ -1925,9 +1929,13 @@ function moveStaff(empId, newDiv, newDist, newArea, newBranch, assetAction) {
       sh.getRange(rowIdx, 1, 1, 37).setValues([rowData]);
     });
 
-    _log('MOVE_STAFF', empId,
-      'Action:' + assetAction + ' → ' + newDiv + '/' + newDist + '/' + newBranch +
-      ' | ' + updated + ' updated, ' + skipped + ' skipped', empId);
+    // Log one entry per affected asset so Activity Log scoping works correctly
+    rowsToWrite.forEach(function(rw) {
+      var bc = String(rw.rowData[C.BARCODE - 1] || '');
+      _log('MOVE_STAFF', bc,
+        'Action:' + assetAction + ' → ' + newDiv + '/' + newDist + '/' + newBranch,
+        empId);
+    });
 
     let msg = 'Staff movement recorded. ' + updated + ' asset(s) ' +
       (assetAction === 'spare' ? 'returned to spare' : 'moved to new location') + '.';
@@ -1990,9 +1998,22 @@ function moveOrgUnit(unitType, currentDiv, currentDist, currentArea, currentBran
       }
     });
 
-    _log('MOVE_ORG', unitType.toUpperCase(),
-      currentDiv + '/' + currentDist + '/' + currentArea + '/' + currentBranch +
-      ' → ' + newDiv + '/' + newDist + '/' + newArea + ' | ' + updated + ' assets', '');
+    // Log one entry per affected asset row
+    if (last >= AE_DATA_START) {
+      var logData = sh.getRange(AE_DATA_START, C.BARCODE, last - AE_DATA_START + 1, 1).getValues();
+      // We already iterated and updated; re-check to log affected barcodes
+      data.forEach(function(row, i) {
+        var bc = String(row[C.BARCODE - 1] || '').trim();
+        if (!bc) return;
+        // Only log rows that were actually updated (check updated district matches)
+        var newDist_check = _normDist(String(sh.getRange(i + AE_DATA_START, C.DISTRICT).getValue() || ''));
+        if (newDist_check === _normDist(newDist || '') && bc) {
+          _log('MOVE_ORG', bc,
+            unitType + ': ' + currentDiv + '/' + currentDist + ' → ' + newDiv + '/' + newDist,
+            '');
+        }
+      });
+    }
 
     return updated > 0
       ? unitType.charAt(0).toUpperCase() + unitType.slice(1) +
@@ -2338,14 +2359,15 @@ function submitFormForReview(formId, drafterId) {
     if (form.status !== 'Draft' && form.status !== 'Rejected')
                                     return { ok: false, message: 'Form status "' + form.status + '" cannot be submitted.' };
 
+    const sh     = _afSheet();
+    const rowIdx = _findAFRow(formId);
+    if (rowIdx < 0) return { ok: false, message: 'Form record not found in sheet.' };
+
+    // Rate limit check runs LAST, after all validation passes, so no credits are wasted on invalid submissions
     if (form.status === 'Rejected') {
       const rlResult = checkRateLimit(formId, drafterId);
       if (!rlResult.allowed) return { ok: false, message: rlResult.message, rateLimitStatus: rlResult };
     }
-
-    const sh     = _afSheet();
-    const rowIdx = _findAFRow(formId);
-    if (rowIdx < 0) return { ok: false, message: 'Form record not found in sheet.' };
 
     const nowStr = new Date().toLocaleString('en-PH');
     sh.getRange(rowIdx, AF.STATUS).setValue('Pending');
@@ -2365,8 +2387,8 @@ function confirmForm(formId, supervisorId, roleTier) {
     if (form.status !== 'Pending') return { ok: false, message: 'Form is not pending review.' };
     if (roleTier !== 'ho') {
       const supervised = _getSupervisedEmpIds(supervisorId);
-      if (supervised.indexOf(form.draftedBy.toLowerCase()) < 0)
-        return { ok: false, message: 'You do not supervise the drafter of this form.' };
+      if (supervised.indexOf(form.empId.toLowerCase()) < 0)
+        return { ok: false, message: 'You do not supervise the accountable person on this form.' };
     }
     const sh     = _afSheet();
     const rowIdx = _findAFRow(formId);
@@ -2393,8 +2415,8 @@ function confirmTransferPair(fromFormId, toFormId, supervisorId, roleTier) {
     if (toForm.status   !== 'Pending') return { ok: false, message: 'To-form is not pending review.' };
     if (roleTier !== 'ho') {
       const supervised = _getSupervisedEmpIds(supervisorId);
-      if (supervised.indexOf(fromForm.draftedBy.toLowerCase()) < 0 &&
-          supervised.indexOf(toForm.draftedBy.toLowerCase()) < 0)
+      if (supervised.indexOf(fromForm.empId.toLowerCase()) < 0 &&
+          supervised.indexOf(toForm.empId.toLowerCase()) < 0)
         return { ok: false, message: 'You do not supervise the drafter(s) of this transfer.' };
     }
     const nowStr = new Date().toLocaleString('en-PH');

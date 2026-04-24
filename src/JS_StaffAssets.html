@@ -170,7 +170,14 @@ function stToggle(key) {
 
 function _updateStaffBadge() {
   var total = _filterByScope(
-    ASSETS.filter(function(a){ return ['allocated','transfer'].indexOf(a.status) >= 0; })
+    ASSETS.filter(function(a) {
+      if (['allocated','transfer'].indexOf(a.status) < 0) return false;
+      var ea = (a.EffectiveAssignment || '').trim().toLowerCase();
+      if (ea === 'central office') return true;
+      // Field assets: only count if they have a resolvable location (matching tree logic)
+      if (ea === 'field office') return _resolveAssetLocation(a) !== null;
+      return false;
+    })
   ).length;
   var el = document.getElementById('nbStaffAssets');
   if (el) el.textContent = total;
