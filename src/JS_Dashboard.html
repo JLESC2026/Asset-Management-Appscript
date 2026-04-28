@@ -181,7 +181,7 @@ function _renderStatCards(all, spare, alloc, borr, disp, pool, overdue, warranty
     return '<div class="stat-card' + (isLg?' stat-card-primary':'') + '" '
       + 'onclick="switchPage(\'' + s.page + '\');'
       + (s.subTab ? 'setTimeout(function(){switchBorrowTab(\''+s.subTab+'\')},50);' : '')
-      + '" style="cursor:pointer;' + (isLg ? 'grid-column:span 2;' : '') + '">'
+      + '" style="cursor:pointer;">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">'
       + '<div class="stat-icon" style="background:' + s.color + '18;color:' + s.color + ';border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center">'
       + s.icon + '</div>'

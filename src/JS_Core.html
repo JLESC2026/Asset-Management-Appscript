@@ -346,7 +346,8 @@ function _filterByScope(assets) {
   function _matchesField(a) {
     var ea = (a.EffectiveAssignment || '').trim().toLowerCase();
     if (ea !== 'field office' && ea !== '' && ea !== 'unknown') return false;
-    if (ea === '' || ea === 'unknown') return false;
+    // Treat blank/unknown as field if asset has Division or District data; otherwise exclude
+    if ((ea === '' || ea === 'unknown') && !a.Division && !a.District) return false;
 
     var assetDiv  = (a.Division  || '').toLowerCase().trim();
     var assetDist = (a.District  || '').toLowerCase().trim();
@@ -854,7 +855,9 @@ function renderAll(){
   if (renderer) renderer();
 
   _dirtyPages = Object.keys(pageRenderMap).filter(function(p){ return p !== currentPage && p !== 'dashboard'; });
-  _loadApprovalData();
+  _loadApprovalData(function() {
+    if (currentPage === 'dashboard') renderDashboard();
+  });
 }
 
 function globalFilter(q){
@@ -1076,7 +1079,7 @@ function renderActivityTable() {
         if (typeof _renderActivityTableRows === 'function') _renderActivityTableRows();
       })
       .withFailureHandler(function(err) { toast('Failed to load log: ' + err.message, 'err'); })
-      .getActivityLogs(1, 5000);
+      .getActivityLogs(1, 500);
     return;
   }
   if (typeof _renderActivityTableRows === 'function') _renderActivityTableRows();
@@ -1089,14 +1092,13 @@ function switchPage(p){
   closeMobileSidebar();
 
   currentPage = p;
-  Object.keys(pages).forEach(function(k){ pages[k] = 1; });
-
-  var pageKeyMap = {
-    'active':  'activeBorrow',
-    'pool':    'borrowPool',
-    'history': 'borrowHist'
+  // Reset pagination only for the page being navigated to, not all pages
+  var _resetPageKey = {
+    'all-assets': 'all', 'spare': 'spare', 'allocated': 'allocated',
+    'disposal': 'disposal', 'transfers': 'xfers', 'activity': 'activity'
   };
-  if (pageKeyMap[p]) pages[pageKeyMap[p]] = 1;
+  if (_resetPageKey[p]) pages[_resetPageKey[p]] = 1;
+  // Borrow sub-tab pages reset themselves inside switchBorrowTab
 
   document.querySelectorAll('.page').forEach(function(el){el.classList.remove('active');});
   document.querySelectorAll('.nav-item').forEach(function(el){el.classList.remove('active');});

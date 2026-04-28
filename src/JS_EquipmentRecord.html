@@ -508,22 +508,8 @@ function _renderEquipBranchNode(div, dist, area, branch, assets, fieldTree) {
     + '</div>'
     + '</div>';
 }
-function _printAccountabilityFormFromBranchGated(idx) {
-  var rec = _eqBranchReg[idx];
-  if (!rec || !rec.assets || !rec.assets.length) { toast('No assets to print.', 'warn'); return; }
-  // Refresh approval data first so jsApprovalStatus reflects the latest server state
-  _loadApprovalData(function() {
-    if (!_checkPrintGate(rec.assets)) {
-      if (confirm('Some assets are pending supervisor approval.\n\nGo to the For Approval page to submit and track your forms?')) {
-        closeModal('equipmentBranchModal');
-        _loadApprovalData(function() { switchPage('for-approval'); });
-      }
-      return;
-    }
-    openAccountabilityFormFromBranch(idx);
-  });
-}
-
+// _printAccountabilityFormFromBranchGated is defined correctly in JS_Modals.html.
+// Removed buggy duplicate from this file (used !object which is always falsy).
 // ── Branch / Location detail modal ────────────────────────────────────────────
 function openEquipBranchModal(idx) {
   var rec = _eqBranchReg[idx];
@@ -591,7 +577,7 @@ function openEquipBranchModal(idx) {
     _origSwitch(p);
     if (p === 'staff-assets')     renderStaffAssets();
     if (p === 'equipment-record') renderEquipmentRecord();
-    if (p === 'for-approval')     renderForApprovalPage();
+    // 'for-approval' intentionally omitted — rendered by _loadApprovalData callback (avoids double render)
   };
 })();
 </script>

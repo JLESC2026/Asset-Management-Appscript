@@ -1103,10 +1103,10 @@ function saveTransfer(t) {
     const fromFormId = draftAccountabilityForm(t.fromEmpId || '', [fromAsset], 'Transfer-From', '', drafterId);
     const toFormId   = draftAccountabilityForm(t.toEmpId   || '', [toAsset],   'Transfer-To',   fromFormId.startsWith('Error') ? '' : fromFormId, drafterId);
 
-if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
+    if (!fromFormId.startsWith('Error') && !toFormId.startsWith('Error')) {
       sh.getRange(rowIdx, CAE.APPROVAL_STATUS).setValue('Draft');
       sh.getRange(rowIdx, CAE.REJECTION_COMMENT).setValue('');
-      // ... rest of existing code inside this block unchanged      const afSh     = _afSheet();
+      const afSh     = _afSheet();
       const fromRowI = _findAFRow(fromFormId);
       if (fromRowI > 0) afSh.getRange(fromRowI, AF.LINKED_FORM_ID).setValue(toFormId);
       // Link formId to asset row
@@ -2784,7 +2784,7 @@ function getApprovalDashboardData(userId, roleTier) {
     return {
       myForms:      getMyForms(userId),
       pendingForms: canReviewForms_server(userId, roleTier) ? getPendingForms(userId, roleTier) : [],
-      config:       getApprovalConfig()
+      config:       getApprovalConfig(_getContextType(userId))
     };
   } catch(e) { return { myForms: [], pendingForms: [], config: {} }; }
 }
